@@ -100,6 +100,8 @@ export async function runRun(argv: string[]): Promise<void> {
   const actionNames: string[] = [];
   const testApp = await createTestApp({
     appId: app.manifest.id,
+    appVersion: app.manifest.version,
+    description: app.manifest.description,
     tablePrefix: app.tablePrefix,
     ...(app.manifest.db
       ? { migrationsFolder: resolve(app.builtRoot, app.manifest.db.migrations) }
@@ -144,10 +146,7 @@ export async function runRun(argv: string[]): Promise<void> {
       continue;
     }
     try {
-      await testApp.start(
-        (await loadHookFactory(app, path)) as Parameters<TestApp["start"]>[0],
-        app.manifest.version,
-      );
+      await testApp.start((await loadHookFactory(app, path)) as Parameters<TestApp["start"]>[0]);
       process.stdout.write(`  hook ${path}: ran\n`);
     } catch (err) {
       // The host logs an app-started failure and carries on; so does rome run.
@@ -184,7 +183,11 @@ rome run: ${app.manifest.id}@${app.manifest.version}
   state    ${base}/__rome
 `);
   await new Promise<void>((done) => {
-    const stop = () => server.close(() => done());
+    // An open SSE or other streamed response would hold close() open.
+    const stop = () => {
+      server.close(() => done());
+      server.closeAllConnections();
+    };
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
   });
@@ -284,7 +287,9 @@ async function handleDev(
   }
   if (req.method === "POST" && path === "/__rome/channels") {
     const body = await readJson(req);
-    const messages = (Array.isArray(body) ? body : [body]).map(toChannelMessage);
+    const messages = (Array.isArray(body) ? body : [body]).map((value) =>
+      toChannelMessage(value, (message) => new BadRequest(message)),
+    );
     testApp.channels.push(...messages);
     return sendJson(res, 200, { added: messages.length });
   }
@@ -479,21 +484,22 @@ function readChannelFile(path: string): ChannelMessage[] {
   const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
   if (!Array.isArray(parsed))
     throw new CliError(`rome run: ${path} must hold a JSON array of messages`, 2);
-  return parsed.map(toChannelMessage);
+  return parsed.map((value) => toChannelMessage(value, (message) => new CliError(message, 2)));
 }
 
 let seededMessages = 0;
 
-function toChannelMessage(value: unknown): ChannelMessage {
+/** A seeded message from --channels or `POST /__rome/channels`. `fail` makes
+ *  the error: a CLI exit for the file, a 400 for a request. */
+function toChannelMessage(value: unknown, fail: (message: string) => Error): ChannelMessage {
   const raw = (typeof value === "object" && value !== null ? value : {}) as Record<string, unknown>;
   if (typeof raw.channel !== "string" || typeof raw.text !== "string") {
-    throw new CliError("rome run: every channel message needs a channel and a text", 2);
+    throw fail("rome run: every channel message needs a channel and a text");
   }
   const timestamp = raw.timestamp === undefined ? new Date() : new Date(String(raw.timestamp));
   if (Number.isNaN(timestamp.getTime())) {
-    throw new CliError(
+    throw fail(
       `rome run: channel message timestamp ${JSON.stringify(raw.timestamp)} is not a date`,
-      2,
     );
   }
   return {

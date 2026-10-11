@@ -49,7 +49,12 @@ export function artifactPaths(manifest: AppManifestData, key: "actions" | "hooks
 }
 
 // The host's resolver settings, so an entry resolves here exactly as on install.
-const resolver = new ResolverFactory(MODULE_RESOLVER_OPTIONS);
+// Built on first use, so commands that load no modules skip the native resolver.
+let resolverInstance: ResolverFactory | undefined;
+function resolver(): ResolverFactory {
+  resolverInstance ??= new ResolverFactory(MODULE_RESOLVER_OPTIONS);
+  return resolverInstance;
+}
 
 type ActionFactory = (config: ActionConfig, deps: unknown) => Action;
 
@@ -73,7 +78,9 @@ export async function loadActionModules(app: AppOnDisk): Promise<ActionModule[]>
       throw new Error(`Invalid ${yamlPath}:\n${formatZodIssues(parsed.error)}`);
     }
     const config = parsed.data as ActionConfig;
-    const module = await importResolved(await resolveModuleEntryPath(resolver, dir, config.entry));
+    const module = await importResolved(
+      await resolveModuleEntryPath(resolver(), dir, config.entry),
+    );
     let factory: ActionFactory;
     try {
       factory = resolveActionFactory<ActionFactory>(module, config.name);
@@ -88,7 +95,7 @@ export async function loadActionModules(app: AppOnDisk): Promise<ActionModule[]>
 /** Import a hook directory's module and return its `createHook`. */
 export async function loadHookFactory(app: AppOnDisk, path: string): Promise<unknown> {
   const dir = join(app.builtRoot, path);
-  const module = await importResolved(await resolveModuleEntryPath(resolver, dir));
+  const module = await importResolved(await resolveModuleEntryPath(resolver(), dir));
   if (typeof module.createHook !== "function") {
     throw new Error(`Hook "${path}" must export createHook(deps) from ${dir}`);
   }

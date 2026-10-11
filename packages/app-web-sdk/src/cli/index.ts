@@ -1,13 +1,11 @@
 import { runBuild } from "./build.js";
 import { runCreate } from "./create.js";
 import { runDev } from "./dev.js";
-import { runRun } from "./run.js";
 import { CliError } from "./store/config.js";
 import { runLogin } from "./store/login.js";
 import { runWhoami } from "./store/whoami.js";
 import { runPublish } from "./store/publish.js";
 import { runUpgrade } from "./upgrade.js";
-import { runValidate } from "./validate.js";
 
 const HELP = `rome — Rome app CLI
 
@@ -37,8 +35,10 @@ const ARG_COMMANDS: Record<string, (argv: string[]) => Promise<void>> = {
   publish: runPublish,
   upgrade: runUpgrade,
   create: runCreate,
-  validate: runValidate,
-  run: runRun,
+  // Loaded on use: they pull in the test kit and the packaging module, which
+  // the other commands never need.
+  validate: async (argv) => (await import("./validate.js")).runValidate(argv),
+  run: async (argv) => (await import("./run.js")).runRun(argv),
 };
 
 async function main(argv: string[]): Promise<void> {

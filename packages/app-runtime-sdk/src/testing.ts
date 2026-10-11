@@ -342,6 +342,11 @@ export interface TestApp {
  */
 export async function createTestApp(options: {
   appId: string;
+  /** `appContext.app.version` and the app-started hook's version, as app.yaml's
+   *  `version` gives them on the host. */
+  appVersion?: string;
+  /** `appContext.app.description`, app.yaml's `description`. */
+  description?: string;
   tablePrefix?: string;
   migrationsFolder?: string | URL;
   channelHistory?: ChannelMessage[];
@@ -424,7 +429,11 @@ export async function createTestApp(options: {
   };
 
   const appContext: RomeAppContext = {
-    app: { id: options.appId, version: "0.0.0-test", description: options.appId },
+    app: {
+      id: options.appId,
+      version: options.appVersion ?? "0.0.0-test",
+      description: options.description ?? options.appId,
+    },
     controller: undefined,
     db,
     log: logger,
@@ -473,7 +482,7 @@ export async function createTestApp(options: {
     runAction: (name, args) =>
       runAction(name.includes(":") ? name : `${options.appId}:${name}`, args),
     inChannel: withChannelContext,
-    async start(createHook, appVersion = "0.0.0-test") {
+    async start(createHook, appVersion = options.appVersion ?? "0.0.0-test") {
       const hook = createHook({ appId: options.appId, logger, appContext, agentRunner });
       await hook.onAppStarted({
         type: "app-started",
