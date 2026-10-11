@@ -1,7 +1,7 @@
 import { isAbsolute } from "node:path";
 import { createLogger } from "../logger.js";
 import { getAppTemplateDir, type AppTemplateKind } from "../paths.js";
-import { assertValidAppId } from "./packaging/index.js";
+import { assertValidAppId } from "@rome-os/app-runtime/packaging";
 import { appIdToDisplayName, isDirectoryNonEmpty, materializeTemplate } from "./create.js";
 
 const log = createLogger("app-scaffold");

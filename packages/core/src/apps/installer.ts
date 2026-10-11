@@ -26,7 +26,7 @@ import {
   parseAppManifest,
   resolvePathWithinBase,
   safeIsFile,
-} from "./packaging/index.js";
+} from "@rome-os/app-runtime/packaging";
 import type { AppstoreSource, SpecSource } from "./lockfile.js";
 import type { RomeCloudListingClient } from "./rome-cloud-listing-client.js";
 import { gcInstalledCache, prepare } from "./prepare.js";

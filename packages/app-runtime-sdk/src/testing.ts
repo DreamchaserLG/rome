@@ -21,6 +21,8 @@
  * app installs itself as a dev dependency. Everything else is in this package.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createRequire } from "node:module";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ActionInvocationError,
@@ -66,8 +68,11 @@ export async function createTestDb(options: {
   tablePrefix: string;
   /** The folder `drizzle-kit generate` writes, as a path or a `file:` URL. */
   migrationsFolder?: string | URL;
+  /** The `better-sqlite3` default export. Found from this package or the
+   *  current directory when left out. */
+  Database?: SqliteConstructor;
 }): Promise<TestDb> {
-  const sqlite = await openInMemorySqlite();
+  const sqlite = await openInMemorySqlite(options.Database);
   const { drizzle } = await import("drizzle-orm/better-sqlite3");
   const connection = drizzle(sqlite as never) as unknown as DrizzleDb;
   if (options.migrationsFolder) {
@@ -88,19 +93,29 @@ interface SqliteHandle {
   close(): void;
 }
 
-async function openInMemorySqlite(): Promise<SqliteHandle> {
+export type SqliteConstructor = new (path: string) => SqliteHandle;
+
+async function openInMemorySqlite(Database?: SqliteConstructor): Promise<SqliteHandle> {
+  if (Database) return new Database(":memory:");
   // A variable specifier keeps TypeScript from requiring the optional module's
   // types in apps that never call createTestDb.
   const specifier = "better-sqlite3";
-  let mod: { default: new (path: string) => SqliteHandle };
+  let mod: { default: SqliteConstructor };
   try {
     mod = (await import(specifier)) as typeof mod;
-  } catch (err) {
-    throw new Error(
-      `createTestDb needs better-sqlite3. Add it to the app's devDependencies (pnpm add -D better-sqlite3) and allow its build in pnpm-workspace.yaml (allowBuilds: { better-sqlite3: true }). Cause: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
+  } catch {
+    // pnpm keeps an app's dev dependencies out of this package's resolution
+    // path, so look again from the directory the tests run in.
+    try {
+      const require = createRequire(join(process.cwd(), "package.json"));
+      return new (require(specifier) as SqliteConstructor)(":memory:");
+    } catch (err) {
+      throw new Error(
+        `createTestDb needs better-sqlite3. Add it to the app's devDependencies (pnpm add -D better-sqlite3) and allow its build in pnpm-workspace.yaml (allowBuilds: { better-sqlite3: true }). Cause: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
   return new mod.default(":memory:");
 }
@@ -318,11 +333,19 @@ export async function createTestApp(options: {
   channelHistory?: ChannelMessage[];
   /** Extra deps merged into every action's `deps`, after the defaults. */
   deps?: Record<string, unknown>;
+  /** Answers `runAction` for a name no `app.action` registered, such as a
+   *  `system:` action. Left out, such a call rejects with `not_found`. */
+  unknownAction?: (name: string, args: Record<string, unknown>) => Promise<ActionResult>;
+  /** Replaces host services on `appContext`, such as `listRoutines`. */
+  appContext?: Partial<Pick<RomeAppContext, "favors" | "listRoutines" | "repositories">>;
+  /** The `better-sqlite3` default export; see {@link createTestDb}. */
+  Database?: SqliteConstructor;
 }): Promise<TestApp> {
   const tablePrefix = options.tablePrefix ?? options.appId.replaceAll("-", "_");
   const { db, close } = await createTestDb({
     tablePrefix,
     ...(options.migrationsFolder ? { migrationsFolder: options.migrationsFolder } : {}),
+    ...(options.Database ? { Database: options.Database } : {}),
   });
   const channels = createFakeChannels(options.channelHistory);
   const logger = createRecordingLogger();
@@ -350,6 +373,10 @@ export async function createTestApp(options: {
     args: Record<string, unknown> = {},
   ): Promise<ActionResult> => {
     const action = actions.get(name);
+    if (!action && options.unknownAction) {
+      const result = await options.unknownAction(name, toWireShape(args, name, "args"));
+      return toWireShape(result, name, "result");
+    }
     if (!action) {
       throw new ActionInvocationError(
         name,
@@ -389,6 +416,7 @@ export async function createTestApp(options: {
       } as unknown as ActionInvocation<TEvent, TOutput>;
     },
     listRoutines: unavailable("listRoutines"),
+    ...options.appContext,
   };
 
   const deps = { channelsService: channels.service, ...options.deps, appContext };
