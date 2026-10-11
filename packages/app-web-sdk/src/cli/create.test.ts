@@ -1,7 +1,9 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { materializeTemplate } from "@rome-os/app-runtime/packaging";
 import { findTemplateDir, runCreate } from "./create.js";
 
 describe("rome create", () => {
@@ -34,6 +36,23 @@ describe("rome create", () => {
     expect(readFileSync(join(cwd, "sales-agent", "test", "app.test.ts"), "utf8")).not.toContain(
       "__APP_ID__",
     );
+  });
+
+  it("restores the .gitignore a published template ships as gitignore", async () => {
+    const packageRoot = join(findTemplateDir(), "..", "..", "app-web-sdk");
+    execFileSync(process.execPath, [join(packageRoot, "scripts", "copy-template.mjs")]);
+    const packed = join(packageRoot, "templates", "app");
+    try {
+      expect(existsSync(join(packed, ".gitignore"))).toBe(false);
+      await materializeTemplate(packed, join(cwd, "from-package"), {
+        appId: "from-package",
+        appName: "From Package",
+      });
+      expect(existsSync(join(cwd, "from-package", ".gitignore"))).toBe(true);
+      expect(existsSync(join(cwd, "from-package", "gitignore"))).toBe(false);
+    } finally {
+      rmSync(join(packageRoot, "templates"), { recursive: true, force: true });
+    }
   });
 
   it("refuses a directory that already has files", async () => {

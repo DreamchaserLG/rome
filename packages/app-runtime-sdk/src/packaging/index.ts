@@ -104,3 +104,10 @@ export {
   materializeTemplate,
   type TemplateVars,
 } from "./template.js";
+export {
+  MODULE_RESOLVER_OPTIONS,
+  type ModuleSpecifierResolver,
+  resolveActionFactory,
+  resolveApiEntryPath,
+  resolveModuleEntryPath,
+} from "./module-entry.js";

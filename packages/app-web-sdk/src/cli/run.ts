@@ -3,11 +3,12 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createRequire } from "node:module";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type {
-  ChannelMessage,
-  RomeAppApiHandler,
-  RomeAppContext,
-  ThreadContext,
+import {
+  ActionInvocationError,
+  type ChannelMessage,
+  type RomeAppApiHandler,
+  type RomeAppContext,
+  type ThreadContext,
 } from "@rome-os/app-runtime";
 import { createTestApp, type SqliteConstructor, type TestApp } from "@rome-os/app-runtime/testing";
 import {
@@ -64,7 +65,8 @@ function parseArgs(argv: string[]): RunOptions | null {
     if (arg === "--help" || arg === "-h") return null;
     else if (arg === "--port") options.port = Number(value());
     else if (arg === "--no-build") options.build = false;
-    else if (arg === "--channels") options.channelsFile = value();
+    // Resolved now: rome run moves into the app root before reading it.
+    else if (arg === "--channels") options.channelsFile = resolve(value());
     else if (arg === "--theme") {
       const theme = value();
       if (theme !== "light" && theme !== "dark")
@@ -97,10 +99,19 @@ export async function runRun(argv: string[]): Promise<void> {
     ...(app.manifest.db
       ? { migrationsFolder: resolve(app.builtRoot, app.manifest.db.migrations) }
       : {}),
-    channelHistory: options.channelsFile ? readChannelFile(resolve(options.channelsFile)) : [],
+    channelHistory: options.channelsFile ? readChannelFile(options.channelsFile) : [],
     Database: requireSqlite(app.appDir),
     appContext: { listRoutines: async () => [] },
     unknownAction: async (name) => {
+      // Only another app's or the system's actions are out of reach here. A
+      // name of this app's that was never registered is a plain miss.
+      if (!name.includes(":") || name.startsWith(`${app.manifest.id}:`)) {
+        throw new ActionInvocationError(
+          name,
+          "not_found",
+          `No action "${name}" in ${app.manifest.id}`,
+        );
+      }
       process.stderr.write(
         `rome run: ${name} is not available outside Rome; the caller got an error result\n`,
       );
@@ -235,8 +246,15 @@ async function handleDev(
       | undefined;
     const name = decodeURIComponent(action[1]!);
     const run = () => testApp.runAction(name, body?.args ?? {});
-    const result = body?.channel ? await testApp.inChannel(body.channel, run) : await run();
-    return sendJson(res, 200, result);
+    try {
+      const result = body?.channel ? await testApp.inChannel(body.channel, run) : await run();
+      return sendJson(res, 200, result);
+    } catch (err) {
+      if (err instanceof ActionInvocationError && err.code === "not_found") {
+        return sendJson(res, 404, { error: err.message, actions: ctx.actionNames });
+      }
+      throw err;
+    }
   }
   sendJson(res, 404, { error: "not found" });
 }

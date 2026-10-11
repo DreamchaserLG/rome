@@ -58,7 +58,10 @@ export async function materializeTemplate(
   const entries = await readdir(srcDir, { withFileTypes: true });
   for (const entry of entries) {
     const srcPath = join(srcDir, entry.name);
-    const destName = applyPlaceholders(entry.name, vars);
+    // A published template ships its .gitignore as `gitignore`; npm and pnpm
+    // drop dotted .gitignore files from a tarball.
+    const destName =
+      entry.name === "gitignore" ? ".gitignore" : applyPlaceholders(entry.name, vars);
     const destPath = join(destDir, destName);
     if (entry.isDirectory()) {
       await materializeTemplate(srcPath, destPath, vars);

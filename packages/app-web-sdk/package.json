@@ -48,6 +48,7 @@
     "@rome-os/app-runtime": "workspace:^",
     "@rsbuild/plugin-react": "^2.0.0",
     "@rslib/core": "^1.0.0",
+    "@rspack/resolver": "^0.4.0",
     "@tailwindcss/postcss": "^4.1.0",
     "lucide-react": "^0.468.0",
     "react": "19.2.6",

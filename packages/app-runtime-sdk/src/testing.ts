@@ -50,11 +50,7 @@ import {
   type RomeAppContext,
   type ThreadContext,
 } from "./index.js";
-
-/** Host table naming, so a test reads the same table names the daemon creates. */
-function migrationsTableName(tablePrefix: string): string {
-  return `__drizzle_migrations_app_${tablePrefix}`;
-}
+import { appMigrationsTableName } from "./packaging/manifest.js";
 
 export interface TestDb {
   db: AppDbContext;
@@ -80,7 +76,7 @@ export async function createTestDb(options: {
     const { migrate } = await import("drizzle-orm/better-sqlite3/migrator");
     migrate(connection as never, {
       migrationsFolder: toPath(options.migrationsFolder),
-      migrationsTable: migrationsTableName(options.tablePrefix),
+      migrationsTable: appMigrationsTableName(options.tablePrefix),
     });
   }
   const { tablePrefix } = options;

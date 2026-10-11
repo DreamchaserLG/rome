@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Action, ActionConfig } from "@rome-os/app-runtime";
@@ -6,9 +6,14 @@ import {
   ActionConfigSchema,
   type AppManifestData,
   formatZodIssues,
+  MODULE_RESOLVER_OPTIONS,
   parseAppManifest,
   parseManifestObject,
+  resolveActionFactory,
+  resolveApiEntryPath,
+  resolveModuleEntryPath,
 } from "@rome-os/app-runtime/packaging";
+import { ResolverFactory } from "@rspack/resolver";
 import { parse as parseYaml } from "yaml";
 import { findAppDir } from "./loadAppYaml.js";
 
@@ -43,7 +48,10 @@ export function artifactPaths(manifest: AppManifestData, key: "actions" | "hooks
   return (manifest[key] ?? []).map((entry) => (typeof entry === "string" ? entry : entry.path));
 }
 
-type ActionFactory = (config: ActionConfig, deps: unknown) => Action | Promise<Action>;
+// The host's resolver settings, so an entry resolves here exactly as on install.
+const resolver = new ResolverFactory(MODULE_RESOLVER_OPTIONS);
+
+type ActionFactory = (config: ActionConfig, deps: unknown) => Action;
 
 interface ActionModule {
   path: string;
@@ -52,9 +60,8 @@ interface ActionModule {
 }
 
 /**
- * Import every action the manifest lists from the built tree, the way the
- * host resolves them: the directory's `action.yaml`, then `createAction`,
- * `create<Name>Action`, a default export, or the one `create*Action` export.
+ * Import every action the manifest lists from the built tree with the host's
+ * own entry and factory resolution.
  */
 export async function loadActionModules(app: AppOnDisk): Promise<ActionModule[]> {
   const loaded: ActionModule[] = [];
@@ -66,8 +73,14 @@ export async function loadActionModules(app: AppOnDisk): Promise<ActionModule[]>
       throw new Error(`Invalid ${yamlPath}:\n${formatZodIssues(parsed.error)}`);
     }
     const config = parsed.data as ActionConfig;
-    const module = await importEntry(dir, config.entry);
-    loaded.push({ path, config, factory: resolveActionFactory(module, config.name, dir) });
+    const module = await importResolved(await resolveModuleEntryPath(resolver, dir, config.entry));
+    let factory: ActionFactory;
+    try {
+      factory = resolveActionFactory<ActionFactory>(module, config.name);
+    } catch (err) {
+      throw new Error(`${err instanceof Error ? err.message : String(err)} (in ${dir})`);
+    }
+    loaded.push({ path, config, factory });
   }
   return loaded;
 }
@@ -75,7 +88,7 @@ export async function loadActionModules(app: AppOnDisk): Promise<ActionModule[]>
 /** Import a hook directory's module and return its `createHook`. */
 export async function loadHookFactory(app: AppOnDisk, path: string): Promise<unknown> {
   const dir = join(app.builtRoot, path);
-  const module = await importEntry(dir);
+  const module = await importResolved(await resolveModuleEntryPath(resolver, dir));
   if (typeof module.createHook !== "function") {
     throw new Error(`Hook "${path}" must export createHook(deps) from ${dir}`);
   }
@@ -86,51 +99,13 @@ export async function loadHookFactory(app: AppOnDisk, path: string): Promise<unk
 export async function loadApiFactory(app: AppOnDisk): Promise<unknown> {
   if (!app.manifest.api) return null;
   const entry = app.manifest.api.entry ?? "api/index";
-  const module = await importFile(join(app.builtRoot, entry));
+  const module = await importResolved(resolveApiEntryPath(app.builtRoot, entry, app.manifest.id));
   if (typeof module.createApiHandler !== "function") {
     throw new Error(`The API module ${entry} must export createApiHandler(ctx)`);
   }
   return module.createApiHandler;
 }
 
-async function importEntry(dir: string, entry?: string): Promise<Record<string, unknown>> {
-  return importFile(join(dir, entry ?? "index"));
-}
-
-async function importFile(entry: string): Promise<Record<string, unknown>> {
-  // An action.yaml written against the source names `index.ts`; the build
-  // emits `index.js` beside where it was.
-  const base = entry.replace(/\.([cm]?)tsx?$/, ".$1js");
-  const candidates = /\.[cm]?js$/.test(base)
-    ? [base]
-    : [`${base}.js`, `${base}.mjs`, join(base, "index.js")];
-  const found = candidates.find((candidate) => existsSync(candidate));
-  if (!found) {
-    throw new Error(
-      `No built module at ${base} (looked for ${candidates.join(", ")}). Run rome build first.`,
-    );
-  }
-  return (await import(pathToFileURL(found).href)) as Record<string, unknown>;
-}
-
-function resolveActionFactory(
-  module: Record<string, unknown>,
-  actionName: string,
-  dir: string,
-): ActionFactory {
-  const pascal = actionName
-    .split(/[^a-zA-Z0-9]+/)
-    .filter(Boolean)
-    .map((part) => part[0]!.toUpperCase() + part.slice(1))
-    .join("");
-  for (const candidate of [module.createAction, module[`create${pascal}Action`], module.default]) {
-    if (typeof candidate === "function") return candidate as ActionFactory;
-  }
-  const named = Object.entries(module).filter(
-    ([name, value]) => /^create[A-Za-z0-9_]*Action$/.test(name) && typeof value === "function",
-  );
-  if (named.length === 1) return named[0]![1] as ActionFactory;
-  throw new Error(
-    `No action factory found for "${actionName}" in ${dir}. Export createAction(config, deps) or a single create*Action function.`,
-  );
+async function importResolved(path: string): Promise<Record<string, unknown>> {
+  return (await import(pathToFileURL(path).href)) as Record<string, unknown>;
 }
