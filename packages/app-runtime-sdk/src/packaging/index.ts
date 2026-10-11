@@ -1,6 +1,10 @@
 /**
  * App packaging — the core-independent building blocks of the app lifecycle.
  *
+ * Internal and unstable: this entry exists for the Rome host and the `rome`
+ * CLI. App code must not import it, and a change here is not a breaking
+ * change to the SDK.
+ *
  * Everything an app *is* before it touches a Rome instance lives here:
  *
  *   - Contract  — strict `app.yaml` schema (formatVersion, unknown-field
