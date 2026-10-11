@@ -27,6 +27,7 @@ import {
   ActionInvocationError,
   setCurrentActionContextResolver,
   setCurrentActionContextRunner,
+  toActionWireShape,
   type Action,
   type ActionConfig,
   type ActionInvocation,
@@ -388,8 +389,8 @@ export async function createTestApp(options: {
     }
     const action = actions.get(name);
     if (!action && options.unknownAction) {
-      const result = await options.unknownAction(name, toWireShape(args, name, "args"));
-      return toWireShape(result, name, "result");
+      const result = await options.unknownAction(name, toActionWireShape(args, name, "args"));
+      return toActionWireShape(result, name, "result");
     }
     if (!action) {
       throw new ActionInvocationError(
@@ -400,10 +401,10 @@ export async function createTestApp(options: {
           : `No action "${name}" is registered; call app.action(name, createAction) first`,
       );
     }
-    const wireArgs = toWireShape(args, name, "args");
+    const wireArgs = toActionWireShape(args, name, "args");
     try {
       const result = await action.execute(wireArgs);
-      return toWireShape(result, name, "result");
+      return toActionWireShape(result, name, "result");
     } catch (err) {
       if (err instanceof ActionInvocationError) throw err;
       throw new ActionInvocationError(
@@ -508,19 +509,4 @@ export async function createTestApp(options: {
     },
     close,
   };
-}
-
-function toWireShape<T>(value: T, actionName: string, what: "args" | "result"): T {
-  try {
-    // Like the host, this rejects `undefined`: JSON.stringify returns no text.
-    return JSON.parse(JSON.stringify(value)) as T;
-  } catch (err) {
-    throw new ActionInvocationError(
-      actionName,
-      "unserializable",
-      `Action ${what} for "${actionName}" cannot cross a process boundary: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
-  }
 }

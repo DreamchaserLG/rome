@@ -1,8 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { builtinModules } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { packArtifact } from "@rome-os/app-runtime/packaging";
+import { dirname, join, relative, resolve } from "node:path";
+import { packArtifact, resolveApiEntryPath } from "@rome-os/app-runtime/packaging";
 import {
+  type AppOnDisk,
   artifactPaths,
   loadActionModules,
   loadApiFactory,
@@ -20,7 +22,10 @@ Usage: rome validate [--no-build]
   2. Packs it into a temporary directory with the same strict app.yaml schema
      and per-artifact checks the daemon runs on install. .rome/artifact, where
      an installed app's artifact lives, is left alone.
-  3. Imports every action, hook and the API entry from the build, and checks
+  3. Checks that every package the actions, hooks and API import is in
+     dependencies, peerDependencies or optionalDependencies. An install runs
+     pnpm install --prod, so a dev dependency is missing at runtime.
+  4. Imports every action, hook and the API entry from the build, and checks
      each exports the factory the host calls.
 
 Exits 1 with the first problem found.
@@ -53,6 +58,15 @@ export async function runValidate(argv: string[]): Promise<void> {
   }
   process.stdout.write(`✓ pack: ${app.manifest.id}@${app.manifest.version}\n`);
 
+  const missing = devOnlyImports(app);
+  if (missing.length > 0) {
+    throw new CliError(
+      `✗ imports: ${missing.join("; ")}. An install skips devDependencies; move them to dependencies.`,
+      1,
+    );
+  }
+  process.stdout.write("✓ imports: every runtime package is a dependency\n");
+
   try {
     const actions = await loadActionModules(app);
     for (const path of artifactPaths(app.manifest, "hooks")) await loadHookFactory(app, path);
@@ -63,4 +77,70 @@ export async function runValidate(argv: string[]): Promise<void> {
   } catch (err) {
     throw new CliError(`✗ modules: ${err instanceof Error ? err.message : String(err)}`, 1);
   }
+}
+
+// Static, side-effect and dynamic imports and requires, in the per-file output
+// `rome build` writes for server code.
+const IMPORT = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']([^"']+)["']/g;
+
+/** Each bare import in the code the host loads (action and hook directories,
+ *  the API entry, and the files they import) whose package an install's
+ *  `pnpm install --prod` leaves out, as "file imports pkg". */
+export function devOnlyImports(app: AppOnDisk): string[] {
+  const pkgPath = join(app.appDir, "package.json");
+  if (!existsSync(pkgPath)) return [];
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as Record<string, Record<string, string>>;
+  const installed = new Set([
+    ...Object.keys(pkg.dependencies ?? {}),
+    ...Object.keys(pkg.peerDependencies ?? {}),
+    ...Object.keys(pkg.optionalDependencies ?? {}),
+  ]);
+
+  const queue: string[] = [];
+  const addDir = (dir: string): void => {
+    if (!existsSync(dir)) return;
+    for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
+      if (entry.isFile() && SCRIPT.test(entry.name)) queue.push(join(entry.parentPath, entry.name));
+    }
+  };
+  for (const path of artifactPaths(app.manifest, "actions")) addDir(join(app.builtRoot, path));
+  for (const path of artifactPaths(app.manifest, "hooks")) addDir(join(app.builtRoot, path));
+  if (app.manifest.api?.entry) {
+    queue.push(resolveApiEntryPath(app.builtRoot, app.manifest.api.entry, app.manifest.id));
+  }
+
+  const seen = new Set<string>();
+  const found = new Set<string>();
+  while (queue.length > 0) {
+    const file = queue.pop()!;
+    if (seen.has(file)) continue;
+    seen.add(file);
+    for (const [, specifier] of readFileSync(file, "utf8").matchAll(IMPORT)) {
+      if (specifier!.startsWith(".")) {
+        const target = resolveRelative(dirname(file), specifier!);
+        if (target) queue.push(target);
+      } else if (!isBuiltin(specifier!) && !installed.has(packageName(specifier!))) {
+        found.add(`${relative(app.appDir, file)} imports ${packageName(specifier!)}`);
+      }
+    }
+  }
+  return [...found];
+}
+
+const SCRIPT = /\.(?:js|mjs|cjs)$/;
+
+function resolveRelative(dir: string, specifier: string): string | undefined {
+  const base = resolve(dir, specifier);
+  return [base, `${base}.js`, join(base, "index.js")].find(
+    (candidate) => SCRIPT.test(candidate) && existsSync(candidate) && statSync(candidate).isFile(),
+  );
+}
+
+function packageName(specifier: string): string {
+  const parts = specifier.split("/");
+  return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]!;
+}
+
+function isBuiltin(specifier: string): boolean {
+  return specifier.startsWith("node:") || builtinModules.includes(specifier.split("/")[0]!);
 }
