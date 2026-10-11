@@ -415,17 +415,20 @@ export async function createTestApp(options: {
       );
     }
     const wireArgs = toActionWireShape(args, name, "args");
+    let result: ActionResult;
     try {
-      const result = await action.execute(wireArgs);
-      return toActionWireShape(result, name, "result");
+      result = await action.execute(wireArgs);
     } catch (err) {
-      if (err instanceof ActionInvocationError) throw err;
+      // As in the host, anything the handler throws, a failed nested
+      // runAction included, fails this action with handler_error.
+      if (err instanceof Error && err.name === "ActionCancelledError") throw err;
       throw new ActionInvocationError(
         name,
         "handler_error",
         err instanceof Error ? err.message : String(err),
       );
     }
+    return toActionWireShape(result, name, "result");
   };
 
   const appContext: RomeAppContext = {

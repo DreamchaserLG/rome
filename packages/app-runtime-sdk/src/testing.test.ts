@@ -136,6 +136,18 @@ describe("createTestApp", () => {
     });
   });
 
+  it("fails an action whose nested call fails with handler_error, as the host does", async () => {
+    await app.action("calls_missing", (config: ActionConfig, deps: DemoDeps) => ({
+      config,
+      execute: () => deps.appContext.runAction("demo:missing", {}),
+    }));
+
+    await expect(app.runAction("calls_missing")).rejects.toMatchObject({
+      actionName: "demo:calls_missing",
+      code: "handler_error",
+    });
+  });
+
   it("rejects what the host would reject: an undefined result and a detached run", async () => {
     await app.action(
       "forgets_to_return",
