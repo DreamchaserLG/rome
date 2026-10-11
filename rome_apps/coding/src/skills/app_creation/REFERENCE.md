@@ -888,7 +888,10 @@ const app = await createTestApp({
   appId: "sales-agent",
   tablePrefix: "sales_agent",
   migrationsFolder: new URL("../src/db/migrations", import.meta.url),
-  channelHistory: [channelMessage({ channel: "feishu", text: "Acme wants 20 seats" })],
+  // conversationId matches the threadId below, so the action's history query finds it.
+  channelHistory: [
+    channelMessage({ channel: "feishu", conversationId: "oc_sales", text: "Acme wants 20 seats" }),
+  ],
 });
 await app.start(createHook);                       // runs onAppStarted
 await app.action("quote", createQuote);            // createAction(config, app.deps)

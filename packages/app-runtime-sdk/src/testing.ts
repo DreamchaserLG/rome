@@ -8,7 +8,9 @@
  *   appId: "sales-agent",
  *   tablePrefix: "sales_agent",
  *   migrationsFolder: new URL("../src/db/migrations", import.meta.url),
- *   channelHistory: [channelMessage({ channel: "feishu", text: "Who owns Acme?" })],
+ *   channelHistory: [
+ *     channelMessage({ channel: "feishu", conversationId: "oc_sales", text: "Who owns Acme?" }),
+ *   ],
  * });
  * await app.action("quote", createQuoteAction);
  * const result = await app.inChannel(
@@ -171,18 +173,24 @@ export function createFakeChannels(history: ChannelMessage[] = []): FakeChannels
 
 let messageSequence = 0;
 
-/** A {@link ChannelMessage} with defaults for everything a test does not name. */
+/** A {@link ChannelMessage} with defaults for everything a test does not name.
+ *  Set `conversationId` to the `threadId` an action passes to `inChannel` when
+ *  the action reads its own conversation's history; the default matches none. */
 export function channelMessage(
-  fields: Partial<ChannelMessage> & { channel: string; text: string },
+  fields: Partial<Omit<ChannelMessage, "conversationId">> & {
+    channel: string;
+    text: string;
+    conversationId?: string;
+  },
 ): ChannelMessage {
   return {
     direction: "inbound",
     messageId: `msg_${++messageSequence}`,
-    conversationId: "conversation" as ConversationId,
     senderId: "sender",
     attachments: [],
     timestamp: new Date(),
     ...fields,
+    conversationId: (fields.conversationId ?? "conversation") as ConversationId,
   };
 }
 

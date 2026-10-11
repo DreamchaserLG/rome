@@ -43,6 +43,8 @@ app-started hook, and serves:
 
 --channels seeds the fake channel history from a JSON array of messages
 ({channel, text, conversationId?, senderId?, senderDisplayName?, timestamp?}).
+Give conversationId the threadId an action runs in, or a history query for
+that conversation finds nothing.
 State lives in memory and resets on restart. Agents, routines, favors and
 real channels are not available; actions that call them get an error result.
 `;
