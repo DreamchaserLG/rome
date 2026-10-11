@@ -80,7 +80,7 @@ function parseArgs(argv: string[]): RunOptions | null {
     } else if (arg === "--theme-name") options.themeName = value();
     else throw new CliError(`rome run: unknown argument "${arg}"\n\n${HELP}`, 2);
   }
-  if (!Number.isInteger(options.port) || options.port <= 0)
+  if (!Number.isInteger(options.port) || options.port <= 0 || options.port > 65535)
     throw new CliError("rome run: --port must be a port number", 2);
   return options;
 }
