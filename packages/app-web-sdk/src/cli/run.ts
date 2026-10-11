@@ -209,6 +209,9 @@ export async function handleRunRequest(
   } catch (err) {
     // A client that closes a streamed response mid-way is not a failure.
     if ((err as NodeJS.ErrnoException).code === "ERR_STREAM_PREMATURE_CLOSE") return;
+    if (err instanceof BadRequest && !res.headersSent) {
+      return sendJson(res, 400, { error: err.message });
+    }
     // The full error, stack included, goes to the terminal; the response
     // carries only its message.
     process.stderr.write(
@@ -513,10 +516,17 @@ function readBody(req: IncomingMessage): Promise<Uint8Array> {
   });
 }
 
+/** A request `rome run` refuses as malformed, answered with a 400. */
+class BadRequest extends Error {}
+
 async function readJson(req: IncomingMessage): Promise<unknown> {
   const body = await readBody(req);
   if (body.length === 0) return undefined;
-  return JSON.parse(Buffer.from(body).toString("utf8")) as unknown;
+  try {
+    return JSON.parse(Buffer.from(body).toString("utf8")) as unknown;
+  } catch (err) {
+    throw new BadRequest(`request body is not JSON: ${(err as Error).message}`);
+  }
 }
 
 const MIME: Record<string, string> = {

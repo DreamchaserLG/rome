@@ -2,7 +2,11 @@ import { parseArgs } from "node:util";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { isBlockedSourceFile } from "@rome-os/app-runtime/packaging";
+import {
+  isBlockedSourceFile,
+  isExcludedSourceEntry,
+  SOURCE_EXCLUDED_SEGMENTS,
+} from "@rome-os/app-runtime/packaging";
 import { create as tarCreate } from "tar";
 import YAML from "yaml";
 import { CliError, requireBearer } from "./config.js";
@@ -21,15 +25,6 @@ const HELP = `Usage: rome publish <directory>
 
 const DEFAULT_EXCLUDES = ["node_modules", ".git", ".DS_Store"];
 const ALWAYS_EXCLUDES = [".rome", ".rome_store"];
-const SOURCE_EXCLUDES = [
-  "node_modules",
-  ".git",
-  ".rome",
-  ".rome_store",
-  ".turbo",
-  ".next",
-  "coverage",
-];
 interface PublishResponse {
   listing: { id: string; handle: string; slug: string };
   version: { version: string; contentHash: string; sizeBytes: number; sourceAvailable?: boolean };
@@ -95,7 +90,7 @@ export async function runPublish(argv: string[]): Promise<void> {
       throw new CliError("app.yaml enables includeSource, so --exclude src is not allowed");
     }
     await validatePublishedSource(path.join(dir, "src"));
-    for (const pattern of SOURCE_EXCLUDES) excludes.add(pattern);
+    for (const pattern of SOURCE_EXCLUDED_SEGMENTS) excludes.add(pattern);
   }
 
   const bytes = await packDirectory(parentDir, dirName, excludes, includeSource);
@@ -170,7 +165,7 @@ async function validatePublishedSource(sourceDir: string): Promise<void> {
 async function validatePublishedSourceTree(sourceRoot: string, currentDir: string): Promise<void> {
   const entries = await fs.readdir(currentDir, { withFileTypes: true });
   for (const entry of entries) {
-    if (SOURCE_EXCLUDES.includes(entry.name) || entry.name === ".DS_Store") continue;
+    if (isExcludedSourceEntry(entry.name)) continue;
 
     const absolutePath = path.join(currentDir, entry.name);
     const relativePath = path.relative(sourceRoot, absolutePath);

@@ -168,6 +168,8 @@ describe("rome run server", () => {
     expect(ran.status).toBe(200);
     expect(JSON.parse(ran.body)).toEqual({ status: "ok", data: { n: 1 } });
     expect(typo.status).toBe(404);
+    const malformed = await get(port, "/__rome/actions/ping", { method: "POST", body: "{args" });
+    expect(malformed.status).toBe(400);
   });
 
   it("passes a streamed API response through", async () => {

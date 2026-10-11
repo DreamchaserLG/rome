@@ -88,6 +88,7 @@ export {
   packArtifact,
   readPackageManifest,
   PNPM_TIMEOUT_MESSAGE_PREFIX,
+  SOURCE_EXCLUDED_SEGMENTS,
   runPnpm,
   type BuildSourceWorkspaceOptions,
   type PackOptions,
