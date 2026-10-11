@@ -350,7 +350,7 @@ decide whether to load the skill.
 | `rome dev`   | Dev server with HMR for the web bundle. Use during heavy UI iteration; otherwise a single `install` (which rebuilds + repacks) is fine. |
 | `rome create <app-id>` | Scaffold a new app from the same template `app_management` `op: "create"` uses. For a coding agent working outside Rome. |
 | `rome validate` | Build, then pack into a temporary directory with the same checks an install runs. It leaves `.rome/artifact`, the installed artifact, alone. Then import every action, hook and the API entry from `dist/` and check that each exports the factory the host calls. Exits 1 on the first problem. |
-| `rome run` | Serve the app with no Rome daemon. It runs the migrations into an in-memory SQLite and runs the `app-started` hook. It serves the UI at `/apps/<id>` in a shadow root with the dashboard's theme tokens (`?theme=dark` switches mode), and the API at `/api/apps/<id>/`. `POST /__rome/actions/<name>` with `{"args": {}, "channel": {…}}` runs an action. `--channels <file.json>` seeds fake channel history. Needs `better-sqlite3`, which the template lists as a dev dependency. |
+| `rome run` | Serve the app with no Rome daemon. It runs the migrations into an in-memory SQLite and runs the `app-started` hook. It serves the UI at `/apps/<id>` in a shadow root with the dashboard's theme tokens (`?theme=dark` switches mode), and the API at `/api/apps/<id>/`. `POST /__rome/actions/<name>` with `{"args": {}, "channel": {…}}` runs an action. `--channels <file.json>` seeds fake channel history. |
 
 `build` and `dev` read `app.yaml` for `web.displayName`, `web.navLabel`, and `web.entry` (default `App.tsx`). The web entry must default-export a React component — see [Frontend SDK](#frontend-sdk--rome-osapp-web-sdk).
 
@@ -876,7 +876,7 @@ The test kit runs an app's actions, API handler and `app-started` hook in a plai
 - in-memory settings;
 - an action registry behind `appContext.runAction`.
 
-It needs `better-sqlite3` and `allowBuilds: { better-sqlite3: true }` in the app's `pnpm-workspace.yaml`; the template has both. The template lists it under `devDependencies`, so an installed app's production bundle leaves it out.
+The database is Node's built-in `node:sqlite` (Node 22.16 or later), so tests need no native addon. Node prints an `ExperimentalWarning` for it.
 
 ```ts
 import { channelMessage, createTestApp } from "@rome-os/app-runtime/testing";

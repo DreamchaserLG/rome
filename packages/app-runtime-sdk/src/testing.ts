@@ -17,12 +17,11 @@
  * );
  * ```
  *
- * The in-memory database needs `better-sqlite3`, which the host bundles but an
- * app installs itself as a dev dependency. Everything else is in this package.
+ * The in-memory database is Node's built-in `node:sqlite` (Node 22.16 or
+ * later) behind the better-sqlite3 API the host's database has, so an app
+ * needs no native addon to run its tests.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
-import { createRequire } from "node:module";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ActionInvocationError,
@@ -50,6 +49,7 @@ import {
   type RomeAppContext,
   type ThreadContext,
 } from "./index.js";
+import { NodeSqliteDatabase } from "./node-sqlite.js";
 import { appMigrationsTableName } from "./packaging/manifest.js";
 
 export interface TestDb {
@@ -65,13 +65,14 @@ export async function createTestDb(options: {
   tablePrefix: string;
   /** The folder `drizzle-kit generate` writes, as a path or a `file:` URL. */
   migrationsFolder?: string | URL;
-  /** The `better-sqlite3` default export. Found from this package or the
-   *  current directory when left out. */
+  /** A better-sqlite3-compatible constructor, such as better-sqlite3's own
+   *  default export. Node's built-in `node:sqlite` when left out. */
   Database?: SqliteConstructor;
 }): Promise<TestDb> {
-  const sqlite = await openInMemorySqlite(options.Database);
-  const { drizzle } = await import("drizzle-orm/better-sqlite3");
-  const connection = drizzle(sqlite as never) as unknown as DrizzleDb;
+  const sqlite = options.Database
+    ? new options.Database(":memory:")
+    : new NodeSqliteDatabase(":memory:");
+  const connection = await drizzleOver(sqlite);
   if (options.migrationsFolder) {
     const { migrate } = await import("drizzle-orm/better-sqlite3/migrator");
     migrate(connection as never, {
@@ -92,29 +93,17 @@ interface SqliteHandle {
 
 export type SqliteConstructor = new (path: string) => SqliteHandle;
 
-async function openInMemorySqlite(Database?: SqliteConstructor): Promise<SqliteHandle> {
-  if (Database) return new Database(":memory:");
-  // A variable specifier keeps TypeScript from requiring the optional module's
-  // types in apps that never call createTestDb.
-  const specifier = "better-sqlite3";
-  let mod: { default: SqliteConstructor };
-  try {
-    mod = (await import(specifier)) as typeof mod;
-  } catch {
-    // pnpm keeps an app's dev dependencies out of this package's resolution
-    // path, so look again from the directory the tests run in.
-    try {
-      const require = createRequire(join(process.cwd(), "package.json"));
-      return new (require(specifier) as SqliteConstructor)(":memory:");
-    } catch (err) {
-      throw new Error(
-        `createTestDb needs better-sqlite3. Add it to the app's devDependencies (pnpm add -D better-sqlite3) and allow its build in pnpm-workspace.yaml (allowBuilds: { better-sqlite3: true }). Cause: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
-  }
-  return new mod.default(":memory:");
+/** What `drizzle(client)` from `drizzle-orm/better-sqlite3` builds, without
+ *  that entry's top-level import of the better-sqlite3 package. */
+async function drizzleOver(client: SqliteHandle): Promise<DrizzleDb> {
+  const [{ BaseSQLiteDatabase, SQLiteSyncDialect }, { BetterSQLiteSession }] = await Promise.all([
+    import("drizzle-orm/sqlite-core"),
+    import("drizzle-orm/better-sqlite3/session"),
+  ]);
+  const dialect = new SQLiteSyncDialect();
+  const session = new BetterSQLiteSession(client as never, dialect, undefined, {});
+  const db = new BaseSQLiteDatabase("sync", dialect, session as never, undefined);
+  return Object.assign(db, { $client: client }) as unknown as DrizzleDb;
 }
 
 function toPath(value: string | URL): string {
@@ -354,7 +343,7 @@ export async function createTestApp(options: {
   unknownAction?: (name: string, args: Record<string, unknown>) => Promise<ActionResult>;
   /** Replaces host services on `appContext`, such as `listRoutines`. */
   appContext?: Partial<Pick<RomeAppContext, "favors" | "listRoutines" | "repositories">>;
-  /** The `better-sqlite3` default export; see {@link createTestDb}. */
+  /** A better-sqlite3-compatible constructor; see {@link createTestDb}. */
   Database?: SqliteConstructor;
 }): Promise<TestApp> {
   // The host's fallback when app.yaml declares no db.tablePrefix.

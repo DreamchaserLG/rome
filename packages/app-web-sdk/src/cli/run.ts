@@ -1,6 +1,5 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { createRequire } from "node:module";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -14,7 +13,7 @@ import {
   type ThreadContext,
 } from "@rome-os/app-runtime";
 import { appIdToPathSegment } from "@rome-os/app-runtime/packaging";
-import { createTestApp, type SqliteConstructor, type TestApp } from "@rome-os/app-runtime/testing";
+import { createTestApp, type TestApp } from "@rome-os/app-runtime/testing";
 import {
   loadActionModules,
   loadApiFactory,
@@ -103,7 +102,6 @@ export async function runRun(argv: string[]): Promise<void> {
       ? { migrationsFolder: resolve(app.builtRoot, app.manifest.db.migrations) }
       : {}),
     channelHistory: options.channelsFile ? readChannelFile(options.channelsFile) : [],
-    Database: requireSqlite(app.appDir),
     appContext: { listRoutines: async () => [] },
     unknownAction: async (name) => {
       // Only another app's or the system's actions are out of reach here. A
@@ -462,18 +460,6 @@ try {
 `;
 }
 
-function requireSqlite(appDir: string): SqliteConstructor {
-  try {
-    return createRequire(join(appDir, "package.json"))("better-sqlite3") as SqliteConstructor;
-  } catch (err) {
-    throw new CliError(
-      `rome run needs better-sqlite3 in the app: pnpm add -D better-sqlite3, and allow its build in pnpm-workspace.yaml (allowBuilds: { better-sqlite3: true }). Cause: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
-  }
-}
-
 function readChannelFile(path: string): ChannelMessage[] {
   const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
   if (!Array.isArray(parsed))
@@ -488,6 +474,13 @@ function toChannelMessage(value: unknown): ChannelMessage {
   if (typeof raw.channel !== "string" || typeof raw.text !== "string") {
     throw new CliError("rome run: every channel message needs a channel and a text", 2);
   }
+  const timestamp = raw.timestamp === undefined ? new Date() : new Date(String(raw.timestamp));
+  if (Number.isNaN(timestamp.getTime())) {
+    throw new CliError(
+      `rome run: channel message timestamp ${JSON.stringify(raw.timestamp)} is not a date`,
+      2,
+    );
+  }
   return {
     direction: "inbound",
     messageId: `seed_${++seededMessages}`,
@@ -497,7 +490,7 @@ function toChannelMessage(value: unknown): ChannelMessage {
     ...raw,
     channel: raw.channel,
     text: raw.text,
-    timestamp: raw.timestamp ? new Date(String(raw.timestamp)) : new Date(),
+    timestamp,
   } as unknown as ChannelMessage;
 }
 
