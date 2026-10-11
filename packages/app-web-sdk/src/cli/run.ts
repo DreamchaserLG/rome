@@ -21,6 +21,7 @@ import {
   readAppOnDisk,
   type AppOnDisk,
 } from "./appModules.js";
+import type { RomeAppBootstrap } from "../runtime/index.js";
 import { runBuild } from "./build.js";
 import { CliError } from "./store/config.js";
 
@@ -405,7 +406,7 @@ function sendHostPage(res: ServerResponse, ctx: RunContext, url: URL): void {
     assetBase,
     shell: { locale: "en-US", theme, themeName, mode: "full" },
     caller: { kind: "guardian", userId: "guardian" },
-  };
+  } satisfies RomeAppBootstrap;
   res.setHeader("content-type", "text/html; charset=utf-8");
   res.end(
     hostPage({

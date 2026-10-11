@@ -5,13 +5,14 @@ import { createApiHandler } from "../src/api/index.js";
 
 // Runs the app's actions and API with no Rome daemon: an in-memory SQLite,
 // a fake channels service, and appContext.runAction wired to the actions
-// registered below. Pass `migrationsFolder: new URL("../src/db/migrations",
-// import.meta.url)` once app.yaml declares a db.
+// registered below. `tablePrefix` matches app.yaml's db.tablePrefix; also pass
+// `migrationsFolder: new URL("../src/db/migrations", import.meta.url)` once
+// app.yaml declares a db.
 describe("__APP_ID__", () => {
   let app: TestApp;
 
   beforeEach(async () => {
-    app = await createTestApp({ appId: "__APP_ID__" });
+    app = await createTestApp({ appId: "__APP_ID__", tablePrefix: "__APP_TABLE_PREFIX__" });
     await app.action("hello", createHello);
   });
 
