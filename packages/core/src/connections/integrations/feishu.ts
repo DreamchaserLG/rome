@@ -40,7 +40,7 @@ import { CredentialRejected, Disconnected } from "../errors.js";
 import { credentialsPaste } from "../schemes.js";
 import type { SetupFn, SetupView } from "../setup/types.js";
 import type { ChannelActivity } from "@rome-os/app-runtime";
-import type { TalkDirectory, TalkFeatures } from "../types.js";
+import type { TalkDirectory, TalkFeatures, TalkHistory } from "../types.js";
 import type {
   ConnectionDescriptor,
   ProfileDisplay,
@@ -48,7 +48,7 @@ import type {
   SecretRecord,
   Talker,
 } from "../types.js";
-import { addressIsConversationFeature, directoryPage } from "./talk-features.js";
+import { addressIsConversationFeature, directoryPage, historyQueryLimit } from "./talk-features.js";
 
 /** The `app` grant material — the custom-app credentials (see feishu.ts). */
 export interface FeishuAppMaterial {
@@ -439,6 +439,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
     capabilities: {
       talker: {
         needs: ["app"] as const,
+        history: true,
         build(creds, kit): Talker {
           // Inline material for the `app` grant (never an external resolver for
           // a Talk grant); credentialsPaste packs these fields.
@@ -476,6 +477,16 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
               };
             },
           };
+          const history: TalkHistory = {
+            async query(input) {
+              const since = input.since ?? new Date(Date.now() - 24 * 3_600_000);
+              return adapter.fetchHistory(
+                input.conversationId ?? null,
+                since,
+                historyQueryLimit(input.limit),
+              );
+            },
+          };
           const directory: TalkDirectory = {
             async listConversations(input) {
               const query = input.query?.toLocaleLowerCase();
@@ -509,6 +520,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             },
           };
           const features: TalkFeatures = {
+            history,
             directMessaging: addressIsConversationFeature(),
             activity,
             directory,
