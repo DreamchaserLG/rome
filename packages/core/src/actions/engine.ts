@@ -1638,8 +1638,14 @@ export class ActionEngine {
       worker.rpc?.dispose();
       this.clearSurplusIdleTimer(worker);
       // A pooled worker that a caller took while it was starting is running,
-      // not starting, but its death before ready is still a failed start.
-      if (worker.pooled && !worker.hasBeenReady && worker.state !== "stopping") {
+      // not starting, but its death before ready is still a failed start,
+      // unless that caller cancelled it.
+      if (
+        worker.pooled &&
+        !worker.hasBeenReady &&
+        worker.state !== "stopping" &&
+        !worker.cancelRequested
+      ) {
         log.warn("warm action worker exited before ready", {
           code,
           signal: signal ?? undefined,
@@ -1735,8 +1741,8 @@ export class ActionEngine {
   /** Forks a pooled worker into the warm pool. It turns idle on its ready
    * message and goes to the first queued root, if any. A worker slow to send
    * ready keeps running until WARM_WORKER_START_ABANDON_MS, since a slow start
-   * is not a failed one. The deadlines also cover a worker a caller took while
-   * it was starting, so a hung start cannot hold that caller's slot. */
+   * is not a failed one. A worker a caller took while it was starting has that
+   * caller waiting on it, so main stops it at WARM_WORKER_READY_TIMEOUT_MS. */
   private startWarmWorker(): void {
     const worker = this.createWorkerProcess({ pooled: true, detached: true });
     this.warmWorkers.add(worker);
@@ -1769,11 +1775,18 @@ export class ActionEngine {
     const startEnded = () => worker.hasBeenReady || worker.state === "stopping";
     let readyDeadline = this.clock.setTimeout(() => {
       if (startEnded()) return;
+      this.warmWorkerStartFailed = true;
+      if (worker.state === "running") {
+        log.warn("stopping a taken action worker that is slow to become ready", {
+          timeoutMs: WARM_WORKER_READY_TIMEOUT_MS,
+        });
+        void this.stopWorker(worker);
+        return;
+      }
       log.warn("warm action worker is slow to become ready", {
         timeoutMs: WARM_WORKER_READY_TIMEOUT_MS,
       });
       worker.readyOverdue = true;
-      this.warmWorkerStartFailed = true;
       readyDeadline = this.clock.setTimeout(() => {
         if (startEnded()) return;
         log.warn("stopping a warm action worker that never became ready", {

@@ -1038,7 +1038,9 @@ describe("ActionEngine", () => {
         children[3].completeNext();
         await expect(failFast[0]).resolves.toEqual({ status: "ok", data: "root" });
 
-        await clock.advance("299s");
+        // Its caller is waiting, so the taken worker gets the 60-second
+        // deadline, not the five minutes an untaken slow start gets.
+        await clock.advance("59s");
         expect(children[2].sent).not.toContainEqual(shutdown);
         await clock.advance("1s");
         expect(children[2].sent).toContainEqual(shutdown);
@@ -1069,6 +1071,43 @@ describe("ActionEngine", () => {
 
         // A failed start sends the queued root to a single-use fork, which
         // gets its payload without waiting for ready.
+        await rs.waitFor(() =>
+          expect(actionMessages(children[4])).toMatchObject([{ actionName: "explain" }]),
+        );
+        children[4].completeNext();
+        children[0].completeNext();
+        await submit;
+        await engine.stopWorkerWarmPool();
+      });
+
+      it("does not treat a cancelled taken starting worker as a failed start", async () => {
+        const { engine, children } = createWarmEngine(4);
+        const submit = engine.run("submit", {}, queue);
+        await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+        await engine.dispatch("explain", {});
+        await rs.waitFor(() => expect(children).toHaveLength(2));
+        const cold = [engine.run("root", {}), engine.run("root", {})];
+        await rs.waitFor(() => expect(children).toHaveLength(4));
+        const taken = engine
+          .run("root", {}, { executionId: "taken-root" })
+          .catch((err: unknown) => err);
+        await rs.waitFor(() =>
+          expect(actionMessages(children[1])).toMatchObject([{ actionName: "root" }]),
+        );
+
+        await expect(engine.cancel("taken-root")).resolves.toBe(true);
+        children[1].signalCode = "SIGTERM";
+        children[1].emit("exit", null, "SIGTERM");
+        await expect(taken).resolves.toMatchObject({ name: "ActionCancelledError" });
+        children[2].completeNext();
+        children[3].completeNext();
+        await Promise.all(cold);
+
+        // The queued root still waits for a pooled worker's ready.
+        await rs.waitFor(() => expect(children).toHaveLength(5));
+        await settle();
+        expect(actionMessages(children[4])).toHaveLength(0);
+        children[4].emit("message", ready);
         await rs.waitFor(() =>
           expect(actionMessages(children[4])).toMatchObject([{ actionName: "explain" }]),
         );
