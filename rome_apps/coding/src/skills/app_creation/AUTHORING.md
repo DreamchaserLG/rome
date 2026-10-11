@@ -298,6 +298,8 @@ git status                                                            # working 
 
 Then call `system:app_management { op: "install", source: { mode: "source", path: "<app-root>" } }` — the daemon rebuilds, repacks, and installs in one step — and exercise the action / API / UI you changed.
 
+A coding agent working outside Rome, with no `system:app_management`, runs `rome validate` in place of the install, then `rome run`. `rome run` serves the UI, API and actions on `http://127.0.0.1:4319`, so it can be exercised with `curl` and screenshotted in a browser. Real channels, agents and routines still need an install into a running Rome.
+
 For newly created apps, finish with an independent clean-context verification
 pass: call `system:summon` with `agentName: "assistant:assistant"` and only the app id,
 `<app-root>`, packed artifact path, expected behavior, dashboard/API base URL,

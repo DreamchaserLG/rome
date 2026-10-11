@@ -1,0 +1,493 @@
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createRequire } from "node:module";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import type {
+  ChannelMessage,
+  RomeAppApiHandler,
+  RomeAppContext,
+  ThreadContext,
+} from "@rome-os/app-runtime";
+import { createTestApp, type SqliteConstructor, type TestApp } from "@rome-os/app-runtime/testing";
+import {
+  artifactPaths,
+  loadActionModules,
+  loadApiFactory,
+  loadHookFactory,
+  readAppOnDisk,
+  type AppOnDisk,
+} from "./appModules.js";
+import { runBuild } from "./build.js";
+import { CliError } from "./store/config.js";
+
+const HELP = `rome run — serve one app locally, with no Rome daemon
+
+Usage: rome run [--port 4319] [--no-build] [--channels <file.json>]
+                [--theme light|dark] [--theme-name ember|ash|slate]
+
+Builds the app, runs its migrations into an in-memory SQLite, runs its
+app-started hook, and serves:
+
+  /apps/<id>                 the web UI, mounted in a shadow root with the
+                             dashboard's theme tokens (?theme=dark to switch)
+  /api/apps/<id>/...         the app's API, called as the guardian
+  POST /__rome/actions/<n>   run an action: {"args": {...}, "channel": {...}}
+  GET  /__rome/channels      every channel read and send so far
+  POST /__rome/channels      add messages to the fake channel history
+  GET  /__rome/logs          what the app logged
+  GET  /__rome               a summary of all of the above
+
+--channels seeds the fake channel history from a JSON array of messages
+({channel, text, conversationId?, senderId?, senderDisplayName?, timestamp?}).
+State lives in memory and resets on restart. Agents, routines, favors and
+real channels are not available; actions that call them get an error result.
+`;
+
+interface RunOptions {
+  port: number;
+  build: boolean;
+  channelsFile?: string;
+  theme: "light" | "dark";
+  themeName: string;
+}
+
+function parseArgs(argv: string[]): RunOptions | null {
+  const options: RunOptions = { port: 4319, build: true, theme: "light", themeName: "ember" };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!;
+    const value = () => {
+      const next = argv[++i];
+      if (next === undefined) throw new CliError(`rome run: ${arg} needs a value`, 2);
+      return next;
+    };
+    if (arg === "--help" || arg === "-h") return null;
+    else if (arg === "--port") options.port = Number(value());
+    else if (arg === "--no-build") options.build = false;
+    else if (arg === "--channels") options.channelsFile = value();
+    else if (arg === "--theme") {
+      const theme = value();
+      if (theme !== "light" && theme !== "dark")
+        throw new CliError("rome run: --theme is light or dark", 2);
+      options.theme = theme;
+    } else if (arg === "--theme-name") options.themeName = value();
+    else throw new CliError(`rome run: unknown argument "${arg}"\n\n${HELP}`, 2);
+  }
+  if (!Number.isInteger(options.port) || options.port <= 0)
+    throw new CliError("rome run: --port must be a port number", 2);
+  return options;
+}
+
+export async function runRun(argv: string[]): Promise<void> {
+  const options = parseArgs(argv);
+  if (!options) {
+    process.stdout.write(HELP);
+    return;
+  }
+
+  const app = await readAppOnDisk(process.cwd());
+  if (options.build) {
+    process.chdir(app.appDir);
+    await runBuild();
+  }
+
+  const testApp = await createTestApp({
+    appId: app.manifest.id,
+    tablePrefix: app.tablePrefix,
+    ...(app.manifest.db
+      ? { migrationsFolder: resolve(app.builtRoot, app.manifest.db.migrations) }
+      : {}),
+    channelHistory: options.channelsFile ? readChannelFile(resolve(options.channelsFile)) : [],
+    Database: requireSqlite(app.appDir),
+    appContext: { listRoutines: async () => [] },
+    unknownAction: async (name) => {
+      process.stderr.write(
+        `rome run: ${name} is not available outside Rome; the caller got an error result\n`,
+      );
+      return { status: "error", error: `${name} is not available in rome run` };
+    },
+  });
+
+  const actionNames: string[] = [];
+  for (const { config, factory } of await loadActionModules(app)) {
+    const action = await testApp.action(config.name, factory, config);
+    await testApp.action(`${app.manifest.id}:${config.name}`, () => action, config);
+    actionNames.push(config.name);
+  }
+
+  for (const path of artifactPaths(app.manifest, "hooks")) {
+    if (basename(path) !== "app-started") {
+      process.stdout.write(`  hook ${path}: not delivered by rome run\n`);
+      continue;
+    }
+    try {
+      await testApp.start(
+        (await loadHookFactory(app, path)) as Parameters<TestApp["start"]>[0],
+        app.manifest.version,
+      );
+      process.stdout.write(`  hook ${path}: ran\n`);
+    } catch (err) {
+      // The host logs an app-started failure and carries on; so does rome run.
+      process.stderr.write(
+        `  hook ${path}: threw ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+    }
+  }
+
+  const createApiHandler = (await loadApiFactory(app)) as
+    | ((ctx: RomeAppContext) => RomeAppApiHandler)
+    | null;
+  const api = createApiHandler ? createApiHandler(testApp.appContext) : null;
+
+  const server = createServer((req, res) => {
+    handle(req, res, { app, testApp, api, options, actionNames }).catch((err: unknown) => {
+      sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+    });
+  });
+  await new Promise<void>((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(options.port, "127.0.0.1", resolveListen);
+  });
+
+  const base = `http://127.0.0.1:${options.port}`;
+  process.stdout.write(`
+rome run: ${app.manifest.id}@${app.manifest.version}
+  UI       ${app.manifest.web ? `${base}/apps/${app.manifest.id}` : "(no web entry)"}
+  API      ${api ? `${base}/api/apps/${app.manifest.id}/` : "(no api entry)"}
+  actions  ${actionNames.join(", ") || "(none)"}
+           curl -s -X POST ${base}/__rome/actions/<name> -d '{"args":{}}'
+  state    ${base}/__rome
+`);
+  await new Promise<void>((done) => {
+    const stop = () => server.close(() => done());
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+  });
+  testApp.close();
+}
+
+interface Ctx {
+  app: AppOnDisk;
+  testApp: TestApp;
+  api: RomeAppApiHandler | null;
+  options: RunOptions;
+  actionNames: string[];
+}
+
+async function handle(req: IncomingMessage, res: ServerResponse, ctx: Ctx): Promise<void> {
+  const url = new URL(req.url ?? "/", "http://127.0.0.1");
+  const id = ctx.app.manifest.id;
+  const path = url.pathname;
+
+  if (path === "/" || path === "") return redirect(res, `/apps/${id}`);
+  if (path === "/favicon.ico") return void res.writeHead(204).end();
+  if (path === `/apps/${id}` || path.startsWith(`/apps/${id}/`)) return sendHostPage(res, ctx, url);
+  if (path === "/__rome/host-themes.css") return sendFile(res, HOST_THEMES_CSS);
+  if (path.startsWith(`/app-assets/${id}/`)) return sendAsset(res, ctx, path);
+  if (path === `/api/apps/${id}` || path.startsWith(`/api/apps/${id}/`))
+    return proxyApi(req, res, ctx, url);
+  if (path.startsWith("/__rome")) return handleDev(req, res, ctx, path);
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function handleDev(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: Ctx,
+  path: string,
+): Promise<void> {
+  const { testApp } = ctx;
+  if (req.method === "GET" && path === "/__rome") {
+    return sendJson(res, 200, {
+      app: { id: ctx.app.manifest.id, version: ctx.app.manifest.version },
+      actions: ctx.actionNames,
+      settings: Object.fromEntries(testApp.settings),
+      channels: { queries: testApp.channels.queries, sent: testApp.channels.sent },
+      logs: testApp.logger.lines.length,
+    });
+  }
+  if (req.method === "GET" && path === "/__rome/logs")
+    return sendJson(res, 200, testApp.logger.lines);
+  if (req.method === "GET" && path === "/__rome/channels") {
+    return sendJson(res, 200, { queries: testApp.channels.queries, sent: testApp.channels.sent });
+  }
+  if (req.method === "POST" && path === "/__rome/channels") {
+    const body = await readJson(req);
+    const messages = (Array.isArray(body) ? body : [body]).map(toChannelMessage);
+    testApp.channels.push(...messages);
+    return sendJson(res, 200, { added: messages.length });
+  }
+  const action = path.match(/^\/__rome\/actions\/(.+)$/);
+  if (req.method === "POST" && action) {
+    const body = (await readJson(req)) as
+      | { args?: Record<string, unknown>; channel?: ThreadContext }
+      | undefined;
+    const name = decodeURIComponent(action[1]!);
+    const run = () => testApp.runAction(name, body?.args ?? {});
+    const result = body?.channel ? await testApp.inChannel(body.channel, run) : await run();
+    return sendJson(res, 200, result);
+  }
+  sendJson(res, 404, { error: "not found" });
+}
+
+async function proxyApi(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: Ctx,
+  url: URL,
+): Promise<void> {
+  if (!ctx.api) return sendJson(res, 404, { error: "this app has no api entry" });
+  const prefix = `/api/apps/${ctx.app.manifest.id}`;
+  const body = await readBody(req);
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (typeof value === "string") headers[key] = value;
+  }
+  const response = await ctx.api.handle({
+    method: req.method ?? "GET",
+    path: url.pathname.slice(prefix.length).split("/").filter(Boolean).map(decodeURIComponent),
+    headers,
+    query: url.searchParams,
+    ...(body.length > 0 ? { body } : {}),
+    caller: { kind: "guardian", userId: "guardian", via: "cookie" },
+  });
+  res.statusCode = response.status;
+  response.headers.forEach((value, key) => res.setHeader(key, value));
+  res.end(Buffer.from(await response.arrayBuffer()));
+}
+
+function webDir(ctx: Ctx): string | null {
+  const manifestPath = ctx.app.manifest.web?.manifest;
+  return manifestPath ? dirname(resolve(ctx.app.builtRoot, manifestPath)) : null;
+}
+
+function sendAsset(res: ServerResponse, ctx: Ctx, path: string): void {
+  const dir = webDir(ctx);
+  // /app-assets/<id>/<version>/<file>
+  const rest = path.split("/").slice(4).map(decodeURIComponent).join("/");
+  const file = dir ? resolve(dir, rest) : null;
+  if (!dir || !file || relative(dir, file).startsWith(".."))
+    return sendJson(res, 404, { error: "not found" });
+  sendFile(res, file);
+}
+
+function sendHostPage(res: ServerResponse, ctx: Ctx, url: URL): void {
+  const dir = webDir(ctx);
+  if (!dir || !existsSync(join(dir, "manifest.json"))) {
+    return sendJson(res, 404, { error: "this app has no built web bundle; run rome build" });
+  }
+  const webManifest = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")) as {
+    entry: string;
+    styles?: string[];
+    assetVersion?: string;
+  };
+  const { id, version } = ctx.app.manifest;
+  const assetBase = `/app-assets/${id}/${webManifest.assetVersion ?? version}`;
+  const theme =
+    url.searchParams.get("theme") === "dark"
+      ? "dark"
+      : url.searchParams.get("theme") === "light"
+        ? "light"
+        : ctx.options.theme;
+  const themeName = url.searchParams.get("themeName") ?? ctx.options.themeName;
+  const routeBase = `/apps/${id}`;
+  const bootstrap = {
+    appId: id,
+    version,
+    routeBase,
+    routePath: url.pathname.slice(routeBase.length + 1),
+    apiBase: `/api/apps/${id}`,
+    assetBase,
+    shell: { locale: "en-US", theme, themeName, mode: "full" },
+    caller: { kind: "guardian", userId: "guardian" },
+  };
+  res.setHeader("content-type", "text/html; charset=utf-8");
+  res.end(
+    hostPage({
+      title: ctx.app.manifest.web?.displayName ?? ctx.app.manifest.name ?? id,
+      bootstrap,
+      entryUrl: `${assetBase}/${webManifest.entry}`,
+      styleUrls: (webManifest.styles ?? []).map((style) => `${assetBase}/${style}`),
+    }),
+  );
+}
+
+const HOST_THEMES_CSS = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "assets",
+  "host-themes.css",
+);
+
+/**
+ * The dashboard's page host, reduced to what an app sees: the theme tokens on
+ * <html>, a shadow root with the app canvas alias, the app's own CSS scoped
+ * into it (`:root` → `:host`, relative urls resolved), and `mount(root,
+ * bootstrap)`. Mirrors `prepareShadowMount` and `appendScopedStyles` in
+ * packages/web/src/components/rome-app-host.tsx.
+ */
+function hostPage(input: {
+  title: string;
+  bootstrap: { shell: { theme: string; themeName: string } } & Record<string, unknown>;
+  entryUrl: string;
+  styleUrls: string[];
+}): string {
+  const { theme, themeName } = input.bootstrap.shell;
+  const json = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u003c");
+  return `<!doctype html>
+<html lang="en" data-theme="${escapeHtml(themeName)}" class="${theme === "dark" ? "dark" : ""}" style="color-scheme: ${theme}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(input.title)} · rome run</title>
+<link rel="stylesheet" href="/__rome/host-themes.css">
+<style>
+  html, body { margin: 0; min-height: 100%; }
+  body { background: var(--app-canvas); color: var(--foreground); font-family: ui-sans-serif, system-ui, sans-serif; }
+  #rome-app-host { min-height: 100vh; }
+  #rome-app-error { margin: 24px; padding: 16px; border: 1px solid var(--destructive); border-radius: 12px; white-space: pre-wrap; font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<div id="rome-app-host"></div>
+<script type="module">
+const bootstrap = ${json(input.bootstrap)};
+const entryUrl = ${json(input.entryUrl)};
+const styleUrls = ${json(input.styleUrls)};
+const skip = (u) => u.startsWith("/") || u.startsWith("#") || u.startsWith("data:") || u.startsWith("http:") || u.startsWith("https:") || u.startsWith("//");
+function scope(css, source) {
+  return css
+    .replace(/@import\\s+(url\\()?\\s*(['"]?)([^'")\\s]+)\\2\\s*\\)?/g, (m, p, _q, u) => skip(u) ? m : (p ? '@import url("' + new URL(u, source) + '")' : '@import "' + new URL(u, source) + '"'))
+    .replace(/url\\(\\s*(['"]?)([^'")]+)\\1\\s*\\)/g, (m, _q, u) => skip(u) ? m : 'url("' + new URL(u, source) + '")')
+    .replaceAll(":root", ":host");
+}
+try {
+  const host = document.getElementById("rome-app-host");
+  const shadow = host.attachShadow({ mode: "open" });
+  const shell = document.createElement("style");
+  shell.textContent = ":host { --background: var(--app-canvas); background-color: var(--background); display: block; min-height: inherit; }";
+  shadow.append(shell);
+  for (const url of styleUrls) {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("Failed to load app stylesheet: " + response.status + " " + url);
+    const style = document.createElement("style");
+    style.textContent = scope(await response.text(), new URL(url, location.href).toString());
+    shadow.append(style);
+  }
+  const body = document.createElement("body");
+  if (bootstrap.shell.theme === "dark") body.classList.add("dark");
+  const root = document.createElement("div");
+  root.id = "root";
+  body.append(root);
+  shadow.append(body);
+  window.__ROME_APP_BOOTSTRAP__ = bootstrap;
+  const mod = await import(entryUrl);
+  if (typeof mod.mount !== "function") throw new Error("App bundle does not export mount(root, bootstrap)");
+  await mod.mount(root, bootstrap);
+} catch (err) {
+  const box = document.createElement("pre");
+  box.id = "rome-app-error";
+  box.textContent = "Failed to mount the app: " + (err && err.stack || err);
+  document.body.append(box);
+  console.error(err);
+}
+</script>
+</body>
+</html>
+`;
+}
+
+function requireSqlite(appDir: string): SqliteConstructor {
+  try {
+    return createRequire(join(appDir, "package.json"))("better-sqlite3") as SqliteConstructor;
+  } catch (err) {
+    throw new CliError(
+      `rome run needs better-sqlite3 in the app: pnpm add -D better-sqlite3, and allow its build in pnpm-workspace.yaml (allowBuilds: { better-sqlite3: true }). Cause: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+}
+
+function readChannelFile(path: string): ChannelMessage[] {
+  const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+  if (!Array.isArray(parsed))
+    throw new CliError(`rome run: ${path} must hold a JSON array of messages`, 2);
+  return parsed.map(toChannelMessage);
+}
+
+let seededMessages = 0;
+
+function toChannelMessage(value: unknown): ChannelMessage {
+  const raw = (typeof value === "object" && value !== null ? value : {}) as Record<string, unknown>;
+  if (typeof raw.channel !== "string" || typeof raw.text !== "string") {
+    throw new CliError("rome run: every channel message needs a channel and a text", 2);
+  }
+  return {
+    direction: "inbound",
+    messageId: `seed_${++seededMessages}`,
+    conversationId: "conversation",
+    senderId: "sender",
+    attachments: [],
+    ...raw,
+    channel: raw.channel,
+    text: raw.text,
+    timestamp: raw.timestamp ? new Date(String(raw.timestamp)) : new Date(),
+  } as unknown as ChannelMessage;
+}
+
+function readBody(req: IncomingMessage): Promise<Uint8Array> {
+  return new Promise((done, fail) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    req.on("end", () => done(new Uint8Array(Buffer.concat(chunks))));
+    req.on("error", fail);
+  });
+}
+
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  const body = await readBody(req);
+  if (body.length === 0) return undefined;
+  return JSON.parse(Buffer.from(body).toString("utf8")) as unknown;
+}
+
+const MIME: Record<string, string> = {
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".woff2": "font/woff2",
+  ".map": "application/json",
+};
+
+function sendFile(res: ServerResponse, file: string): void {
+  if (!existsSync(file) || !statSync(file).isFile())
+    return sendJson(res, 404, { error: "not found" });
+  res.setHeader("content-type", MIME[extname(file)] ?? "application/octet-stream");
+  res.end(readFileSync(file));
+}
+
+function sendJson(res: ServerResponse, status: number, body: unknown): void {
+  res.statusCode = status;
+  res.setHeader("content-type", "application/json");
+  res.end(JSON.stringify(body, null, 2));
+}
+
+function redirect(res: ServerResponse, location: string): void {
+  res.statusCode = 302;
+  res.setHeader("location", location);
+  res.end();
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(
+    /[&<>"]/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!,
+  );
+}

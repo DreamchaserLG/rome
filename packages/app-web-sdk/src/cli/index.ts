@@ -1,16 +1,22 @@
 import { runBuild } from "./build.js";
+import { runCreate } from "./create.js";
 import { runDev } from "./dev.js";
+import { runRun } from "./run.js";
 import { CliError } from "./store/config.js";
 import { runLogin } from "./store/login.js";
 import { runWhoami } from "./store/whoami.js";
 import { runPublish } from "./store/publish.js";
 import { runUpgrade } from "./upgrade.js";
+import { runValidate } from "./validate.js";
 
 const HELP = `rome — Rome app CLI
 
 Develop:
+  rome create     Scaffold a new app from the template
   rome dev        Start the dev server with HMR
   rome build      Build the app web bundle for production
+  rome validate   Build, pack and check the app the way an install does
+  rome run        Serve the app's UI, API and actions locally, no Rome needed
   rome upgrade    Bump app.yaml version by major, minor, or patch
 
 Dev and build read app.yaml (web.displayName, web.navLabel, web.entry)
@@ -30,6 +36,9 @@ const ARG_COMMANDS: Record<string, (argv: string[]) => Promise<void>> = {
   whoami: runWhoami,
   publish: runPublish,
   upgrade: runUpgrade,
+  create: runCreate,
+  validate: runValidate,
+  run: runRun,
 };
 
 async function main(argv: string[]): Promise<void> {
