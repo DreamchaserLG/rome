@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { basename, dirname, extname, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
@@ -355,8 +355,10 @@ function sendAsset(res: ServerResponse, ctx: RunContext, path: string): void {
   const dir = webDir(ctx);
   // /app-assets/<id segment>/<version>/<file>
   const rest = path.split("/").slice(4).map(decodeURIComponent).join("/");
-  const file = dir ? resolve(dir, rest) : null;
-  if (!dir || !file || relative(dir, file).startsWith(".."))
+  if (!dir) return sendJson(res, 404, { error: "not found" });
+  const file = resolve(dir, rest);
+  const within = relative(dir, file);
+  if (within.startsWith("..") || isAbsolute(within))
     return sendJson(res, 404, { error: "not found" });
   sendFile(res, file);
 }

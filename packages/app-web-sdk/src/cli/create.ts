@@ -47,9 +47,14 @@ export async function runCreate(argv: string[]): Promise<void> {
   let name: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
-    if (arg === "--dir") dir = argv[++i];
-    else if (arg === "--name") name = argv[++i];
-    else if (!arg.startsWith("-") && appId === undefined) appId = arg;
+    if (arg === "--dir" || arg === "--name") {
+      const value = argv[++i];
+      if (value === undefined || value.startsWith("-")) {
+        throw new CliError(`rome create: ${arg} needs a value\n\n${HELP}`, 2);
+      }
+      if (arg === "--dir") dir = value;
+      else name = value;
+    } else if (!arg.startsWith("-") && appId === undefined) appId = arg;
     else throw new CliError(`rome create: unexpected argument "${arg}"\n\n${HELP}`, 2);
   }
   if (!appId || !isValidAppId(appId) || appId.startsWith("@")) {
