@@ -45,8 +45,9 @@ app-started hook, and serves:
 ({channel, text, conversationId?, senderId?, senderDisplayName?, timestamp?}).
 Give conversationId the threadId an action runs in, or a history query for
 that conversation finds nothing.
-State lives in memory and resets on restart. Agents, routines, favors and
-real channels are not available; actions that call them get an error result.
+State lives in memory and resets on restart. Agents, favors and real
+channels are not available; actions that call them get an error result.
+Routines do not run, so listRoutines returns an empty list.
 `;
 
 export interface RunOptions {
@@ -98,6 +99,7 @@ export async function runRun(argv: string[]): Promise<void> {
   }
 
   const actionNames: string[] = [];
+  let warnedRoutines = false;
   const testApp = await createTestApp({
     appId: app.manifest.id,
     appVersion: app.manifest.version,
@@ -107,7 +109,17 @@ export async function runRun(argv: string[]): Promise<void> {
       ? { migrationsFolder: resolve(app.builtRoot, app.manifest.db.migrations) }
       : {}),
     channelHistory: options.channelsFile ? readChannelFile(options.channelsFile) : [],
-    appContext: { listRoutines: async () => [] },
+    appContext: {
+      // No routines exist outside Rome. An empty list keeps a UI that lists
+      // them usable; the note says why it is empty.
+      listRoutines: async () => {
+        if (!warnedRoutines) {
+          warnedRoutines = true;
+          process.stderr.write("rome run: routines do not run here, so listRoutines returns []\n");
+        }
+        return [];
+      },
+    },
     unknownAction: async (name) => {
       // Only another app's or the system's actions are out of reach here. A
       // name of this app's that was never registered is a plain miss.
