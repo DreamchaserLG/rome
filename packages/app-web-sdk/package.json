@@ -45,7 +45,7 @@
     "prepack": "node scripts/copy-template.mjs"
   },
   "dependencies": {
-    "@rome-os/app-runtime": "workspace:^",
+    "@rome-os/app-runtime": "workspace:*",
     "@rsbuild/plugin-react": "^2.0.0",
     "@rslib/core": "^1.0.0",
     "@rspack/resolver": "^0.4.0",

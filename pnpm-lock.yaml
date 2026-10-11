@@ -163,7 +163,7 @@ importers:
   packages/app-web-sdk:
     dependencies:
       '@rome-os/app-runtime':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../app-runtime-sdk
       '@rome-os/ui':
         specifier: ^0.3.0
