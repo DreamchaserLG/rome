@@ -929,6 +929,52 @@ describe("ActionEngine", () => {
         await engine.stopWorkerWarmPool();
       });
 
+      it("defers the recovery refill while it would take a reserved slot", async () => {
+        const registry = new ActionRegistryImpl();
+        registry.register(buildAction("root"));
+        const { children, actionWorkerFork } = installFakeChildProcessFactory({
+          autoRespond: false,
+        });
+        // Cap 3 keeps two slots back, so the busy fallback fills the queued-root slot.
+        const engine = new ActionEngine(registry, createActionEngineRepos(), {
+          processRole: "main",
+          workerWarmPoolSize: 1,
+          maxWorkerProcesses: 3,
+          actionWorkerFork,
+          clock: new FakeClock(),
+        });
+        engine.startWorkerWarmPool();
+        children[0].exitCode = 1;
+        children[0].emit("exit", 1, null);
+        await settle();
+
+        await engine.dispatch("root", {});
+        await rs.waitFor(() => expect(actionMessages(children[1])).toHaveLength(1));
+        children[1].emit("message", ready);
+        await settle();
+        expect(children).toHaveLength(2);
+
+        const failFast = [engine.run("root", {}), engine.run("root", {})];
+        await rs.waitFor(() => expect(children).toHaveLength(4));
+        children[2].completeNext();
+        children[3].completeNext();
+        await expect(Promise.all(failFast)).resolves.toEqual([
+          { status: "ok", data: "root" },
+          { status: "ok", data: "root" },
+        ]);
+        expect(children).toHaveLength(4);
+
+        // The fallback's exit frees its slot, so the deferred refill runs.
+        children[1].completeNext();
+        await rs.waitFor(() => expect(children).toHaveLength(5));
+        children[4].emit("message", ready);
+        const next = engine.run("root", {});
+        await rs.waitFor(() => expect(actionMessages(children[4])).toHaveLength(1));
+        children[4].completeNext();
+        await expect(next).resolves.toEqual({ status: "ok", data: "root" });
+        await engine.stopWorkerWarmPool();
+      });
+
       it("falls back to a single-use fork when the new worker fails to spawn", async () => {
         const { engine, children } = createWarmEngine();
 

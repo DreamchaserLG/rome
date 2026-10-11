@@ -357,11 +357,17 @@ export class ActionEngine {
    * any worker reaches ready. While set, queued roots take single-use forks
    * instead of waiting on pooled workers that would fail the same way. */
   private warmWorkerStartFailed = false;
+  /** Set when the warm pool is short but busy and starting workers fill
+   * `queuedRootSlots()`. A starting worker holds a slot no caller can use yet,
+   * so refilling then would take a slot reserved for fail-fast callers. The
+   * next worker exit retries the refill. */
+  private warmPoolRefillDeferred = false;
   private workerPoolGeneration = 0;
   private warmWorkers = new Set<ActionWorkerProcess>();
   private liveWorkers = new Set<ActionWorkerProcess>();
-  /** Runs a callback in the async context the engine was built in, which
-   * holds no request, session, span or app-API scope. Workers fork in it. */
+  /** Runs a callback in the async context the engine was built in. Workers
+   * fork in it. Boot builds the engine outside any request, session, span or
+   * app-API scope, so none of those reach a worker's calls to main. */
   private readonly runInEngineContext = AsyncLocalStorage.snapshot();
 
   constructor(
@@ -1376,6 +1382,9 @@ export class ActionEngine {
     return this.liveWorkers.size - this.warmWorkers.size;
   }
 
+  /** Counts every generation. Restart stops each worker that is not running,
+   * so a starting worker is always current, and any starting worker holds a
+   * slot. */
   private startingWarmWorkerCount(): number {
     return [...this.warmWorkers].filter((worker) => worker.state === "starting").length;
   }
@@ -1416,9 +1425,7 @@ export class ActionEngine {
    * queue empty stays in the pool. */
   private startWarmWorkersForQueuedRoots(): boolean {
     const busy = this.busyWorkerCount();
-    let starting = [...this.warmWorkers].filter(
-      (worker) => worker.state === "starting" && worker.generation === this.workerPoolGeneration,
-    ).length;
+    let starting = this.startingWarmWorkerCount();
     while (
       starting < this.queuedRoots.length &&
       busy + starting < this.queuedRootSlots() &&
@@ -1613,7 +1620,10 @@ export class ActionEngine {
       this.warmWorkers.delete(worker);
       this.liveWorkers.delete(worker);
       this.admitQueuedRoots();
-      if (worker.pooled && worker.hasBeenReady && this.workerWarmPoolStarted) {
+      if (
+        this.workerWarmPoolStarted &&
+        ((worker.pooled && worker.hasBeenReady) || this.warmPoolRefillDeferred)
+      ) {
         this.ensureWorkerWarmPool();
       }
     });
@@ -1678,8 +1688,13 @@ export class ActionEngine {
     ) {
       return;
     }
+    this.warmPoolRefillDeferred = false;
     for (let i = this.warmWorkerCount(); i < this.workerWarmPoolSize; i++) {
       if (this.liveWorkers.size >= this.maxWorkerProcesses) break;
+      if (this.busyWorkerCount() + this.startingWarmWorkerCount() >= this.queuedRootSlots()) {
+        this.warmPoolRefillDeferred = true;
+        break;
+      }
       this.startWarmWorker();
     }
   }
