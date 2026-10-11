@@ -382,6 +382,38 @@ describe("ActionEngine", () => {
         await expect(queued).resolves.toEqual({ status: "ok", data: "root" });
       });
 
+      it("forks a single-use worker in the async context of the root it serves", async () => {
+        const { engine, children } = createQueueingEngine(1);
+        // Stands in for the dispatcher's trace span and other request-scoped stores.
+        const requestScope = new AsyncLocalStorage<string>();
+        engine.setWorkerRpcServer({
+          register(rpc: IpcRpc) {
+            rpc.handle("probe", async () => requestScope.getStore() ?? null);
+          },
+        } as unknown as WorkerRpcServer);
+        const probe = async (child: FakeWorkerChild, reqId: string, expected: string) => {
+          child.emit("message", { type: "rpc_request", reqId, method: "probe", params: {} });
+          await rs.waitFor(() =>
+            expect(child.sent).toContainEqual({ type: "rpc_response", reqId, result: expected }),
+          );
+        };
+
+        const first = requestScope.run("request-1", () => engine.run("root", {}));
+        await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+        const queued = requestScope.run("request-2", () => engine.run("root", {}, queue));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await probe(children[0], "r1", "request-1");
+
+        // The queued root's fork starts from the first worker's exit callback,
+        // which runs in request-1, but serves the root queued in request-2.
+        children[0].completeNext();
+        await first;
+        await rs.waitFor(() => expect(actionMessages(children[1])).toHaveLength(1));
+        await probe(children[1], "r2", "request-2");
+        children[1].completeNext();
+        await expect(queued).resolves.toEqual({ status: "ok", data: "root" });
+      });
+
       it("admits queued roots in arrival order", async () => {
         const { engine, children } = createQueueingEngine(1);
 

@@ -294,6 +294,9 @@ interface QueuedRoot {
   rootExecutionId: string;
   queuedAt: number;
   deadline: ClockTimer;
+  /** The async context the root queued in. A single-use fork for the root
+   * starts in it, so the worker's calls to main keep the dispatcher's trace. */
+  runInQueuedContext: <R>(fn: () => R) => R;
   admit: (worker: ActionWorkerProcess) => void;
   reject: (error: Error) => void;
 }
@@ -360,9 +363,9 @@ export class ActionEngine {
   private workerPoolGeneration = 0;
   private warmWorkers = new Set<ActionWorkerProcess>();
   private liveWorkers = new Set<ActionWorkerProcess>();
-  /** Runs a callback in the async context the engine was built in. Workers
-   * fork in it. Boot builds the engine outside any request, session, span or
-   * app-API scope, so none of those reach a worker's calls to main. */
+  /** Runs a callback in the async context the engine was built in. Pooled
+   * workers fork in it. Boot builds the engine outside any request, session,
+   * span or app-API scope, so none of those reach a worker's calls to main. */
   private readonly runInEngineContext = AsyncLocalStorage.snapshot();
 
   constructor(
@@ -1325,6 +1328,7 @@ export class ActionEngine {
       const entry: QueuedRoot = {
         rootExecutionId,
         queuedAt,
+        runInQueuedContext: AsyncLocalStorage.snapshot(),
         deadline: this.clock.setTimeout(() => {
           this.removeQueuedRoot(entry);
           const waitedMs = this.clock.now().getTime() - queuedAt;
@@ -1425,7 +1429,7 @@ export class ActionEngine {
       const entry = this.queuedRoots.shift()!;
       this.clock.clearTimeout(entry.deadline);
       try {
-        worker ??= this.checkoutWorker(true);
+        worker ??= entry.runInQueuedContext(() => this.checkoutWorker(true));
       } catch (err) {
         entry.reject(err instanceof Error ? err : new Error(String(err)));
         continue;
@@ -1588,13 +1592,14 @@ export class ActionEngine {
     if (this.liveWorkers.size >= this.maxWorkerProcesses) {
       throw new ActionWorkerCapacityError(this.maxWorkerProcesses);
     }
-    // Every child callback re-enters the async context of this fork. A worker
-    // can fork inside one request or another worker's callback and then serve
-    // unrelated roots, so it forks in the engine's own context. Otherwise its
-    // calls to main would carry that request's actor, trace and session.
-    const fork = this.actionWorkerFork;
-    const child = this.runInEngineContext(() =>
-      fork(WORKER_ENTRY_PATH, {
+    // Every child callback re-enters the async context of this fork. A pooled
+    // worker can fork inside one request and then serve unrelated roots, so it
+    // forks in the engine's own context. Otherwise its calls to main would
+    // carry that request's actor, trace and session. A single-use fork serves
+    // only the caller's root, so it keeps the caller's context.
+    const actionWorkerFork = this.actionWorkerFork;
+    const fork = () =>
+      actionWorkerFork(WORKER_ENTRY_PATH, {
         execArgv: process.execArgv,
         detached: options.detached,
         stdio: ["inherit", "inherit", "inherit", "ipc"],
@@ -1602,8 +1607,8 @@ export class ActionEngine {
           ...process.env,
           ROME_ACTION_WORKER: "1",
         },
-      }),
-    );
+      });
+    const child = options.pooled ? this.runInEngineContext(fork) : fork();
     const worker: ActionWorkerProcess = {
       child,
       state: "starting",
