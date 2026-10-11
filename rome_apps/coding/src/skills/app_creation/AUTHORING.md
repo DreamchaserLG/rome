@@ -291,7 +291,7 @@ Before declaring a change done, from `<app-root>` run:
 ```sh
 pnpm install                                                          # if you added a dep or just created the app
 tsc --noEmit                                                          # full type check (covers backend + web)
-pnpm test                                                             # actions, API and hooks, via @rome-os/app-runtime/testing
+pnpm test                                                             # if package.json has a test script (new apps do): actions, API, hooks
 pnpm build                                                            # catch build errors locally before installing
 git status                                                            # working tree must be clean — every change is committed before install
 ```
