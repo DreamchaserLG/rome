@@ -357,11 +357,6 @@ export class ActionEngine {
    * any worker reaches ready. While set, queued roots take single-use forks
    * instead of waiting on pooled workers that would fail the same way. */
   private warmWorkerStartFailed = false;
-  /** Set when the warm pool is short but busy and starting workers fill
-   * `queuedRootSlots()`. A starting worker holds a slot no caller can use yet,
-   * so refilling then would take a slot reserved for fail-fast callers. The
-   * next worker exit retries the refill. */
-  private warmPoolRefillDeferred = false;
   private workerPoolGeneration = 0;
   private warmWorkers = new Set<ActionWorkerProcess>();
   private liveWorkers = new Set<ActionWorkerProcess>();
@@ -1260,6 +1255,13 @@ export class ActionEngine {
     // idle root-only worker while a nested call needs it.
     const warm = this.takeIdleWarmWorker();
     if (warm) return warm;
+    // A refill can fill the last slot with a warm worker that is still
+    // starting. That worker reaches ready sooner than a new fork would, so the
+    // caller takes it, and the payload waits in its IPC channel until then.
+    if (this.liveWorkers.size >= this.maxWorkerProcesses) {
+      const starting = this.takeStartingWarmWorker();
+      if (starting) return starting;
+    }
 
     const worker = this.createWorkerProcess({
       pooled: false,
@@ -1281,6 +1283,24 @@ export class ActionEngine {
         worker.state = "running";
         this.warmWorkers.delete(worker);
         this.clearSurplusIdleTimer(worker);
+        return worker;
+      }
+    }
+    return null;
+  }
+
+  /** Takes a current warm worker that is still starting and not overdue for
+   * ready. Its ready handler records the start once it arrives. */
+  private takeStartingWarmWorker(): ActionWorkerProcess | null {
+    for (const worker of this.warmWorkers) {
+      if (
+        worker.state === "starting" &&
+        !worker.readyOverdue &&
+        worker.generation === this.workerPoolGeneration &&
+        worker.child.connected
+      ) {
+        worker.state = "running";
+        this.warmWorkers.delete(worker);
         return worker;
       }
     }
@@ -1610,7 +1630,9 @@ export class ActionEngine {
     child.once("exit", (code: number | null, signal: NodeJS.Signals | null) => {
       worker.rpc?.dispose();
       this.clearSurplusIdleTimer(worker);
-      if (worker.pooled && worker.state === "starting") {
+      // A pooled worker that a caller took while it was starting is running,
+      // not starting, but its death before ready is still a failed start.
+      if (worker.pooled && !worker.hasBeenReady && worker.state !== "stopping") {
         log.warn("warm action worker exited before ready", {
           code,
           signal: signal ?? undefined,
@@ -1620,10 +1642,7 @@ export class ActionEngine {
       this.warmWorkers.delete(worker);
       this.liveWorkers.delete(worker);
       this.admitQueuedRoots();
-      if (
-        this.workerWarmPoolStarted &&
-        ((worker.pooled && worker.hasBeenReady) || this.warmPoolRefillDeferred)
-      ) {
+      if (this.workerWarmPoolStarted && worker.pooled && worker.hasBeenReady) {
         this.ensureWorkerWarmPool();
       }
     });
@@ -1688,13 +1707,8 @@ export class ActionEngine {
     ) {
       return;
     }
-    this.warmPoolRefillDeferred = false;
     for (let i = this.warmWorkerCount(); i < this.workerWarmPoolSize; i++) {
       if (this.liveWorkers.size >= this.maxWorkerProcesses) break;
-      if (this.busyWorkerCount() + this.startingWarmWorkerCount() >= this.queuedRootSlots()) {
-        this.warmPoolRefillDeferred = true;
-        break;
-      }
       this.startWarmWorker();
     }
   }
@@ -1732,6 +1746,9 @@ export class ActionEngine {
         this.warmWorkerStartFailed = false;
         this.admitQueuedRoots();
         this.scheduleSurplusRetirement();
+      } else if (worker.state === "running") {
+        worker.hasBeenReady = true;
+        this.warmWorkerStartFailed = false;
       }
     };
     // A failed spawn emits `error` with no pid and may never emit `exit`.

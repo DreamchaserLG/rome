@@ -929,13 +929,14 @@ describe("ActionEngine", () => {
         await engine.stopWorkerWarmPool();
       });
 
-      it("defers the recovery refill while it would take a reserved slot", async () => {
+      it("lets a fail-fast caller at the cap take a refill worker that is still starting", async () => {
         const registry = new ActionRegistryImpl();
         registry.register(buildAction("root"));
         const { children, actionWorkerFork } = installFakeChildProcessFactory({
           autoRespond: false,
         });
-        // Cap 3 keeps two slots back, so the busy fallback fills the queued-root slot.
+        // Cap 3 keeps two slots back. The busy fallback fills the queued-root
+        // slot and the recovery refill starts in a reserved one.
         const engine = new ActionEngine(registry, createActionEngineRepos(), {
           processRole: "main",
           workerWarmPoolSize: 1,
@@ -951,27 +952,58 @@ describe("ActionEngine", () => {
         await engine.dispatch("root", {});
         await rs.waitFor(() => expect(actionMessages(children[1])).toHaveLength(1));
         children[1].emit("message", ready);
-        await settle();
-        expect(children).toHaveLength(2);
+        await rs.waitFor(() => expect(children).toHaveLength(3));
 
         const failFast = [engine.run("root", {}), engine.run("root", {})];
         await rs.waitFor(() => expect(children).toHaveLength(4));
-        children[2].completeNext();
+        expect(actionMessages(children[3])).toHaveLength(1);
+        expect(actionMessages(children[2])).toHaveLength(1);
         children[3].completeNext();
+        children[2].emit("message", ready);
+        children[2].completeNext();
         await expect(Promise.all(failFast)).resolves.toEqual([
           { status: "ok", data: "root" },
           { status: "ok", data: "root" },
         ]);
-        expect(children).toHaveLength(4);
 
-        // The fallback's exit frees its slot, so the deferred refill runs.
-        children[1].completeNext();
-        await rs.waitFor(() => expect(children).toHaveLength(5));
-        children[4].emit("message", ready);
+        // The taken worker returns to the pool, so the next run is warm.
         const next = engine.run("root", {});
-        await rs.waitFor(() => expect(actionMessages(children[4])).toHaveLength(1));
-        children[4].completeNext();
+        await rs.waitFor(() => expect(actionMessages(children[2])).toHaveLength(2));
+        children[2].completeNext();
         await expect(next).resolves.toEqual({ status: "ok", data: "root" });
+        expect(children).toHaveLength(4);
+        children[1].completeNext();
+        await engine.stopWorkerWarmPool();
+      });
+
+      it("treats a taken starting worker that dies before ready as a failed start", async () => {
+        const { engine, children } = createWarmEngine(4);
+        const submit = engine.run("submit", {}, queue);
+        await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+        await engine.dispatch("explain", {});
+        await rs.waitFor(() => expect(children).toHaveLength(2));
+        const cold = [engine.run("root", {}), engine.run("root", {})];
+        await rs.waitFor(() => expect(children).toHaveLength(4));
+        const taken = engine.run("root", {}).catch((err: unknown) => err);
+        await rs.waitFor(() =>
+          expect(actionMessages(children[1])).toMatchObject([{ actionName: "root" }]),
+        );
+
+        children[1].exitCode = 1;
+        children[1].emit("exit", 1, null);
+        await expect(taken).resolves.toMatchObject({ name: "ActionWorkerExitError" });
+        children[2].completeNext();
+        children[3].completeNext();
+        await Promise.all(cold);
+
+        // A failed start sends the queued root to a single-use fork, which
+        // gets its payload without waiting for ready.
+        await rs.waitFor(() =>
+          expect(actionMessages(children[4])).toMatchObject([{ actionName: "explain" }]),
+        );
+        children[4].completeNext();
+        children[0].completeNext();
+        await submit;
         await engine.stopWorkerWarmPool();
       });
 
