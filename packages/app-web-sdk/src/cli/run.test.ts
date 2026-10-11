@@ -134,12 +134,18 @@ describe("rome run server", () => {
       body: "{}",
     });
     const sandboxed = await get(port, "/__rome", { headers: { origin: "null" } });
+    const crossSiteGet = await get(port, "/api/apps/%40me%2Fdemo/events", {
+      headers: { "sec-fetch-site": "cross-site" },
+    });
+    const typedUrl = await get(port, "/__rome", { headers: { "sec-fetch-site": "none" } });
     const sameOrigin = await get(port, "/__rome", {
       headers: { origin: `http://127.0.0.1:${port}` },
     });
 
-    expect([rebound.status, crossSite.status, sandboxed.status]).toEqual([403, 403, 403]);
-    expect(sameOrigin.status).toBe(200);
+    expect([rebound.status, crossSite.status, sandboxed.status, crossSiteGet.status]).toEqual([
+      403, 403, 403, 403,
+    ]);
+    expect([sameOrigin.status, typedUrl.status]).toEqual([200, 200]);
   });
 
   it("serves a scoped app's assets under its encoded id, and nothing outside the web dir", async () => {

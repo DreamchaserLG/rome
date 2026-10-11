@@ -95,6 +95,7 @@ export async function runRun(argv: string[]): Promise<void> {
     await runBuild();
   }
 
+  const actionNames: string[] = [];
   const testApp = await createTestApp({
     appId: app.manifest.id,
     tablePrefix: app.tablePrefix,
@@ -107,10 +108,15 @@ export async function runRun(argv: string[]): Promise<void> {
       // Only another app's or the system's actions are out of reach here. A
       // name of this app's that was never registered is a plain miss.
       if (!name.includes(":") || name.startsWith(`${app.manifest.id}:`)) {
+        const prefixed = `${app.manifest.id}:${name}`;
+        const hint =
+          !name.includes(":") && actionNames.includes(name)
+            ? `; Rome resolves this app's actions by full name, "${prefixed}"`
+            : "";
         throw new ActionInvocationError(
           name,
           "not_found",
-          `No action "${name}" in ${app.manifest.id}`,
+          `No action "${name}" in ${app.manifest.id}${hint}`,
         );
       }
       process.stderr.write(
@@ -120,7 +126,6 @@ export async function runRun(argv: string[]): Promise<void> {
     },
   });
 
-  const actionNames: string[] = [];
   for (const { config, factory } of await loadActionModules(app)) {
     await testApp.action(config.name, factory, config);
     actionNames.push(config.name);
@@ -219,8 +224,9 @@ export async function handleRunRequest(
 
 async function route(req: IncomingMessage, res: ServerResponse, ctx: RunContext): Promise<void> {
   // Every route acts as the guardian. Only this machine's own pages may call
-  // them: a rebound DNS name fails the Host check, and another site's page
-  // fails the Origin check.
+  // them: a rebound DNS name fails the Host check, another site's page fails
+  // the Origin check, and its cross-site GETs (which carry no Origin) fail the
+  // Sec-Fetch-Site check. Another dev server on localhost counts as same-site.
   const local = [`127.0.0.1:${ctx.options.port}`, `localhost:${ctx.options.port}`];
   if (!local.includes(req.headers.host ?? "")) {
     return sendJson(res, 403, { error: `rome run only answers on ${local.join(" or ")}` });
@@ -228,6 +234,10 @@ async function route(req: IncomingMessage, res: ServerResponse, ctx: RunContext)
   const origin = req.headers.origin;
   if (origin && !local.some((host) => origin === `http://${host}`)) {
     return sendJson(res, 403, { error: `rome run does not answer pages from ${origin}` });
+  }
+  const fetchSite = req.headers["sec-fetch-site"];
+  if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") {
+    return sendJson(res, 403, { error: `rome run does not answer ${fetchSite} requests` });
   }
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   // URLs carry the app id the way the host writes it: `@me/app` → `%40me%2Fapp`.
