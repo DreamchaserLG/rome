@@ -195,7 +195,10 @@ export function channelMessage(
 }
 
 const actionContextStore = new AsyncLocalStorage<CurrentActionContext>();
-let contextHooksInstalled = false;
+const resolveTestContext = () => actionContextStore.getStore();
+// Like the host's runner, a patch outside any turn runs without a context.
+const runTestContext = <T>(patch: CurrentActionContext, run: () => Promise<T>): Promise<T> =>
+  actionContextStore.getStore() ? withActionContext(patch, run) : run();
 
 /**
  * Run `fn` as a turn on a channel conversation, so `getCurrentActionContext()`
@@ -208,14 +211,10 @@ export function withActionContext<T>(
   context: CurrentActionContext,
   fn: () => Promise<T>,
 ): Promise<T> {
-  if (!contextHooksInstalled) {
-    setCurrentActionContextResolver(() => actionContextStore.getStore());
-    // Like the host's runner, a patch outside any turn runs without a context.
-    setCurrentActionContextRunner((patch, run) =>
-      actionContextStore.getStore() ? withActionContext(patch, run) : run(),
-    );
-    contextHooksInstalled = true;
-  }
+  // Installed on every call, since other code in the process can replace the
+  // global hooks between calls.
+  setCurrentActionContextResolver(resolveTestContext);
+  setCurrentActionContextRunner(runTestContext);
   const outer = actionContextStore.getStore();
   if (!outer) return actionContextStore.run(context, fn);
   return actionContextStore.run(

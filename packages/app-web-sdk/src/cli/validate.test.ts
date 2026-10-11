@@ -56,9 +56,16 @@ describe("devOnlyImports", () => {
     // Not reachable from an action, hook or the API: the build's test helpers.
     write(root, "dist/test-only.js", 'import "vitest";\n');
 
-    expect((await devOnlyImports(app)).sort()).toEqual([
+    expect((await devOnlyImports(app)).missing.sort()).toEqual([
       "dist/api/index.js imports vitest",
       "dist/lib/helper.js imports @rstest/core",
     ]);
+  });
+
+  it("reports nothing scanned when the app has only TypeScript source", async () => {
+    write(root, "dist/actions/note/index.ts", 'import { vi } from "vitest";\n');
+    write(root, "dist/api/index.ts", "export default {};\n");
+
+    expect(await devOnlyImports(app)).toEqual({ missing: [], scanned: 0 });
   });
 });

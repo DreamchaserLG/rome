@@ -59,14 +59,18 @@ export async function runValidate(argv: string[]): Promise<void> {
   }
   process.stdout.write(`✓ pack: ${app.manifest.id}@${app.manifest.version}\n`);
 
-  const missing = await devOnlyImports(app);
+  const { missing, scanned } = await devOnlyImports(app);
   if (missing.length > 0) {
     throw new CliError(
       `✗ imports: ${missing.join("; ")}. An install skips devDependencies; move them to dependencies.`,
       1,
     );
   }
-  process.stdout.write("✓ imports: every runtime package is a dependency\n");
+  process.stdout.write(
+    scanned > 0
+      ? "✓ imports: every runtime package is a dependency\n"
+      : "- imports: no compiled .js modules found, so the dependency check was skipped\n",
+  );
 
   try {
     const actions = await loadActionModules(app);
@@ -83,10 +87,12 @@ export async function runValidate(argv: string[]): Promise<void> {
 /** Each bare import in the code the host loads (action and hook directories,
  *  the API entry, and the files they import) whose package an install's
  *  `pnpm install --prod` leaves out, as "file imports pkg". */
-export async function devOnlyImports(app: AppOnDisk): Promise<string[]> {
+export async function devOnlyImports(
+  app: AppOnDisk,
+): Promise<{ missing: string[]; scanned: number }> {
   await initLexer;
   const pkgPath = join(app.appDir, "package.json");
-  if (!existsSync(pkgPath)) return [];
+  if (!existsSync(pkgPath)) return { missing: [], scanned: 0 };
   const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as Record<string, Record<string, string>>;
   const installed = new Set([
     ...Object.keys(pkg.dependencies ?? {}),
@@ -113,7 +119,9 @@ export async function devOnlyImports(app: AppOnDisk): Promise<string[]> {
   const found = new Set<string>();
   while (queue.length > 0) {
     const file = queue.pop()!;
-    if (seen.has(file)) continue;
+    // Only compiled modules are read; an app run from TypeScript source is
+    // reported as unchecked rather than passed.
+    if (seen.has(file) || !SCRIPT.test(file) || !existsSync(file)) continue;
     seen.add(file);
     // A lexer, not a regex, so a specifier in a comment or string is not read
     // as an import. Dynamic imports with a computed specifier have no name.
@@ -128,7 +136,7 @@ export async function devOnlyImports(app: AppOnDisk): Promise<string[]> {
       }
     }
   }
-  return [...found];
+  return { missing: [...found], scanned: seen.size };
 }
 
 const SCRIPT = /\.(?:js|mjs|cjs)$/;
