@@ -1,4 +1,4 @@
-import { AsyncResource } from "node:async_hooks";
+import { AsyncLocalStorage, AsyncResource } from "node:async_hooks";
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { describe, it, expect, rs, afterEach } from "@rstest/core";
@@ -662,6 +662,41 @@ describe("ActionEngine", () => {
         await engine.stopWorkerWarmPool();
       });
 
+      it("retires surplus workers after a burst while sparse traffic continues", async () => {
+        const { engine, children, clock } = createWarmEngine();
+
+        const submit = engine.run("submit", {}, queue);
+        await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+        await engine.dispatch("explain", {});
+        await engine.dispatch("explain", {});
+        expect(children).toHaveLength(3);
+        children[1].emit("message", ready);
+        children[2].emit("message", ready);
+        await rs.waitFor(() =>
+          expect(children.map((child) => child.pendingActionNames.length)).toEqual([1, 1, 1]),
+        );
+        for (const child of children) child.completeNext();
+        await submit;
+        await settle();
+
+        // One run a minute reuses the same worker, so the other two age out.
+        for (let minute = 0; minute < 7; minute++) {
+          const run = engine.run("root", {});
+          await settle();
+          const serving = children.filter((child) => child.pendingActionNames.length === 1);
+          expect(serving).toHaveLength(1);
+          serving[0].completeNext();
+          await run;
+          await clock.advance("1m");
+        }
+        const retired = children.filter((child) =>
+          child.sent.some((message) => (message as { type?: unknown }).type === "shutdown"),
+        );
+        expect(retired).toHaveLength(2);
+        expect(children).toHaveLength(3);
+        await engine.stopWorkerWarmPool();
+      });
+
       it("falls back to a single-use fork when the new worker exits before ready", async () => {
         const { engine, children, actionWorkerFork } = createWarmEngine();
 
@@ -763,7 +798,7 @@ describe("ActionEngine", () => {
       });
 
       it("takes single-use forks while a pooled worker is overdue for ready", async () => {
-        const { engine, children, clock } = createWarmEngine(4);
+        const { engine, children, clock } = createWarmEngine();
 
         const submit = engine.run("submit", {}, queue);
         await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
@@ -823,6 +858,74 @@ describe("ActionEngine", () => {
         children[0].completeNext();
         await expect(run).resolves.toEqual({ status: "ok", data: "root" });
         expect(actionWorkerFork).toHaveBeenCalledTimes(3);
+        await engine.stopWorkerWarmPool();
+      });
+
+      it("keeps the reserved slots free while pooled workers are overdue for ready", async () => {
+        const { engine, children, clock } = createWarmEngine();
+
+        const submit = engine.run("submit", {}, queue);
+        await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+        for (let i = 0; i < 5; i++) await engine.dispatch("explain", {});
+        expect(children).toHaveLength(6);
+
+        // The five overdue workers and the busy one fill the queued-root slots,
+        // so the waiting roots fork nothing and both fail-fast roots still run.
+        await clock.advance("1m");
+        await settle();
+        expect(children).toHaveLength(6);
+        const failFast = [engine.run("root", {}), engine.run("root", {})];
+        await rs.waitFor(() => expect(children).toHaveLength(8));
+        children[6].completeNext();
+        children[7].completeNext();
+        await expect(Promise.all(failFast)).resolves.toEqual([
+          { status: "ok", data: "root" },
+          { status: "ok", data: "root" },
+        ]);
+
+        for (const child of children.slice(1, 6)) child.emit("message", ready);
+        await rs.waitFor(() =>
+          expect(children.slice(1, 6).map((child) => actionMessages(child).length)).toEqual([
+            1, 1, 1, 1, 1,
+          ]),
+        );
+        for (const child of children) if (child.pendingActionNames.length) child.completeNext();
+        await submit;
+        await engine.stopWorkerWarmPool();
+      });
+
+      it("refills the pool once a fork reaches ready after a stopped start", async () => {
+        const registry = new ActionRegistryImpl();
+        registry.register(buildAction("root"));
+        const clock = new FakeClock();
+        const { children, actionWorkerFork } = installFakeChildProcessFactory({
+          autoRespond: false,
+        });
+        const engine = new ActionEngine(registry, createActionEngineRepos(), {
+          processRole: "main",
+          workerWarmPoolSize: 1,
+          actionWorkerFork,
+          clock,
+        });
+        engine.startWorkerWarmPool();
+        await clock.advance("5m");
+        expect(children[0].sent).toContainEqual(shutdown);
+        await settle();
+
+        const run = engine.run("root", {});
+        await rs.waitFor(() => expect(actionMessages(children[1])).toHaveLength(1));
+        expect(children).toHaveLength(2);
+        children[1].emit("message", ready);
+        expect(children).toHaveLength(3);
+        children[1].completeNext();
+        await run;
+
+        children[2].emit("message", ready);
+        const next = engine.run("root", {});
+        await rs.waitFor(() => expect(actionMessages(children[2])).toHaveLength(1));
+        children[2].completeNext();
+        await expect(next).resolves.toEqual({ status: "ok", data: "root" });
+        expect(children).toHaveLength(3);
         await engine.stopWorkerWarmPool();
       });
 
@@ -916,17 +1019,22 @@ describe("ActionEngine", () => {
         await engine.stopWorkerWarmPool();
       });
 
-      it("keeps the forking request's actor out of a new worker's calls to main", async () => {
+      it("keeps the forking request's async context out of a new worker's calls to main", async () => {
         const { engine, children } = createWarmEngine();
+        // Stands in for every other request-scoped store: span, session, app API.
+        const requestScope = new AsyncLocalStorage<string>();
         engine.setWorkerRpcServer({
           register(rpc: IpcRpc) {
-            rpc.handle("probe", async () => ({ actor: (await currentSessionActor()) ?? null }));
+            rpc.handle("probe", async () => ({
+              actor: (await currentSessionActor()) ?? null,
+              scope: requestScope.getStore() ?? null,
+            }));
           },
         } as unknown as WorkerRpcServer);
 
         const guardian: SessionActor = { kind: "guardian", userId: "guardian-1", via: "cookie" };
-        const { submit } = await runWithSessionActor(guardian, () =>
-          submitThenDispatch(engine, children[0]),
+        const { submit } = await requestScope.run("request-1", () =>
+          runWithSessionActor(guardian, () => submitThenDispatch(engine, children[0])),
         );
         expect(children).toHaveLength(2);
 
@@ -940,7 +1048,7 @@ describe("ActionEngine", () => {
           expect(children[1].sent).toContainEqual({
             type: "rpc_response",
             reqId: "r1",
-            result: { actor: null },
+            result: { actor: null, scope: null },
           }),
         );
 
