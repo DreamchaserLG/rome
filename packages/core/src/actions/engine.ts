@@ -1390,7 +1390,9 @@ export class ActionEngine {
   /** Whether a queued root may take a single-use fork. A starting warm worker
    * holds a slot that a fail-fast caller cannot use, so it counts toward
    * `queuedRootSlots()` like a busy one. Otherwise forks beside workers that
-   * are slow to become ready could take the reserved slots. */
+   * are slow to become ready could take the reserved slots. At a cap of 3 or
+   * lower that leaves one queued-root slot, so a hung starting worker holds
+   * queued roots until main stops it. */
   private canForkForQueuedRoot(): boolean {
     return (
       this.liveWorkers.size < this.maxWorkerProcesses &&
@@ -1728,7 +1730,8 @@ export class ActionEngine {
   /** Forks a pooled worker into the warm pool. It turns idle on its ready
    * message and goes to the first queued root, if any. A worker slow to send
    * ready keeps running until WARM_WORKER_START_ABANDON_MS, since a slow start
-   * is not a failed one. */
+   * is not a failed one. The deadlines also cover a worker a caller took while
+   * it was starting, so a hung start cannot hold that caller's slot. */
   private startWarmWorker(): void {
     const worker = this.createWorkerProcess({ pooled: true, detached: true });
     this.warmWorkers.add(worker);
@@ -1758,15 +1761,16 @@ export class ActionEngine {
       this.warmWorkerStartFailed = true;
       void this.stopWorker(worker);
     };
+    const startEnded = () => worker.hasBeenReady || worker.state === "stopping";
     let readyDeadline = this.clock.setTimeout(() => {
-      if (worker.state !== "starting") return;
+      if (startEnded()) return;
       log.warn("warm action worker is slow to become ready", {
         timeoutMs: WARM_WORKER_READY_TIMEOUT_MS,
       });
       worker.readyOverdue = true;
       this.warmWorkerStartFailed = true;
       readyDeadline = this.clock.setTimeout(() => {
-        if (worker.state !== "starting") return;
+        if (startEnded()) return;
         log.warn("stopping a warm action worker that never became ready", {
           timeoutMs: WARM_WORKER_START_ABANDON_MS,
         });

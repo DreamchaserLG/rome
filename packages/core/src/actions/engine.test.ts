@@ -976,6 +976,45 @@ describe("ActionEngine", () => {
         await engine.stopWorkerWarmPool();
       });
 
+      it("stops a taken starting worker that never becomes ready", async () => {
+        const registry = new ActionRegistryImpl();
+        registry.register(buildAction("root"));
+        const clock = new FakeClock();
+        const { children, actionWorkerFork } = installFakeChildProcessFactory({
+          autoRespond: false,
+        });
+        const engine = new ActionEngine(registry, createActionEngineRepos(), {
+          processRole: "main",
+          workerWarmPoolSize: 1,
+          maxWorkerProcesses: 3,
+          actionWorkerFork,
+          clock,
+        });
+        engine.startWorkerWarmPool();
+        children[0].exitCode = 1;
+        children[0].emit("exit", 1, null);
+        await settle();
+
+        await engine.dispatch("root", {});
+        await rs.waitFor(() => expect(actionMessages(children[1])).toHaveLength(1));
+        children[1].emit("message", ready);
+        await rs.waitFor(() => expect(children).toHaveLength(3));
+
+        const failFast = [engine.run("root", {}), engine.run("root", {}).catch((err) => err)];
+        await rs.waitFor(() => expect(children).toHaveLength(4));
+        expect(actionMessages(children[2])).toHaveLength(1);
+        children[3].completeNext();
+        await expect(failFast[0]).resolves.toEqual({ status: "ok", data: "root" });
+
+        await clock.advance("299s");
+        expect(children[2].sent).not.toContainEqual(shutdown);
+        await clock.advance("1s");
+        expect(children[2].sent).toContainEqual(shutdown);
+        await expect(failFast[1]).resolves.toMatchObject({ name: "ActionWorkerExitError" });
+        children[1].completeNext();
+        await engine.stopWorkerWarmPool();
+      });
+
       it("treats a taken starting worker that dies before ready as a failed start", async () => {
         const { engine, children } = createWarmEngine(4);
         const submit = engine.run("submit", {}, queue);
