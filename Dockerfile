@@ -210,6 +210,18 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     git lfs version && \
     printf '%s\n' "$BROWSER_BINARY" > /etc/rome-browser-binary
 
+# App installs run pnpm in this container (runPnpm in
+# packages/core/src/apps/packaging/pack.ts). pnpm runs `node-gyp rebuild` for
+# every approved dependency that has a binding.gyp and no install script, even
+# one that ships prebuilt binaries, and node-gyp looks for make before it builds
+# anything. g++ compiles the addons that do build from source. python3, the
+# third node-gyp requirement, is in the list above. The fetch stage and
+# infra/rome/Dockerfile install the same toolchain. The cost is about 240 MB
+# uncompressed.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends make g++
+
 # Runtime libraries for the WeChat personal-account connection. The client
 # itself is 744 MB and is fetched into a volume when a guardian connects, so it
 # is deliberately not baked in; these are its shared libraries, which are 37 MB

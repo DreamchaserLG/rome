@@ -15,6 +15,7 @@ Build runs the app's own toolchain. Pack snapshots the build output and the [man
 - Every packed artifact carries positive proof that pack produced it. Classifying a directory as a packed artifact keys on that proof, never on the absence of source markers ([declared install mode](../concepts/apps.md#lifecycle-operations)).
 - Pack is deterministic: identical source packs to an identical artifact hash. Nothing time-, host-, or process-dependent enters the artifact.
 - A packed artifact never ships installed dependency modules. Materialize resolves the declared dependency graph on the install host, so native modules match the host runtime.
+- The container image ships the node-gyp toolchain: python3, make, and g++. In the container, source builds and materialize can run an approved dependency build script that compiles a native module. pnpm runs `node-gyp rebuild` for every approved dependency that has a `binding.gyp` and no install script, even one that ships prebuilt binaries.
 - A dependency the artifact does not declare does not exist after materialize. Dependency resolution is fenced from any enclosing workspace, so a reference that resolves only in the author's checkout fails here.
 - Store-page metadata never enters the handoff. Pack excludes the store sidecar from the packed artifact and from every hash that addresses it, so store assets never reach an install.
 - An app can publish its source in the same packed artifact. If `app.yaml#includeSource` is `true`, pack keeps the root `src/` directory. The artifact hash covers that source.

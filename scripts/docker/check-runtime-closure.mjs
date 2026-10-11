@@ -78,6 +78,20 @@ async function main() {
       'node /opt/rome/packages/rome-node-cli/bin/rome-node.js --help >/dev/null || { echo "Rome Node CLI is not runnable" >&2; exit 1; }',
     ].join("\n"),
   ]);
+  run("docker", [
+    "run",
+    "--rm",
+    "--network",
+    "none",
+    "--volume",
+    `${path.join(scriptDir, "check-native-addon-build.sh")}:/rome-check/check-native-addon-build.sh:ro`,
+    "--entrypoint",
+    "rome-run-as",
+    imageTag,
+    "rome",
+    "bash",
+    "/rome-check/check-native-addon-build.sh",
+  ]);
 
   console.log("Docker runtime closure check passed.");
 }

@@ -19,6 +19,21 @@ for (const dockerfile of ["Dockerfile", "infra/rome/Dockerfile"]) {
   });
 }
 
+test("the production image installs the node-gyp toolchain that app installs run", async () => {
+  const source = await readFile(join(root, "Dockerfile"), "utf8");
+  const stage = source.split(/^FROM /m).find((block) => /^\S+ AS production\b/.test(block));
+  assert.ok(stage, "Dockerfile has no production stage");
+  // Docker drops comment lines inside a continued RUN, so a package named only
+  // in a comment does not count.
+  const commands = stage.replace(/^\s*#.*\n/gm, "").replaceAll("\\\n", " ");
+  const packages = new Set(
+    [...commands.matchAll(/apt-get install ([^&\n]*)/g)].flatMap((match) => match[1].split(/\s+/)),
+  );
+  for (const name of ["python3", "make", "g++"]) {
+    assert.ok(packages.has(name), `production stage does not apt-get install ${name}`);
+  }
+});
+
 for (const endpoint of [undefined, "http://chrome:9333"]) {
   test(`shell startup does not inject a browser endpoint (${endpoint ?? "unset"})`, () => {
     const output = execFileSync(
