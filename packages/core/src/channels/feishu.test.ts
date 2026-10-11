@@ -1071,6 +1071,26 @@ describe("FeishuAdapter history", () => {
     expect(messages.map((m) => m.messageId)).toStrictEqual(["om_b", "om_a"]);
   });
 
+  it("reads at most three groups at a time", async () => {
+    for (const id of ["oc_a", "oc_b", "oc_c", "oc_d", "oc_e"]) {
+      await channel.emit({ chatId: id, chatType: "group", mentionedBot: true });
+    }
+    let inFlight = 0;
+    let peak = 0;
+    channel.rawClient.im.v1.message.list = (async () => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight--;
+      return { code: 0, data: { items: [historyItem()] } };
+    }) as never;
+
+    const messages = await adapter.fetchHistory(null, new Date(0), 100);
+
+    expect(messages).toHaveLength(5);
+    expect(peak).toBe(3);
+  });
+
   it("skips a group it cannot read when another group answers", async () => {
     await channel.emit({ chatId: "oc_a", chatType: "group", mentionedBot: true });
     await channel.emit({ chatId: "oc_b", chatType: "group", mentionedBot: true });

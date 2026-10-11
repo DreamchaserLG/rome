@@ -29,6 +29,7 @@ const TEXT_BEARING_CONTENT_TYPES: ReadonlySet<string> = new Set(["text", "post"]
 const HISTORY_PAGE_SIZE = 50;
 /** Pages one chat's history read may take, which bounds a read at 1,000 messages. */
 const MAX_HISTORY_PAGES = 20;
+const HISTORY_CHAT_CONCURRENCY = 3;
 
 export interface FeishuConfig {
   appId: string;
@@ -249,9 +250,21 @@ export class FeishuAdapter {
   async fetchHistory(chatId: string | null, since: Date, limit: number): Promise<ChannelMessage[]> {
     if (chatId !== null) return this.fetchChatHistory(chatId, since, limit);
     const chatIds = [...this.observedConversations.keys()];
-    const perChat = await Promise.allSettled(
-      chatIds.map((id) => this.fetchChatHistory(id, since, limit)),
+    // A few chats at a time, so a bot in many groups stays under Feishu's
+    // per-app rate limit on `message.list`.
+    const perChat = new Array<PromiseSettledResult<ChannelMessage[]>>(chatIds.length);
+    let next = 0;
+    const readers = Array.from(
+      { length: Math.min(HISTORY_CHAT_CONCURRENCY, chatIds.length) },
+      async () => {
+        for (let i = next++; i < chatIds.length; i = next++) {
+          [perChat[i]] = await Promise.allSettled([
+            this.fetchChatHistory(chatIds[i], since, limit),
+          ]);
+        }
+      },
     );
+    await Promise.all(readers);
     const failures = perChat.flatMap((result, i) =>
       result.status === "rejected" ? [{ chatId: chatIds[i], reason: result.reason }] : [],
     );
