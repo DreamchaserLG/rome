@@ -864,6 +864,48 @@ Takeaways:
   (`appContext.runAction("system:summon", { agentName: "assistant:assistant", prompt, sessionId? })`).
   Do not call `agentRunner.run` directly on agents that aren't yours.
 
+### Testing: `@rome-os/app-runtime/testing`
+
+The test kit runs an app's actions, API handler and `app-started` hook in a plain `rstest` process, with no Rome daemon. Each app is wired the way the host wires it:
+
+- the app's real migrations, run into an in-memory SQLite;
+- a fake `channelsService` over a fixed message history;
+- in-memory settings;
+- an action registry behind `appContext.runAction`.
+
+It needs `better-sqlite3` as a dev dependency, and `allowBuilds: { better-sqlite3: true }` in the app's `pnpm-workspace.yaml`.
+
+```ts
+import { channelMessage, createTestApp } from "@rome-os/app-runtime/testing";
+import { createAction as createQuote } from "../src/actions/quote/index.js";
+import { createApiHandler } from "../src/api/index.js";
+import { createHook } from "../src/hooks/app-started/index.js";
+
+const app = await createTestApp({
+  appId: "sales-agent",
+  tablePrefix: "sales_agent",
+  migrationsFolder: new URL("../src/db/migrations", import.meta.url),
+  channelHistory: [channelMessage({ channel: "feishu", text: "Acme wants 20 seats" })],
+});
+await app.start(createHook);                       // runs onAppStarted
+await app.action("quote", createQuote);            // createAction(config, app.deps)
+
+// A mention in a Feishu group: getCurrentActionContext().channelContext is set inside.
+const result = await app.inChannel(
+  { channel: "feishu", threadId: "oc_sales", channelUserId: "ou_mei", threadType: "group" },
+  () => app.runAction("quote", { lines: [{ sku: "PRO", quantity: 20 }] }),
+);
+
+const state = await app.api(createApiHandler).request("GET", "state"); // { status, body }
+app.close();
+```
+
+- `app.runAction` crosses a JSON boundary like the host does. A `Date` in a result arrives as a string.
+- Calling an action that was never registered rejects with `ActionInvocationError`, as the host does.
+- `app.channels.queries` and `app.channels.sent` record every read and send.
+- Favors, routines and the agent runner reject with a message that names the service. Pass a fake through `createTestApp({ deps })` when an action needs one.
+- Keep test helpers outside `src/` (for example in `<app-root>/test/`). `rome build` compiles everything under `src/` except `*.test.ts`.
+
 ---
 
 ## Frontend SDK: `@rome-os/app-web-sdk`
