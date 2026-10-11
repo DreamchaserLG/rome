@@ -108,7 +108,7 @@ async function openInMemorySqlite(Database?: SqliteConstructor): Promise<SqliteH
       return new (require(specifier) as SqliteConstructor)(":memory:");
     } catch (err) {
       throw new Error(
-        `createTestDb needs better-sqlite3. Add it to the app's optionalDependencies (pnpm add -O better-sqlite3) and allow its build in pnpm-workspace.yaml (allowBuilds: { better-sqlite3: true }). Cause: ${
+        `createTestDb needs better-sqlite3. Add it to the app's devDependencies (pnpm add -D better-sqlite3) and allow its build in pnpm-workspace.yaml (allowBuilds: { better-sqlite3: true }). Cause: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );

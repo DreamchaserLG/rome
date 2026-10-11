@@ -16,7 +16,6 @@ import {
 import { appIdToPathSegment } from "@rome-os/app-runtime/packaging";
 import { createTestApp, type SqliteConstructor, type TestApp } from "@rome-os/app-runtime/testing";
 import {
-  artifactPaths,
   loadActionModules,
   loadApiFactory,
   loadHookFactory,
@@ -129,8 +128,13 @@ export async function runRun(argv: string[]): Promise<void> {
     actionNames.push(config.name);
   }
 
-  for (const path of artifactPaths(app.manifest, "hooks")) {
-    if (basename(path) !== "app-started") {
+  for (const entry of app.manifest.hooks ?? []) {
+    const path = typeof entry === "string" ? entry : entry.path;
+    // The host dispatches by public name: the entry's own, else the file name
+    // without its extension (`defaultPublicName` in core's installer).
+    const publicName =
+      (typeof entry === "string" ? undefined : entry.publicName) ?? basename(path, extname(path));
+    if (publicName !== "app-started") {
       process.stdout.write(`  hook ${path}: not delivered by rome run\n`);
       continue;
     }
@@ -226,6 +230,7 @@ async function route(req: IncomingMessage, res: ServerResponse, ctx: RunContext)
   if (path === "/favicon.ico") return void res.writeHead(204).end();
   if (path === `/apps/${id}` || path.startsWith(`/apps/${id}/`)) return sendHostPage(res, ctx, url);
   if (path === "/__rome/host-themes.css") return sendFile(res, HOST_THEMES_CSS);
+  if (path === "/__rome/host-mount.js") return sendFile(res, HOST_MOUNT_JS);
   if (path.startsWith(`/app-assets/${id}/`)) return sendAsset(res, ctx, path);
   if (path === `/api/apps/${id}` || path.startsWith(`/api/apps/${id}/`))
     return proxyApi(req, res, ctx, url);
@@ -366,20 +371,17 @@ function sendHostPage(res: ServerResponse, ctx: RunContext, url: URL): void {
   );
 }
 
-const HOST_THEMES_CSS = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  "assets",
-  "host-themes.css",
-);
+const ASSETS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "assets");
+const HOST_THEMES_CSS = join(ASSETS_DIR, "host-themes.css");
+const HOST_MOUNT_JS = join(ASSETS_DIR, "host-mount.js");
 
 /**
  * The dashboard's page host, reduced to what an app sees: the theme tokens on
  * <html>, a shadow root with the app canvas alias, the app's own CSS scoped
  * into it (`:root` → `:host`, relative urls resolved), and `mount(root,
  * bootstrap)`. Mirrors `prepareShadowMount` and `appendScopedStyles` in
- * packages/web/src/components/rome-app-host.tsx.
+ * packages/web/src/components/rome-app-host.tsx. The CSS handling lives in
+ * assets/host-mount.js, which that component's test checks against it.
  */
 function hostPage(input: {
   title: string;
@@ -406,27 +408,21 @@ function hostPage(input: {
 <body>
 <div id="rome-app-host"></div>
 <script type="module">
+import { PAGE_SHELL_CSS, scopeAppCss } from "/__rome/host-mount.js";
 const bootstrap = ${json(input.bootstrap)};
 const entryUrl = ${json(input.entryUrl)};
 const styleUrls = ${json(input.styleUrls)};
-const skip = (u) => u.startsWith("/") || u.startsWith("#") || u.startsWith("data:") || u.startsWith("http:") || u.startsWith("https:") || u.startsWith("//");
-function scope(css, source) {
-  return css
-    .replace(/@import\\s+(url\\()?\\s*(['"]?)([^'")\\s]+)\\2\\s*\\)?/g, (m, p, _q, u) => skip(u) ? m : (p ? '@import url("' + new URL(u, source) + '")' : '@import "' + new URL(u, source) + '"'))
-    .replace(/url\\(\\s*(['"]?)([^'")]+)\\1\\s*\\)/g, (m, _q, u) => skip(u) ? m : 'url("' + new URL(u, source) + '")')
-    .replaceAll(":root", ":host");
-}
 try {
   const host = document.getElementById("rome-app-host");
   const shadow = host.attachShadow({ mode: "open" });
   const shell = document.createElement("style");
-  shell.textContent = ":host { --background: var(--app-canvas); background-color: var(--background); display: block; min-height: inherit; }";
+  shell.textContent = PAGE_SHELL_CSS;
   shadow.append(shell);
   for (const url of styleUrls) {
     const response = await fetch(url);
     if (!response.ok) throw new Error("Failed to load app stylesheet: " + response.status + " " + url);
     const style = document.createElement("style");
-    style.textContent = scope(await response.text(), new URL(url, location.href).toString());
+    style.textContent = scopeAppCss(await response.text(), new URL(url, location.href).toString());
     shadow.append(style);
   }
   const body = document.createElement("body");
