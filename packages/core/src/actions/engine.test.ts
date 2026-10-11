@@ -710,21 +710,84 @@ describe("ActionEngine", () => {
         await engine.stopWorkerWarmPool();
       });
 
-      it("falls back to a single-use fork when the new worker never becomes ready", async () => {
+      it("falls back to a single-use fork when the new worker is slow to become ready", async () => {
         const { engine, children, clock } = createWarmEngine();
 
         const { submit } = await submitThenDispatch(engine, children[0]);
         await clock.advance("59s");
         expect(children).toHaveLength(2);
         await clock.advance("1s");
-        expect(children[1].sent).toContainEqual(shutdown);
         await rs.waitFor(() =>
           expect(actionMessages(children[2])).toMatchObject([{ actionName: "explain" }]),
         );
+        expect(children[1].sent).not.toContainEqual(shutdown);
 
+        // The slow worker still joins the pool once it reaches ready.
+        children[1].emit("message", ready);
         children[2].completeNext();
         children[0].completeNext();
         await submit;
+        await settle();
+        expect(children[1].sent).not.toContainEqual(shutdown);
+        await engine.dispatch("root", {});
+        await settle();
+        expect(children).toHaveLength(3);
+        expect(children.filter((child) => child.pendingActionNames.length === 1)).toHaveLength(1);
+        await engine.stopWorkerWarmPool();
+      });
+
+      it("keeps a boot-time pool worker that is slow to become ready", async () => {
+        const registry = new ActionRegistryImpl();
+        registry.register(buildAction("root"));
+        const clock = new FakeClock();
+        const { children, actionWorkerFork } = installFakeChildProcessFactory({
+          autoRespond: false,
+        });
+        const engine = new ActionEngine(registry, createActionEngineRepos(), {
+          processRole: "main",
+          workerWarmPoolSize: 1,
+          actionWorkerFork,
+          clock,
+        });
+        engine.startWorkerWarmPool();
+        await clock.advance("2m");
+        expect(children[0].sent).not.toContainEqual(shutdown);
+
+        children[0].emit("message", ready);
+        const run = engine.run("root", {});
+        await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+        children[0].completeNext();
+        await expect(run).resolves.toEqual({ status: "ok", data: "root" });
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+        await engine.stopWorkerWarmPool();
+      });
+
+      it("does not wait on a slow worker again after a later worker reaches ready", async () => {
+        const { engine, children, clock } = createWarmEngine();
+
+        const first = await submitThenDispatch(engine, children[0]);
+        await clock.advance("1m");
+        await rs.waitFor(() =>
+          expect(actionMessages(children[2])).toMatchObject([{ actionName: "explain" }]),
+        );
+        children[2].emit("message", ready);
+        children[2].completeNext();
+        await rs.waitFor(() => expect(children[2].sent).toContainEqual(shutdown));
+        children[0].completeNext();
+        await first.submit;
+        await settle();
+
+        // children[1] is still starting, so the next queued root starts its own worker.
+        const second = await submitThenDispatch(engine, children[0]);
+        expect(children).toHaveLength(4);
+        children[3].emit("message", ready);
+        await rs.waitFor(() =>
+          expect(actionMessages(children[3])).toMatchObject([{ actionName: "explain" }]),
+        );
+
+        children[3].completeNext();
+        children[0].completeNext();
+        await second.submit;
         await engine.stopWorkerWarmPool();
       });
 

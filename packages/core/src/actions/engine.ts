@@ -121,9 +121,9 @@ const RESERVED_WORKER_SLOTS = 2;
  * exits. Long enough that a steady stream of requests keeps its workers warm,
  * short enough that a burst does not hold its workers' memory indefinitely. */
 const SURPLUS_WARM_WORKER_IDLE_MS = 5 * 60_000;
-/** How long a pooled worker may take to send ready before main stops it as
- * hung. A cold start takes a few seconds, and queued roots wait on starting
- * workers, so a hung one must not hold them until `queuedRootMaxWaitMs`. */
+/** How long a pooled worker may take to send ready before queued roots stop
+ * waiting on it. A cold start takes a few seconds, and a slow or hung one must
+ * not hold queued roots until `queuedRootMaxWaitMs`. */
 const WARM_WORKER_READY_TIMEOUT_MS = 60_000;
 
 export interface ActionRunContext {
@@ -306,6 +306,9 @@ interface ActionWorkerProcess {
   generation: number;
   retireAfterRun: boolean;
   cancelRequested?: boolean;
+  /** A starting pooled worker past WARM_WORKER_READY_TIMEOUT_MS. Queued roots
+   * no longer wait on it, but it still joins the pool if it reaches ready. */
+  readyOverdue?: boolean;
   useCount: number;
   hasBeenReady: boolean;
   attached: boolean;
@@ -1379,7 +1382,10 @@ export class ActionEngine {
   private startWarmWorkersForQueuedRoots(): boolean {
     const busy = this.liveWorkers.size - this.warmWorkers.size;
     let starting = [...this.warmWorkers].filter(
-      (worker) => worker.state === "starting" && worker.generation === this.workerPoolGeneration,
+      (worker) =>
+        worker.state === "starting" &&
+        !worker.readyOverdue &&
+        worker.generation === this.workerPoolGeneration,
     ).length;
     while (
       starting < this.queuedRoots.length &&
@@ -1650,7 +1656,8 @@ export class ActionEngine {
   }
 
   /** Forks a pooled worker into the warm pool. It turns idle on its ready
-   * message and goes to the first queued root, if any. */
+   * message and goes to the first queued root, if any. A worker slow to send
+   * ready is left running, since stopping it would leave the pool empty. */
   private startWarmWorker(): void {
     const worker = this.createWorkerProcess({ pooled: true, detached: true });
     this.warmWorkers.add(worker);
@@ -1678,13 +1685,12 @@ export class ActionEngine {
       void this.stopWorker(worker);
     };
     const readyDeadline = this.clock.setTimeout(() => {
-      stopListening();
       if (worker.state !== "starting") return;
-      log.warn("warm action worker did not become ready", {
+      log.warn("warm action worker is slow to become ready", {
         timeoutMs: WARM_WORKER_READY_TIMEOUT_MS,
       });
+      worker.readyOverdue = true;
       this.warmWorkerStartFailed = true;
-      void this.stopWorker(worker);
       this.admitQueuedRoots();
     }, WARM_WORKER_READY_TIMEOUT_MS);
     worker.child.on("message", markReady);
