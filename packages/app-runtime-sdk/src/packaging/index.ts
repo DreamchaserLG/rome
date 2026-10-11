@@ -98,3 +98,9 @@ export { hashArtifact, hashWorkspace } from "./hash.js";
 export { packBundle } from "./bundle.js";
 export { resolvePathWithinBase, safeIsDir, safeIsFile } from "./path-utils.js";
 export { widthUnits } from "./width-units.js";
+export {
+  appIdToDisplayName,
+  isDirectoryNonEmpty,
+  materializeTemplate,
+  type TemplateVars,
+} from "./template.js";

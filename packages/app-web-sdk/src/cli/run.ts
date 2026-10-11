@@ -110,8 +110,7 @@ export async function runRun(argv: string[]): Promise<void> {
 
   const actionNames: string[] = [];
   for (const { config, factory } of await loadActionModules(app)) {
-    const action = await testApp.action(config.name, factory, config);
-    await testApp.action(`${app.manifest.id}:${config.name}`, () => action, config);
+    await testApp.action(config.name, factory, config);
     actionNames.push(config.name);
   }
 
@@ -137,12 +136,13 @@ export async function runRun(argv: string[]): Promise<void> {
   const createApiHandler = (await loadApiFactory(app)) as
     | ((ctx: RomeAppContext) => RomeAppApiHandler)
     | null;
-  const api = createApiHandler ? createApiHandler(testApp.appContext) : null;
 
   const server = createServer((req, res) => {
-    handle(req, res, { app, testApp, api, options, actionNames }).catch((err: unknown) => {
-      sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
-    });
+    handle(req, res, { app, testApp, createApiHandler, options, actionNames }).catch(
+      (err: unknown) => {
+        sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+      },
+    );
   });
   await new Promise<void>((resolveListen, reject) => {
     server.once("error", reject);
@@ -153,7 +153,7 @@ export async function runRun(argv: string[]): Promise<void> {
   process.stdout.write(`
 rome run: ${app.manifest.id}@${app.manifest.version}
   UI       ${app.manifest.web ? `${base}/apps/${app.manifest.id}` : "(no web entry)"}
-  API      ${api ? `${base}/api/apps/${app.manifest.id}/` : "(no api entry)"}
+  API      ${createApiHandler ? `${base}/api/apps/${app.manifest.id}/` : "(no api entry)"}
   actions  ${actionNames.join(", ") || "(none)"}
            curl -s -X POST ${base}/__rome/actions/<name> -d '{"args":{}}'
   state    ${base}/__rome
@@ -169,12 +169,23 @@ rome run: ${app.manifest.id}@${app.manifest.version}
 interface Ctx {
   app: AppOnDisk;
   testApp: TestApp;
-  api: RomeAppApiHandler | null;
+  createApiHandler: ((ctx: RomeAppContext) => RomeAppApiHandler) | null;
   options: RunOptions;
   actionNames: string[];
 }
 
 async function handle(req: IncomingMessage, res: ServerResponse, ctx: Ctx): Promise<void> {
+  // Every route acts as the guardian. Only this machine's own pages may call
+  // them: a rebound DNS name fails the Host check, and another site's page
+  // fails the Origin check.
+  const local = [`127.0.0.1:${ctx.options.port}`, `localhost:${ctx.options.port}`];
+  if (!local.includes(req.headers.host ?? "")) {
+    return sendJson(res, 403, { error: `rome run only answers on ${local.join(" or ")}` });
+  }
+  const origin = req.headers.origin;
+  if (origin && !local.some((host) => origin === `http://${host}`)) {
+    return sendJson(res, 403, { error: `rome run does not answer pages from ${origin}` });
+  }
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   const id = ctx.app.manifest.id;
   const path = url.pathname;
@@ -236,14 +247,15 @@ async function proxyApi(
   ctx: Ctx,
   url: URL,
 ): Promise<void> {
-  if (!ctx.api) return sendJson(res, 404, { error: "this app has no api entry" });
+  if (!ctx.createApiHandler) return sendJson(res, 404, { error: "this app has no api entry" });
   const prefix = `/api/apps/${ctx.app.manifest.id}`;
   const body = await readBody(req);
   const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(req.headers)) {
     if (typeof value === "string") headers[key] = value;
   }
-  const response = await ctx.api.handle({
+  // The host builds the handler per request; so does rome run.
+  const response = await ctx.createApiHandler(ctx.testApp.appContext).handle({
     method: req.method ?? "GET",
     path: url.pathname.slice(prefix.length).split("/").filter(Boolean).map(decodeURIComponent),
     headers,

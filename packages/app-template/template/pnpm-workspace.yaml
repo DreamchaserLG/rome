@@ -5,6 +5,8 @@
 allowBuilds:
   esbuild: false
   # Tests run the app against a real in-memory SQLite (@rome-os/app-runtime/testing).
+  # It is an optional dependency, so a machine that cannot build it, such as
+  # the daemon installing the app, skips it instead of failing the install.
   better-sqlite3: true
 # Apps may depend on just-published packages (e.g. a fresh @rome-os SDK
 # release); don't quarantine new versions for 24h.

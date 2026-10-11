@@ -112,7 +112,7 @@ async function openInMemorySqlite(Database?: SqliteConstructor): Promise<SqliteH
       return new (require(specifier) as SqliteConstructor)(":memory:");
     } catch (err) {
       throw new Error(
-        `createTestDb needs better-sqlite3. Add it to the app's devDependencies (pnpm add -D better-sqlite3) and allow its build in pnpm-workspace.yaml (allowBuilds: { better-sqlite3: true }). Cause: ${
+        `createTestDb needs better-sqlite3. Add it to the app's optionalDependencies (pnpm add -O better-sqlite3) and allow its build in pnpm-workspace.yaml (allowBuilds: { better-sqlite3: true }). Cause: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -303,8 +303,9 @@ export interface TestApp {
   /** The deps an action's `createAction(config, deps)` receives. */
   deps: { appContext: RomeAppContext; channelsService: ChannelsService } & Record<string, unknown>;
   /**
-   * Instantiate an action from its module's factory and register it, so
-   * {@link TestApp.runAction} and `appContext.runAction` reach it by name.
+   * Instantiate an action from its module's factory and register it as
+   * `<appId>:<name>`, the only name `appContext.runAction` finds it by, as in
+   * the host.
    */
   action<TDeps>(
     name: string,
@@ -314,7 +315,8 @@ export interface TestApp {
   /**
    * Run a registered action the way the host does: arguments and result cross
    * a JSON boundary, so a `Date` arrives as a string and an unserializable
-   * value fails with {@link ActionInvocationError}.
+   * value fails with {@link ActionInvocationError}. A bare `name` is taken as
+   * this app's `<appId>:<name>`; `appContext.runAction` has no such shortcut.
    */
   runAction(name: string, args?: Record<string, unknown>): Promise<ActionResult>;
   /** Run `fn` as a turn in a channel conversation; see {@link withChannelContext}. */
@@ -373,7 +375,9 @@ export async function createTestApp(options: {
 
   const unavailable = (service: string) => () =>
     Promise.reject(
-      new Error(`${service} is not available in createTestApp; pass a fake through options.deps`),
+      new Error(
+        `${service} is not available in createTestApp; pass a fake through options.appContext`,
+      ),
     );
 
   const repositories: AppRuntimeRepositories = {
@@ -406,7 +410,9 @@ export async function createTestApp(options: {
       throw new ActionInvocationError(
         name,
         "not_found",
-        `No action "${name}" is registered; call app.action("${name}", createAction) first`,
+        actions.has(`${options.appId}:${name}`)
+          ? `No action "${name}"; Rome resolves an app's actions as "${options.appId}:${name}"`
+          : `No action "${name}" is registered; call app.action(name, createAction) first`,
       );
     }
     const wireArgs = toWireShape(args, name, "args");
@@ -449,9 +455,10 @@ export async function createTestApp(options: {
       "agentRunner is not available in createTestApp; pass a fake through options.deps",
     );
   };
+  const agentRunner = { run: agentRunnerUnavailable, runForked: agentRunnerUnavailable };
   const deps = {
     channelsService: channels.service,
-    agentRunner: { run: agentRunnerUnavailable, runForked: agentRunnerUnavailable },
+    agentRunner,
     ...options.deps,
     appContext,
   };
@@ -466,13 +473,14 @@ export async function createTestApp(options: {
     deps,
     async action(name, factory, config) {
       const action = await factory(testActionConfig(name, config), deps as never);
-      actions.set(name, action);
+      actions.set(`${options.appId}:${name}`, action);
       return action;
     },
-    runAction,
+    runAction: (name, args) =>
+      runAction(name.includes(":") ? name : `${options.appId}:${name}`, args),
     inChannel: withChannelContext,
     async start(createHook, appVersion = "0.0.0-test") {
-      const hook = createHook({ appId: options.appId, logger, appContext });
+      const hook = createHook({ appId: options.appId, logger, appContext, agentRunner });
       await hook.onAppStarted({
         type: "app-started",
         version: 1,

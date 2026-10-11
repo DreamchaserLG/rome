@@ -61,7 +61,7 @@ function createRecallAction(config: ActionConfig, deps: DemoDeps): Action {
     config,
     async execute() {
       const history = await deps.channelsService.query("feishu", { limit: 1 });
-      const saved = await deps.appContext.runAction("note", { text: history[0]?.text ?? "" });
+      const saved = await deps.appContext.runAction("demo:note", { text: history[0]?.text ?? "" });
       return { status: "ok", data: { saved } };
     },
   };
@@ -127,6 +127,15 @@ describe("createTestApp", () => {
     await expect(app.runAction("missing")).rejects.toBeInstanceOf(ActionInvocationError);
   });
 
+  it("finds an action through appContext only by its app-prefixed name", async () => {
+    await expect(app.appContext.runAction("demo:note", { text: "x" })).resolves.toMatchObject({
+      status: "ok",
+    });
+    await expect(app.appContext.runAction("note", { text: "x" })).rejects.toMatchObject({
+      code: "not_found",
+    });
+  });
+
   it("rejects what the host would reject: an undefined result and a detached run", async () => {
     await app.action(
       "forgets_to_return",
@@ -140,7 +149,7 @@ describe("createTestApp", () => {
       code: "unserializable",
     });
     await expect(
-      app.appContext.runAction("note", { text: "later" }, { detached: true }),
+      app.appContext.runAction("demo:note", { text: "later" }, { detached: true }),
     ).rejects.toThrow(/detached/);
   });
 

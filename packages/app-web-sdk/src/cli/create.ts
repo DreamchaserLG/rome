@@ -1,9 +1,12 @@
-import { isUtf8 } from "node:buffer";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isValidAppId } from "@rome-os/app-runtime/packaging";
+import {
+  appIdToDisplayName,
+  isDirectoryNonEmpty,
+  isValidAppId,
+  materializeTemplate,
+} from "@rome-os/app-runtime/packaging";
 import { CliError } from "./store/config.js";
 
 const HELP = `rome create — scaffold a new Rome app from the template
@@ -33,40 +36,6 @@ export function findTemplateDir(): string {
   return found;
 }
 
-function appIdToDisplayName(appId: string): string {
-  return appId
-    .split("-")
-    .filter((segment) => segment.length > 0)
-    .map((segment) => segment[0]!.toUpperCase() + segment.slice(1))
-    .join(" ");
-}
-
-/** The placeholders `packages/core/src/apps/create.ts` fills, filled the same way. */
-function applyPlaceholders(input: string, vars: { appId: string; appName: string }): string {
-  return input
-    .replace(/__APP_TABLE_PREFIX__/g, vars.appId.replace(/-/g, "_"))
-    .replace(/__APP_ID__/g, vars.appId)
-    .replace(/__APP_NAME__/g, vars.appName);
-}
-
-async function materializeTemplate(
-  srcDir: string,
-  destDir: string,
-  vars: { appId: string; appName: string },
-): Promise<void> {
-  await mkdir(destDir, { recursive: true });
-  for (const entry of await readdir(srcDir, { withFileTypes: true })) {
-    const srcPath = join(srcDir, entry.name);
-    const destPath = join(destDir, applyPlaceholders(entry.name, vars));
-    if (entry.isDirectory()) {
-      await materializeTemplate(srcPath, destPath, vars);
-    } else if (entry.isFile()) {
-      const buf = await readFile(srcPath);
-      await writeFile(destPath, isUtf8(buf) ? applyPlaceholders(buf.toString("utf-8"), vars) : buf);
-    }
-  }
-}
-
 export async function runCreate(argv: string[]): Promise<void> {
   if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) {
     process.stdout.write(HELP);
@@ -89,7 +58,7 @@ export async function runCreate(argv: string[]): Promise<void> {
     );
   }
   const destDir = resolve(dir ?? appId);
-  if (existsSync(destDir) && (await readdir(destDir)).length > 0) {
+  if (await isDirectoryNonEmpty(destDir)) {
     throw new CliError(`rome create: ${destDir} is not empty`);
   }
 

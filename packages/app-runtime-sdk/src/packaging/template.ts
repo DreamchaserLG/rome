@@ -1,3 +1,7 @@
+/**
+ * Fills the app template: the copy Rome's app_management create writes and
+ * the one `rome create` writes are the same code.
+ */
 import { isUtf8 } from "node:buffer";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -11,7 +15,7 @@ export function appIdToDisplayName(appId: string): string {
   return appId
     .split("-")
     .filter((segment) => segment.length > 0)
-    .map((segment) => segment[0].toUpperCase() + segment.slice(1))
+    .map((segment) => segment[0]!.toUpperCase() + segment.slice(1))
     .join(" ");
 }
 

@@ -350,7 +350,7 @@ decide whether to load the skill.
 | `rome dev`   | Dev server with HMR for the web bundle. Use during heavy UI iteration; otherwise a single `install` (which rebuilds + repacks) is fine. |
 | `rome create <app-id>` | Scaffold a new app from the same template `app_management` `op: "create"` uses. For a coding agent working outside Rome. |
 | `rome validate` | Build, then pack into `.rome/artifact` with the same checks an install runs. Then import every action, hook and the API entry from `dist/` and check that each exports the factory the host calls. Exits 1 on the first problem. |
-| `rome run` | Serve the app with no Rome daemon. It runs the migrations into an in-memory SQLite and runs the `app-started` hook. It serves the UI at `/apps/<id>` in a shadow root with the dashboard's theme tokens (`?theme=dark` switches mode), and the API at `/api/apps/<id>/`. `POST /__rome/actions/<name>` with `{"args": {}, "channel": {…}}` runs an action. `--channels <file.json>` seeds fake channel history. Needs `better-sqlite3` as a dev dependency. |
+| `rome run` | Serve the app with no Rome daemon. It runs the migrations into an in-memory SQLite and runs the `app-started` hook. It serves the UI at `/apps/<id>` in a shadow root with the dashboard's theme tokens (`?theme=dark` switches mode), and the API at `/api/apps/<id>/`. `POST /__rome/actions/<name>` with `{"args": {}, "channel": {…}}` runs an action. `--channels <file.json>` seeds fake channel history. Needs `better-sqlite3`, which the template lists as an optional dependency. |
 
 `build` and `dev` read `app.yaml` for `web.displayName`, `web.navLabel`, and `web.entry` (default `App.tsx`). The web entry must default-export a React component — see [Frontend SDK](#frontend-sdk--rome-osapp-web-sdk).
 
@@ -876,7 +876,7 @@ The test kit runs an app's actions, API handler and `app-started` hook in a plai
 - in-memory settings;
 - an action registry behind `appContext.runAction`.
 
-It needs `better-sqlite3` as a dev dependency, and `allowBuilds: { better-sqlite3: true }` in the app's `pnpm-workspace.yaml`.
+It needs `better-sqlite3` and `allowBuilds: { better-sqlite3: true }` in the app's `pnpm-workspace.yaml`; the template has both. The template lists it under `optionalDependencies`, so a daemon install that cannot build it skips it instead of failing.
 
 ```ts
 import { channelMessage, createTestApp } from "@rome-os/app-runtime/testing";
@@ -905,8 +905,9 @@ app.close();
 
 - `app.runAction` crosses a JSON boundary like the host does. A `Date` in a result arrives as a string.
 - Calling an action that was never registered rejects with `ActionInvocationError`, as the host does.
+- Inside the app, `appContext.runAction` finds an action only by `"<appId>:<name>"`, as the host does. `app.runAction` also takes the bare name.
 - `app.channels.queries` and `app.channels.sent` record every read and send.
-- Favors, routines and the agent runner reject with a message that names the service. Pass a fake through `createTestApp({ deps })` when an action needs one.
+- Favors, routines, the agent runner and detached `runAction` calls fail with a message that names the service. Pass fake favors or routines through `createTestApp({ appContext })`, and a fake agent runner through `createTestApp({ deps })`.
 - Keep test helpers outside `src/` (for example in `<app-root>/test/`). `rome build` compiles everything under `src/` except `*.test.ts`.
 
 ---
