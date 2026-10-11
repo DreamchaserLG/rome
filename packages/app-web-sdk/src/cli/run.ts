@@ -2,6 +2,9 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createRequire } from "node:module";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { fileURLToPath } from "node:url";
 import {
   ActionInvocationError,
@@ -10,6 +13,7 @@ import {
   type RomeAppContext,
   type ThreadContext,
 } from "@rome-os/app-runtime";
+import { appIdToPathSegment } from "@rome-os/app-runtime/packaging";
 import { createTestApp, type SqliteConstructor, type TestApp } from "@rome-os/app-runtime/testing";
 import {
   artifactPaths,
@@ -45,7 +49,7 @@ State lives in memory and resets on restart. Agents, routines, favors and
 real channels are not available; actions that call them get an error result.
 `;
 
-interface RunOptions {
+export interface RunOptions {
   port: number;
   build: boolean;
   channelsFile?: string;
@@ -148,13 +152,8 @@ export async function runRun(argv: string[]): Promise<void> {
     | ((ctx: RomeAppContext) => RomeAppApiHandler)
     | null;
 
-  const server = createServer((req, res) => {
-    handle(req, res, { app, testApp, createApiHandler, options, actionNames }).catch(
-      (err: unknown) => {
-        sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
-      },
-    );
-  });
+  const ctx: RunContext = { app, testApp, createApiHandler, options, actionNames };
+  const server = createServer((req, res) => void handleRunRequest(req, res, ctx));
   await new Promise<void>((resolveListen, reject) => {
     server.once("error", reject);
     server.listen(options.port, "127.0.0.1", resolveListen);
@@ -163,8 +162,8 @@ export async function runRun(argv: string[]): Promise<void> {
   const base = `http://127.0.0.1:${options.port}`;
   process.stdout.write(`
 rome run: ${app.manifest.id}@${app.manifest.version}
-  UI       ${app.manifest.web ? `${base}/apps/${app.manifest.id}` : "(no web entry)"}
-  API      ${createApiHandler ? `${base}/api/apps/${app.manifest.id}/` : "(no api entry)"}
+  UI       ${app.manifest.web ? `${base}/apps/${appIdToPathSegment(app.manifest.id)}` : "(no web entry)"}
+  API      ${createApiHandler ? `${base}/api/apps/${appIdToPathSegment(app.manifest.id)}/` : "(no api entry)"}
   actions  ${actionNames.join(", ") || "(none)"}
            curl -s -X POST ${base}/__rome/actions/<name> -d '{"args":{}}'
   state    ${base}/__rome
@@ -177,7 +176,8 @@ rome run: ${app.manifest.id}@${app.manifest.version}
   testApp.close();
 }
 
-interface Ctx {
+/** What one `rome run` server answers from: the app on disk and its wired test app. */
+export interface RunContext {
   app: AppOnDisk;
   testApp: TestApp;
   createApiHandler: ((ctx: RomeAppContext) => RomeAppApiHandler) | null;
@@ -185,7 +185,20 @@ interface Ctx {
   actionNames: string[];
 }
 
-async function handle(req: IncomingMessage, res: ServerResponse, ctx: Ctx): Promise<void> {
+/** Answer one request to a `rome run` server. Errors become a 500 with the message. */
+export async function handleRunRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RunContext,
+): Promise<void> {
+  try {
+    await route(req, res, ctx);
+  } catch (err) {
+    sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+async function route(req: IncomingMessage, res: ServerResponse, ctx: RunContext): Promise<void> {
   // Every route acts as the guardian. Only this machine's own pages may call
   // them: a rebound DNS name fails the Host check, and another site's page
   // fails the Origin check.
@@ -198,7 +211,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Ctx): Prom
     return sendJson(res, 403, { error: `rome run does not answer pages from ${origin}` });
   }
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
-  const id = ctx.app.manifest.id;
+  // URLs carry the app id the way the host writes it: `@me/app` → `%40me%2Fapp`.
+  const id = appIdToPathSegment(ctx.app.manifest.id);
   const path = url.pathname;
 
   if (path === "/" || path === "") return redirect(res, `/apps/${id}`);
@@ -215,7 +229,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, ctx: Ctx): Prom
 async function handleDev(
   req: IncomingMessage,
   res: ServerResponse,
-  ctx: Ctx,
+  ctx: RunContext,
   path: string,
 ): Promise<void> {
   const { testApp } = ctx;
@@ -262,11 +276,11 @@ async function handleDev(
 async function proxyApi(
   req: IncomingMessage,
   res: ServerResponse,
-  ctx: Ctx,
+  ctx: RunContext,
   url: URL,
 ): Promise<void> {
   if (!ctx.createApiHandler) return sendJson(res, 404, { error: "this app has no api entry" });
-  const prefix = `/api/apps/${ctx.app.manifest.id}`;
+  const prefix = `/api/apps/${appIdToPathSegment(ctx.app.manifest.id)}`;
   const body = await readBody(req);
   const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(req.headers)) {
@@ -283,17 +297,19 @@ async function proxyApi(
   });
   res.statusCode = response.status;
   response.headers.forEach((value, key) => res.setHeader(key, value));
-  res.end(Buffer.from(await response.arrayBuffer()));
+  if (!response.body) return void res.end();
+  // Piped, not buffered, so a streamed response (SSE, progress) arrives as written.
+  await pipeline(Readable.fromWeb(response.body as NodeReadableStream), res);
 }
 
-function webDir(ctx: Ctx): string | null {
+function webDir(ctx: RunContext): string | null {
   const manifestPath = ctx.app.manifest.web?.manifest;
   return manifestPath ? dirname(resolve(ctx.app.builtRoot, manifestPath)) : null;
 }
 
-function sendAsset(res: ServerResponse, ctx: Ctx, path: string): void {
+function sendAsset(res: ServerResponse, ctx: RunContext, path: string): void {
   const dir = webDir(ctx);
-  // /app-assets/<id>/<version>/<file>
+  // /app-assets/<id segment>/<version>/<file>
   const rest = path.split("/").slice(4).map(decodeURIComponent).join("/");
   const file = dir ? resolve(dir, rest) : null;
   if (!dir || !file || relative(dir, file).startsWith(".."))
@@ -301,7 +317,7 @@ function sendAsset(res: ServerResponse, ctx: Ctx, path: string): void {
   sendFile(res, file);
 }
 
-function sendHostPage(res: ServerResponse, ctx: Ctx, url: URL): void {
+function sendHostPage(res: ServerResponse, ctx: RunContext, url: URL): void {
   const dir = webDir(ctx);
   if (!dir || !existsSync(join(dir, "manifest.json"))) {
     return sendJson(res, 404, { error: "this app has no built web bundle; run rome build" });
@@ -312,7 +328,8 @@ function sendHostPage(res: ServerResponse, ctx: Ctx, url: URL): void {
     assetVersion?: string;
   };
   const { id, version } = ctx.app.manifest;
-  const assetBase = `/app-assets/${id}/${webManifest.assetVersion ?? version}`;
+  const segment = appIdToPathSegment(id);
+  const assetBase = `/app-assets/${segment}/${webManifest.assetVersion ?? version}`;
   const theme =
     url.searchParams.get("theme") === "dark"
       ? "dark"
@@ -320,13 +337,13 @@ function sendHostPage(res: ServerResponse, ctx: Ctx, url: URL): void {
         ? "light"
         : ctx.options.theme;
   const themeName = url.searchParams.get("themeName") ?? ctx.options.themeName;
-  const routeBase = `/apps/${id}`;
+  const routeBase = `/apps/${segment}`;
   const bootstrap = {
     appId: id,
     version,
     routeBase,
     routePath: url.pathname.slice(routeBase.length + 1),
-    apiBase: `/api/apps/${id}`,
+    apiBase: `/api/apps/${segment}`,
     assetBase,
     shell: { locale: "en-US", theme, themeName, mode: "full" },
     caller: { kind: "guardian", userId: "guardian" },
