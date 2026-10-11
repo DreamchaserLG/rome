@@ -194,7 +194,14 @@ export async function handleRunRequest(
   try {
     await route(req, res, ctx);
   } catch (err) {
-    sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+    // The full error, stack included, goes to the terminal; the response
+    // carries only its message.
+    process.stderr.write(
+      `rome run: ${req.method} ${req.url} failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`,
+    );
+    sendJson(res, 500, {
+      error: err instanceof Error ? err.message : "request failed; see the rome run terminal",
+    });
   }
 }
 
