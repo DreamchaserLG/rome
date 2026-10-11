@@ -117,7 +117,8 @@ function historyItem(over: Partial<HistoryItem> = {}): HistoryItem {
     message_id: "om_h1",
     msg_type: "text",
     create_time: "1700000000000",
-    sender: { id: "ou_alice", id_type: "open_id", sender_type: "user", sender_name: "Alice" },
+    // `message.list` leaves `sender_name` out unless Feishu chooses to send it.
+    sender: { id: "ou_alice", id_type: "open_id", sender_type: "user" },
     body: { content: JSON.stringify({ text: "the client wants a volume discount" }) },
     ...over,
   };
@@ -948,6 +949,7 @@ describe("FeishuAdapter history", () => {
   });
 
   it("reads one chat newest first from Feishu and answers it oldest first", async () => {
+    await channel.emit({ chatId: "oc_other", chatType: "group", mentionedBot: true });
     channel.historyPages = [
       {
         items: [
@@ -981,6 +983,32 @@ describe("FeishuAdapter history", () => {
       addressing: "ambient",
       timestamp: new Date(1_700_000_000_000),
     });
+  });
+
+  it("names a sender from the listed item, else as Feishu User when never heard from", async () => {
+    channel.historyPages = [
+      {
+        items: [
+          historyItem({
+            message_id: "om_named",
+            sender: {
+              id: "ou_carol",
+              id_type: "open_id",
+              sender_type: "user",
+              sender_name: "Carol",
+            },
+          }),
+          historyItem({
+            message_id: "om_unknown",
+            sender: { id: "ou_dave", id_type: "open_id", sender_type: "user" },
+          }),
+        ],
+      },
+    ];
+
+    const messages = await adapter.fetchHistory("oc_sales", new Date(0), 100);
+
+    expect(messages.map((m) => m.senderDisplayName)).toStrictEqual(["Feishu User", "Carol"]);
   });
 
   it("follows page tokens and keeps only the newest `limit` messages", async () => {
@@ -1069,6 +1097,19 @@ describe("FeishuAdapter history", () => {
 
     expect(channel.historyCalls.map((c) => c.container_id)).toStrictEqual(["oc_a", "oc_b"]);
     expect(messages.map((m) => m.messageId)).toStrictEqual(["om_b", "om_a"]);
+  });
+
+  it("pages each group at most four times in a read over every group", async () => {
+    await channel.emit({ chatId: "oc_a", chatType: "group", mentionedBot: true });
+    let calls = 0;
+    channel.rawClient.im.v1.message.list = (async () => {
+      calls++;
+      return { code: 0, data: { items: [historyItem()], has_more: true, page_token: "more" } };
+    }) as never;
+
+    await adapter.fetchHistory(null, new Date(0), 1_000);
+
+    expect(calls).toBe(4);
   });
 
   it("reads at most three groups at a time", async () => {

@@ -29,6 +29,9 @@ const TEXT_BEARING_CONTENT_TYPES: ReadonlySet<string> = new Set(["text", "post"]
 const HISTORY_PAGE_SIZE = 50;
 /** Pages one chat's history read may take, which bounds a read at 1,000 messages. */
 const MAX_HISTORY_PAGES = 20;
+// A read over every group pages each chat less deeply, since the merged answer
+// keeps only the newest `limit` messages across all of them.
+const MAX_HISTORY_PAGES_PER_GROUP = 4;
 const HISTORY_CHAT_CONCURRENCY = 3;
 
 export interface FeishuConfig {
@@ -132,6 +135,11 @@ export class FeishuAdapter {
   >();
   /** Private chats seen inbound, so a history read can tell a DM from a group. */
   private readonly privateChats = new Set<string>();
+  /**
+   * Names of senders seen inbound, by open_id. `message.list` may leave
+   * `sender_name` out, and a history read falls back to these.
+   */
+  private readonly senderNames = new Map<string, string>();
   /** Unsubscribe callbacks from channel.on(), cleared on stop() so handlers
    *  don't accumulate if the adapter is ever started again. */
   private unsubscribes: Array<() => void> = [];
@@ -248,7 +256,7 @@ export class FeishuAdapter {
    * already requests.
    */
   async fetchHistory(chatId: string | null, since: Date, limit: number): Promise<ChannelMessage[]> {
-    if (chatId !== null) return this.fetchChatHistory(chatId, since, limit);
+    if (chatId !== null) return this.fetchChatHistory(chatId, since, limit, MAX_HISTORY_PAGES);
     const chatIds = [...this.observedConversations.keys()];
     // A few chats at a time, so a bot in many groups stays under Feishu's
     // per-app rate limit on `message.list`.
@@ -259,7 +267,7 @@ export class FeishuAdapter {
       async () => {
         for (let i = next++; i < chatIds.length; i = next++) {
           [perChat[i]] = await Promise.allSettled([
-            this.fetchChatHistory(chatIds[i], since, limit),
+            this.fetchChatHistory(chatIds[i], since, limit, MAX_HISTORY_PAGES_PER_GROUP),
           ]);
         }
       },
@@ -287,10 +295,11 @@ export class FeishuAdapter {
     chatId: string,
     since: Date,
     limit: number,
+    maxPages: number,
   ): Promise<ChannelMessage[]> {
     const newestFirst: ChannelMessage[] = [];
     let pageToken: string | undefined;
-    for (let page = 0; page < MAX_HISTORY_PAGES && newestFirst.length < limit; page++) {
+    for (let page = 0; page < maxPages && newestFirst.length < limit; page++) {
       const res = await this.channel.rawClient.im.v1.message.list({
         params: {
           container_id_type: "chat",
@@ -333,7 +342,8 @@ export class FeishuAdapter {
       messageId: item.message_id,
       conversationId: chatId as ConversationId,
       senderId: item.sender.id,
-      senderDisplayName: item.sender.sender_name ?? "Feishu User",
+      senderDisplayName:
+        item.sender.sender_name ?? this.senderNames.get(item.sender.id) ?? "Feishu User",
       text,
       attachments: [],
       timestamp: new Date(Number.isFinite(createTime) ? createTime : 0),
@@ -368,6 +378,7 @@ export class FeishuAdapter {
     if (!text) return;
     const threadType = m.chatType === "p2p" ? "private" : "group";
     if (threadType === "private") this.privateChats.add(m.chatId);
+    if (m.senderName) this.senderNames.set(m.senderId, m.senderName);
     const addressing: MessageAddressing =
       threadType === "private" ? "direct" : m.mentionedBot ? "mention" : "ambient";
     const directedStop = addressing !== "ambient" && isStopCommand(text);
