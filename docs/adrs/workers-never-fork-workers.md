@@ -71,7 +71,7 @@ A queued root that found no idle warm worker used to take a single-use worker, w
 
 A queued root that finds no idle warm worker now waits for the first pooled worker to come free. Either a busy pooled worker returns, or a pooled worker started for that root reaches ready. An action that dispatches a detached root and then returns therefore usually hands its own worker to that root. Each waiting root starts at most one pooled worker, and those workers count against the slots queued roots may fill. A pooled worker beyond the warm pool size exits after five idle minutes, so the pool size is a floor while requests keep coming.
 
-The wait applies only while the warm pool runs with a size above zero. A pooled worker that dies before ready switches queued roots back to single-use workers, so a root still sees the start error and main does not loop on forks. Any worker that later reaches ready switches the wait back on. Fail-fast roots and delegated calls keep taking a single-use worker when no warm worker is idle.
+The wait applies only while the warm pool runs with a size above zero. A pooled worker that dies before ready, or sends no ready within 60 seconds, switches queued roots back to single-use workers, so a root still sees the start error, a hung start holds no root for long, and main does not loop on forks. Any worker that later reaches ready switches the wait back on. Fail-fast roots and delegated calls keep taking a single-use worker when no warm worker is idle.
 
 Alternatives rejected for this amendment:
 
@@ -79,4 +79,4 @@ Alternatives rejected for this amendment:
 - **Wait a fixed time for a busy worker before forking.** Rejected because it adds that wait whenever the dispatcher does not return soon. Starting a pooled worker at once and taking whichever comes free first adds no latency over the old cold fork.
 - **Stop surplus workers as soon as they return.** Rejected because the next request would fork again, so every request would still pay for a background start.
 
-Future diffs must respect: a waiting queued root never waits on a worker that is not already busy or starting for it, and a pooled worker that fails to start cannot make queued roots wait on further starts.
+Future diffs must respect: a waiting queued root never waits on a worker that is not already busy or starting for it, a pooled worker that fails to start cannot make queued roots wait on further starts, and main forks every worker outside the request's session-actor scope, because a pooled worker outlives the request that started it.

@@ -55,7 +55,11 @@ import {
   ActionWorkerCapacityError,
   ActionWorkerExitError,
 } from "./action-errors.js";
-import { currentSessionActor, type SessionActor } from "../lib/session-actor.js";
+import {
+  currentSessionActor,
+  type SessionActor,
+  withoutSessionActor,
+} from "../lib/session-actor.js";
 import {
   ActionWorkerCoordinator,
   DelegatedActionClient,
@@ -117,6 +121,10 @@ const RESERVED_WORKER_SLOTS = 2;
  * exits. Long enough that a steady stream of requests keeps its workers warm,
  * short enough that a burst does not hold its workers' memory indefinitely. */
 const SURPLUS_WARM_WORKER_IDLE_MS = 5 * 60_000;
+/** How long a pooled worker may take to send ready before main stops it as
+ * hung. A cold start takes a few seconds, and queued roots wait on starting
+ * workers, so a hung one must not hold them until `queuedRootMaxWaitMs`. */
+const WARM_WORKER_READY_TIMEOUT_MS = 60_000;
 
 export interface ActionRunContext {
   initiator?: string;
@@ -1513,15 +1521,21 @@ export class ActionEngine {
     if (this.liveWorkers.size >= this.maxWorkerProcesses) {
       throw new ActionWorkerCapacityError(this.maxWorkerProcesses);
     }
-    const child = this.actionWorkerFork(WORKER_ENTRY_PATH, {
-      execArgv: process.execArgv,
-      detached: options.detached,
-      stdio: ["inherit", "inherit", "inherit", "ipc"],
-      env: {
-        ...process.env,
-        ROME_ACTION_WORKER: "1",
-      },
-    });
+    // Every child callback re-enters the async context of this fork, and a
+    // pooled worker outlives the request that forked it. Without the exit, a
+    // later root dispatched from the worker would carry that request's actor.
+    const fork = this.actionWorkerFork;
+    const child = withoutSessionActor(() =>
+      fork(WORKER_ENTRY_PATH, {
+        execArgv: process.execArgv,
+        detached: options.detached,
+        stdio: ["inherit", "inherit", "inherit", "ipc"],
+        env: {
+          ...process.env,
+          ROME_ACTION_WORKER: "1",
+        },
+      }),
+    );
     const worker: ActionWorkerProcess = {
       child,
       state: "starting",
@@ -1641,6 +1655,7 @@ export class ActionEngine {
     const worker = this.createWorkerProcess({ pooled: true, detached: true });
     this.warmWorkers.add(worker);
     const stopListening = () => {
+      this.clock.clearTimeout(readyDeadline);
       worker.child.off("message", markReady);
       worker.child.off("error", failStart);
     };
@@ -1662,8 +1677,19 @@ export class ActionEngine {
       this.warmWorkerStartFailed = true;
       void this.stopWorker(worker);
     };
+    const readyDeadline = this.clock.setTimeout(() => {
+      stopListening();
+      if (worker.state !== "starting") return;
+      log.warn("warm action worker did not become ready", {
+        timeoutMs: WARM_WORKER_READY_TIMEOUT_MS,
+      });
+      this.warmWorkerStartFailed = true;
+      void this.stopWorker(worker);
+      this.admitQueuedRoots();
+    }, WARM_WORKER_READY_TIMEOUT_MS);
     worker.child.on("message", markReady);
     worker.child.once("error", failStart);
+    worker.child.once("exit", stopListening);
   }
 
   /** Stops `worker` once it has sat idle for SURPLUS_WARM_WORKER_IDLE_MS while

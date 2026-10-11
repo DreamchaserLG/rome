@@ -1,3 +1,4 @@
+import { AsyncResource } from "node:async_hooks";
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { describe, it, expect, rs, afterEach } from "@rstest/core";
@@ -12,12 +13,18 @@ import { hashArgs, replayContext, type JournalEntry } from "./replay.js";
 import { ActionRegistryImpl } from "./registry.js";
 import type { Action, ActionResult } from "./types.js";
 import { callAction } from "./call-action.js";
+import type { IpcRpc } from "./ipc.js";
+import type { WorkerRpcServer } from "./worker-rpc.js";
 import { emitAgentMessage, type ActionRuntimeEvent } from "./runtime-events.js";
 import {
   getCurrentHookInvocationContext,
   runWithHookInvocationContext,
 } from "../core/hook-recursion.js";
-import { runWithSessionActor, type SessionActor } from "../lib/session-actor.js";
+import {
+  currentSessionActor,
+  runWithSessionActor,
+  type SessionActor,
+} from "../lib/session-actor.js";
 import {
   createTestRome,
   buildAction,
@@ -91,8 +98,15 @@ describe("ActionEngine", () => {
       sent: unknown[] = [];
       pendingActionNames: string[] = [];
 
+      // A real ChildProcess runs its callbacks in the async context of fork().
+      private readonly forkContext = new AsyncResource("FakeWorkerChild");
+
       constructor(private readonly autoRespond = true) {
         super();
+      }
+
+      override emit(event: string | symbol, ...args: unknown[]): boolean {
+        return this.forkContext.runInAsyncScope(() => super.emit(event, ...args));
       }
 
       send(message: unknown, cb?: (err: Error | null) => void): boolean {
@@ -549,7 +563,7 @@ describe("ActionEngine", () => {
           processRole: "main",
           workerWarmPoolSize: 1,
           maxWorkerProcesses,
-          queuedRootMaxWaitMs: 60_000,
+          queuedRootMaxWaitMs: 10 * 60_000,
           actionWorkerFork,
           clock,
         });
@@ -696,6 +710,24 @@ describe("ActionEngine", () => {
         await engine.stopWorkerWarmPool();
       });
 
+      it("falls back to a single-use fork when the new worker never becomes ready", async () => {
+        const { engine, children, clock } = createWarmEngine();
+
+        const { submit } = await submitThenDispatch(engine, children[0]);
+        await clock.advance("59s");
+        expect(children).toHaveLength(2);
+        await clock.advance("1s");
+        expect(children[1].sent).toContainEqual(shutdown);
+        await rs.waitFor(() =>
+          expect(actionMessages(children[2])).toMatchObject([{ actionName: "explain" }]),
+        );
+
+        children[2].completeNext();
+        children[0].completeNext();
+        await submit;
+        await engine.stopWorkerWarmPool();
+      });
+
       it("falls back to a single-use fork when the new worker fails to spawn", async () => {
         const { engine, children } = createWarmEngine();
 
@@ -783,6 +815,39 @@ describe("ActionEngine", () => {
         );
         completePending();
         await Promise.all([second, third]);
+        await engine.stopWorkerWarmPool();
+      });
+
+      it("keeps the forking request's actor out of a new worker's calls to main", async () => {
+        const { engine, children } = createWarmEngine();
+        engine.setWorkerRpcServer({
+          register(rpc: IpcRpc) {
+            rpc.handle("probe", async () => ({ actor: (await currentSessionActor()) ?? null }));
+          },
+        } as unknown as WorkerRpcServer);
+
+        const guardian: SessionActor = { kind: "guardian", userId: "guardian-1", via: "cookie" };
+        const { submit } = await runWithSessionActor(guardian, () =>
+          submitThenDispatch(engine, children[0]),
+        );
+        expect(children).toHaveLength(2);
+
+        children[1].emit("message", {
+          type: "rpc_request",
+          reqId: "r1",
+          method: "probe",
+          params: {},
+        });
+        await rs.waitFor(() =>
+          expect(children[1].sent).toContainEqual({
+            type: "rpc_response",
+            reqId: "r1",
+            result: { actor: null },
+          }),
+        );
+
+        children[0].completeNext();
+        await submit;
         await engine.stopWorkerWarmPool();
       });
 
