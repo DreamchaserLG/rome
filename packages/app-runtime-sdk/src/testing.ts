@@ -486,7 +486,12 @@ export async function createTestApp(options: {
       runAction(name.includes(":") ? name : `${options.appId}:${name}`, args),
     inChannel: withChannelContext,
     async start(createHook, appVersion = options.appVersion ?? "0.0.0-test") {
-      const hook = createHook({ appId: options.appId, logger, appContext, agentRunner });
+      const hook = createHook({
+        appId: options.appId,
+        logger,
+        appContext,
+        agentRunner: deps.agentRunner as AppStartedHookDeps["agentRunner"],
+      });
       await hook.onAppStarted({
         type: "app-started",
         version: 1,

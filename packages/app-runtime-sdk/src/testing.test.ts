@@ -208,6 +208,19 @@ describe("createTestApp", () => {
 
     expect(app.settings.get("seededFor")).toBe("demo");
   });
+
+  it("hands a fake agentRunner from options.deps to the app-started hook", async () => {
+    const agentRunner = { run: async () => ({}), runForked: async () => ({}) };
+    const withRunner = await createTestApp({ appId: "demo", deps: { agentRunner } });
+
+    let seen: unknown;
+    await withRunner.start((deps) => {
+      seen = deps.agentRunner;
+      return { async onAppStarted() {} };
+    });
+
+    expect(seen).toBe(agentRunner);
+  });
 });
 
 describe("createFakeChannels", () => {
