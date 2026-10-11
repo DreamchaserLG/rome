@@ -3,7 +3,6 @@ import { runDev } from "./dev.js";
 import { CliError } from "./store/config.js";
 import { runLogin } from "./store/login.js";
 import { runWhoami } from "./store/whoami.js";
-import { runPublish } from "./store/publish.js";
 import { runUpgrade } from "./upgrade.js";
 
 const HELP = `rome — Rome app CLI
@@ -31,10 +30,10 @@ Run "rome <command> --help" for command options.
 const ARG_COMMANDS: Record<string, (argv: string[]) => Promise<void>> = {
   login: runLogin,
   whoami: runWhoami,
-  publish: runPublish,
   upgrade: runUpgrade,
   // Loaded on use: they pull in the test kit or the packaging module, which
   // the other commands never need.
+  publish: async (argv) => (await import("./store/publish.js")).runPublish(argv),
   create: async (argv) => (await import("./create.js")).runCreate(argv),
   validate: async (argv) => (await import("./validate.js")).runValidate(argv),
   run: async (argv) => (await import("./run.js")).runRun(argv),
