@@ -157,7 +157,13 @@ export async function runRun(argv: string[]): Promise<void> {
     | null;
 
   const ctx: RunContext = { app, testApp, createApiHandler, options, actionNames };
-  const server = createServer((req, res) => void handleRunRequest(req, res, ctx));
+  const server = createServer((req, res) => {
+    // An unhandled rejection would end the process; one bad request must not.
+    handleRunRequest(req, res, ctx).catch((err: unknown) => {
+      process.stderr.write(`rome run: ${req.method} ${req.url} failed: ${String(err)}\n`);
+      res.destroy();
+    });
+  });
   await new Promise<void>((resolveListen, reject) => {
     server.once("error", reject);
     server.listen(options.port, "127.0.0.1", resolveListen);
@@ -198,11 +204,15 @@ export async function handleRunRequest(
   try {
     await route(req, res, ctx);
   } catch (err) {
+    // A client that closes a streamed response mid-way is not a failure.
+    if ((err as NodeJS.ErrnoException).code === "ERR_STREAM_PREMATURE_CLOSE") return;
     // The full error, stack included, goes to the terminal; the response
     // carries only its message.
     process.stderr.write(
       `rome run: ${req.method} ${req.url} failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`,
     );
+    // Once the body has started there is no status left to send.
+    if (res.headersSent) return void res.destroy();
     sendJson(res, 500, {
       error: err instanceof Error ? err.message : "request failed; see the rome run terminal",
     });
@@ -308,7 +318,11 @@ async function proxyApi(
     caller: { kind: "guardian", userId: "guardian", via: "cookie" },
   });
   res.statusCode = response.status;
-  response.headers.forEach((value, key) => res.setHeader(key, value));
+  response.headers.forEach((value, key) => {
+    if (key !== "set-cookie") res.setHeader(key, value);
+  });
+  const cookies = response.headers.getSetCookie();
+  if (cookies.length > 0) res.setHeader("set-cookie", cookies);
   if (!response.body) return void res.end();
   // Piped, not buffered, so a streamed response (SSE, progress) arrives as written.
   await pipeline(Readable.fromWeb(response.body as NodeReadableStream), res);

@@ -26,9 +26,10 @@ pnpm-workspace.yaml and .gitignore a standalone app needs.
  *  monorepo it is read straight from packages/app-template. */
 export function findTemplateDir(): string {
   const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  // In the monorepo the live template wins over a copy a local `prepack` left.
   const candidates = [
-    join(packageRoot, "templates", "app"),
     join(packageRoot, "..", "app-template", "template"),
+    join(packageRoot, "templates", "app"),
   ];
   const found = candidates.find((dir) => existsSync(join(dir, "app.yaml")));
   if (!found)

@@ -34,6 +34,7 @@ function get(
           body += chunk;
         });
         res.on("end", () => done({ status: res.statusCode ?? 0, body }));
+        res.on("error", fail);
       },
     );
     req.on("error", fail);
@@ -46,6 +47,8 @@ describe("rome run server", () => {
   let testApp: TestApp;
   let server: Server;
   let port: number;
+  // A rejected request handler would end `rome run`'s process.
+  let failures: unknown[];
 
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), "rome-run-"));
@@ -71,22 +74,47 @@ describe("rome run server", () => {
         tablePrefix: "demo",
       },
       testApp,
-      createApiHandler: () => ({
-        handle: async () =>
-          new Response(
-            new ReadableStream({
-              start(controller) {
-                controller.enqueue(new TextEncoder().encode("one,"));
-                controller.enqueue(new TextEncoder().encode("two"));
-                controller.close();
-              },
-            }),
-          ),
-      }),
+      createApiHandler: () => {
+        let sent = false;
+        return {
+          handle: async (request: { path: string[] }) =>
+            request.path[0] === "cookies"
+              ? new Response("ok", {
+                  headers: [
+                    ["set-cookie", "a=1"],
+                    ["set-cookie", "b=2"],
+                  ],
+                })
+              : request.path[0] === "broken"
+                ? new Response(
+                    new ReadableStream({
+                      // The first chunk goes out before the stream fails.
+                      async pull(controller) {
+                        if (sent) return controller.error(new Error("stream broke"));
+                        sent = true;
+                        controller.enqueue(new TextEncoder().encode("partial"));
+                        await new Promise((later) => setTimeout(later, 50));
+                      },
+                    }),
+                  )
+                : new Response(
+                    new ReadableStream({
+                      start(controller) {
+                        controller.enqueue(new TextEncoder().encode("one,"));
+                        controller.enqueue(new TextEncoder().encode("two"));
+                        controller.close();
+                      },
+                    }),
+                  ),
+        };
+      },
       options: { port: 0, build: false, theme: "light", themeName: "ember" },
       actionNames: ["ping"],
     };
-    server = createServer((req, res) => void handleRunRequest(req, res, ctx));
+    failures = [];
+    server = createServer((req, res) => {
+      handleRunRequest(req, res, ctx).catch((err: unknown) => failures.push(err));
+    });
     await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
     port = (server.address() as AddressInfo).port;
     ctx.options.port = port;
@@ -140,5 +168,26 @@ describe("rome run server", () => {
     const response = await get(port, "/api/apps/%40me%2Fdemo/events");
 
     expect(response).toEqual({ status: 200, body: "one,two" });
+  });
+
+  it("passes every Set-Cookie header through", async () => {
+    const cookies = await new Promise<string[] | undefined>((done, fail) => {
+      request({ host: "127.0.0.1", port, path: "/api/apps/%40me%2Fdemo/cookies" }, (res) => {
+        res.resume();
+        done(res.headers["set-cookie"]);
+      })
+        .on("error", fail)
+        .end();
+    });
+
+    expect(cookies).toEqual(["a=1", "b=2"]);
+  });
+
+  it("keeps serving after a streamed response fails mid-way", async () => {
+    await get(port, "/api/apps/%40me%2Fdemo/broken").catch(() => undefined);
+    const next = await get(port, "/api/apps/%40me%2Fdemo/events");
+
+    expect(next).toEqual({ status: 200, body: "one,two" });
+    expect(failures).toEqual([]);
   });
 });
