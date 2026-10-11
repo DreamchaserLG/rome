@@ -20,6 +20,10 @@
       "types": "./dist/browser.d.ts",
       "default": "./dist/browser.js"
     },
+    "./app-id": {
+      "types": "./dist/packaging/app-id.d.ts",
+      "default": "./dist/packaging/app-id.js"
+    },
     "./packaging": {
       "types": "./dist/packaging/index.d.ts",
       "default": "./dist/packaging/index.js"

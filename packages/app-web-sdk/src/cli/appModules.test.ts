@@ -60,7 +60,8 @@ describe("app modules", () => {
     const app = await readAppOnDisk(join(root, "dist"));
     const actions = await loadActionModules(app);
 
-    expect(app.tablePrefix).toBe("demo_app");
+    // app.yaml declares no db.tablePrefix, so the host falls back to the raw id.
+    expect(app.tablePrefix).toBe("demo-app");
     expect(actions.map((a) => a.config.name)).toEqual(["named", "look_up"]);
     expect(typeof (await loadApiFactory(app))).toBe("function");
   });

@@ -32,7 +32,8 @@ export async function readAppOnDisk(startDir: string): Promise<AppOnDisk> {
     appDir,
     builtRoot: resolve(appDir, manifest.appRoot ?? "."),
     manifest,
-    tablePrefix: manifest.db?.tablePrefix ?? manifest.id.replaceAll("-", "_"),
+    // The host's fallback when app.yaml declares no db.tablePrefix.
+    tablePrefix: manifest.db?.tablePrefix ?? manifest.id,
   };
 }
 

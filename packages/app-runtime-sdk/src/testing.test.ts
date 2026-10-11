@@ -6,6 +6,7 @@ import { sql } from "drizzle-orm";
 import {
   ActionInvocationError,
   getCurrentActionContext,
+  runWithCurrentActionContext,
   type Action,
   type ActionConfig,
   type AppActionRuntimeDeps,
@@ -17,6 +18,7 @@ import {
   channelMessage,
   createFakeChannels,
   createTestApp,
+  withActionContext,
   withChannelContext,
   type TestApp,
 } from "./testing.js";
@@ -125,6 +127,42 @@ describe("createTestApp", () => {
     await expect(app.runAction("missing")).rejects.toBeInstanceOf(ActionInvocationError);
   });
 
+  it("rejects what the host would reject: an undefined result and a detached run", async () => {
+    await app.action(
+      "forgets_to_return",
+      async () =>
+        ({
+          execute: async () => undefined as never,
+        }) as unknown as Action,
+    );
+
+    await expect(app.runAction("forgets_to_return")).rejects.toMatchObject({
+      code: "unserializable",
+    });
+    await expect(
+      app.appContext.runAction("note", { text: "later" }, { detached: true }),
+    ).rejects.toThrow(/detached/);
+  });
+
+  it("names the agent runner when an action reaches it", () => {
+    const deps = app.deps as unknown as { agentRunner: { run(): unknown } };
+
+    expect(() => deps.agentRunner.run()).toThrow(/agentRunner is not available/);
+  });
+
+  it("builds the API handler per request, like the host", async () => {
+    let built = 0;
+    const api = app.api(() => {
+      built++;
+      return { handle: async () => Response.json({ built }) };
+    });
+
+    await api.request("GET", "/");
+    const response = await api.request("GET", "/");
+
+    expect(response.body).toEqual({ built: 2 });
+  });
+
   it("serves the API handler with a guardian caller by default", async () => {
     const api = app.api((ctx: RomeAppContext) => ({
       async handle(request) {
@@ -196,5 +234,23 @@ describe("withChannelContext", () => {
     );
 
     expect(seen).toEqual(["one", "two"]);
+  });
+});
+
+describe("withActionContext", () => {
+  it("merges a nested call into the outer context, as runWithCurrentActionContext does", async () => {
+    const seen = await withActionContext({ executionId: "exec_1", sharedContext: { a: 1 } }, () =>
+      withChannelContext({ channel: "feishu", threadId: "oc_1" }, () =>
+        runWithCurrentActionContext({ sharedContext: { b: 2 } }, async () =>
+          getCurrentActionContext(),
+        ),
+      ),
+    );
+
+    expect(seen).toMatchObject({
+      executionId: "exec_1",
+      channelContext: { threadId: "oc_1" },
+      sharedContext: { a: 1, b: 2 },
+    });
   });
 });

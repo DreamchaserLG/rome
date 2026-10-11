@@ -10,7 +10,7 @@
  *   migrationsFolder: new URL("../src/db/migrations", import.meta.url),
  *   channelHistory: [channelMessage({ channel: "feishu", text: "Who owns Acme?" })],
  * });
- * const quote = app.action("quote", createQuoteAction);
+ * await app.action("quote", createQuoteAction);
  * const result = await app.inChannel(
  *   { channel: "feishu", threadId: "oc_sales", channelUserId: "ou_mei", threadType: "group" },
  *   () => app.runAction("quote", { lines: [{ sku: "PRO", quantity: 3 }] }),
@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import {
   ActionInvocationError,
   setCurrentActionContextResolver,
+  setCurrentActionContextRunner,
   type Action,
   type ActionConfig,
   type ActionInvocation,
@@ -200,23 +201,40 @@ export function channelMessage(
 }
 
 const actionContextStore = new AsyncLocalStorage<CurrentActionContext>();
-let resolverInstalled = false;
+let contextHooksInstalled = false;
 
 /**
  * Run `fn` as a turn on a channel conversation, so `getCurrentActionContext()`
  * inside it answers with `channelContext` the way it does when a channel
- * message reaches the app's agent. Calls nest and run concurrently without
- * leaking into each other.
+ * message reaches the app's agent. A nested call merges into the outer
+ * context the way the host's `runWithCurrentActionContext` does, and
+ * concurrent calls do not leak into each other.
  */
 export function withActionContext<T>(
   context: CurrentActionContext,
   fn: () => Promise<T>,
 ): Promise<T> {
-  if (!resolverInstalled) {
+  if (!contextHooksInstalled) {
     setCurrentActionContextResolver(() => actionContextStore.getStore());
-    resolverInstalled = true;
+    // Like the host's runner, a patch outside any turn runs without a context.
+    setCurrentActionContextRunner((patch, run) =>
+      actionContextStore.getStore() ? withActionContext(patch, run) : run(),
+    );
+    contextHooksInstalled = true;
   }
-  return actionContextStore.run(context, fn);
+  const outer = actionContextStore.getStore();
+  if (!outer) return actionContextStore.run(context, fn);
+  return actionContextStore.run(
+    {
+      ...outer,
+      ...context,
+      sharedContext:
+        context.sharedContext === undefined
+          ? outer.sharedContext
+          : { ...outer.sharedContext, ...context.sharedContext },
+    },
+    fn,
+  );
 }
 
 /** {@link withActionContext} for the common case: only the channel conversation. */
@@ -341,7 +359,8 @@ export async function createTestApp(options: {
   /** The `better-sqlite3` default export; see {@link createTestDb}. */
   Database?: SqliteConstructor;
 }): Promise<TestApp> {
-  const tablePrefix = options.tablePrefix ?? options.appId.replaceAll("-", "_");
+  // The host's fallback when app.yaml declares no db.tablePrefix.
+  const tablePrefix = options.tablePrefix ?? options.appId;
   const { db, close } = await createTestDb({
     tablePrefix,
     ...(options.migrationsFolder ? { migrationsFolder: options.migrationsFolder } : {}),
@@ -371,7 +390,13 @@ export async function createTestApp(options: {
   const runAction = async (
     name: string,
     args: Record<string, unknown> = {},
+    runOptions?: { detached?: boolean },
   ): Promise<ActionResult> => {
+    if (runOptions?.detached) {
+      throw new Error(
+        `runAction("${name}", { detached: true }) is not available in createTestApp; a detached run needs the host's dispatcher`,
+      );
+    }
     const action = actions.get(name);
     if (!action && options.unknownAction) {
       const result = await options.unknownAction(name, toWireShape(args, name, "args"));
@@ -419,7 +444,17 @@ export async function createTestApp(options: {
     ...options.appContext,
   };
 
-  const deps = { channelsService: channels.service, ...options.deps, appContext };
+  const agentRunnerUnavailable = () => {
+    throw new Error(
+      "agentRunner is not available in createTestApp; pass a fake through options.deps",
+    );
+  };
+  const deps = {
+    channelsService: channels.service,
+    agentRunner: { run: agentRunnerUnavailable, runForked: agentRunnerUnavailable },
+    ...options.deps,
+    appContext,
+  };
 
   return {
     appId: options.appId,
@@ -446,7 +481,6 @@ export async function createTestApp(options: {
       });
     },
     api(createApiHandler) {
-      const handler = createApiHandler(appContext);
       return {
         async request(method, path, init = {}) {
           const url = new URL(path.replace(/^\/+/, ""), "http://app.test/");
@@ -458,7 +492,9 @@ export async function createTestApp(options: {
                 : new TextEncoder().encode(
                     typeof init.body === "string" ? init.body : JSON.stringify(init.body),
                   );
-          const response = await handler.handle({
+          // The host builds a handler per request, so factory state does not
+          // carry over between requests here either.
+          const response = await createApiHandler(appContext).handle({
             method: method.toUpperCase(),
             path: url.pathname.split("/").filter(Boolean).map(decodeURIComponent),
             headers: { ...(body ? { "content-type": "application/json" } : {}), ...init.headers },
@@ -483,7 +519,8 @@ export async function createTestApp(options: {
 
 function toWireShape<T>(value: T, actionName: string, what: "args" | "result"): T {
   try {
-    return (value === undefined ? value : JSON.parse(JSON.stringify(value))) as T;
+    // Like the host, this rejects `undefined`: JSON.stringify returns no text.
+    return JSON.parse(JSON.stringify(value)) as T;
   } catch (err) {
     throw new ActionInvocationError(
       actionName,
