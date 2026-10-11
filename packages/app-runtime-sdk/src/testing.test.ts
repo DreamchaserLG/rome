@@ -209,6 +209,16 @@ describe("createTestApp", () => {
     expect(app.settings.get("seededFor")).toBe("demo");
   });
 
+  it("awaits an async createHook, as the host does", async () => {
+    await app.start(async ({ appContext }) => ({
+      async onAppStarted() {
+        await appContext.repositories.settings.set("asyncHook", true);
+      },
+    }));
+
+    expect(app.settings.get("asyncHook")).toBe(true);
+  });
+
   it("hands a fake agentRunner from options.deps to the app-started hook", async () => {
     const agentRunner = { run: async () => ({}), runForked: async () => ({}) };
     const withRunner = await createTestApp({ appId: "demo", deps: { agentRunner } });

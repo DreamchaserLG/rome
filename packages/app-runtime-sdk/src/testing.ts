@@ -317,7 +317,7 @@ export interface TestApp {
   inChannel<T>(channelContext: ThreadContext, fn: () => Promise<T>): Promise<T>;
   /** Run the app's `app-started` hook from its `createHook(deps)` factory. */
   start(
-    createHook: (deps: AppStartedHookDeps) => AppStartedHook,
+    createHook: (deps: AppStartedHookDeps) => AppStartedHook | Promise<AppStartedHook>,
     appVersion?: string,
   ): Promise<void>;
   /** Call the app's API handler from its `createApiHandler(ctx)` factory. */
@@ -486,12 +486,16 @@ export async function createTestApp(options: {
       runAction(name.includes(":") ? name : `${options.appId}:${name}`, args),
     inChannel: withChannelContext,
     async start(createHook, appVersion = options.appVersion ?? "0.0.0-test") {
-      const hook = createHook({
+      // The host awaits createHook, so an async factory works there too.
+      const hook = await createHook({
         appId: options.appId,
         logger,
         appContext,
         agentRunner: deps.agentRunner as AppStartedHookDeps["agentRunner"],
       });
+      if (typeof hook?.onAppStarted !== "function") {
+        throw new Error("The app-started hook must implement onAppStarted(event)");
+      }
       await hook.onAppStarted({
         type: "app-started",
         version: 1,
