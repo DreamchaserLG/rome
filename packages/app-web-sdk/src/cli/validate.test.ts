@@ -32,7 +32,8 @@ describe("devOnlyImports", () => {
         id: "demo",
         version: "0.1.0",
         actions: ["actions/note"],
-        api: { entry: "api/index" },
+        // No entry: the host's default, api/index.
+        api: {},
       } as AppManifestData,
       tablePrefix: "demo",
     };
@@ -40,17 +41,24 @@ describe("devOnlyImports", () => {
 
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-  it("names a dev dependency the host-loaded code reaches, and nothing else", () => {
+  it("names a dev dependency the host-loaded code reaches, and nothing else", async () => {
     write(
       root,
       "dist/actions/note/index.js",
       'import { sql } from "drizzle-orm";\nimport { helper } from "../../lib/helper.js";\nimport fs from "node:fs";\n',
     );
     write(root, "dist/lib/helper.js", 'export const helper = await import("@rstest/core/x");\n');
-    write(root, "dist/api/index.js", 'import path from "path";\nexport default {};\n');
+    write(
+      root,
+      "dist/api/index.js",
+      'import path from "path";\nimport { x } from "#internal/x";\nimport { vi } from "vitest";\n// data comes from "feishu"\nconst note = "see import(\\"vitest\\")";\nexport default {};\n',
+    );
     // Not reachable from an action, hook or the API: the build's test helpers.
     write(root, "dist/test-only.js", 'import "vitest";\n');
 
-    expect(devOnlyImports(app)).toEqual(["dist/lib/helper.js imports @rstest/core"]);
+    expect((await devOnlyImports(app)).sort()).toEqual([
+      "dist/api/index.js imports vitest",
+      "dist/lib/helper.js imports @rstest/core",
+    ]);
   });
 });

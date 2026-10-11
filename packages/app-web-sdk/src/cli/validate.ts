@@ -3,6 +3,7 @@ import { builtinModules } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { packArtifact, resolveApiEntryPath } from "@rome-os/app-runtime/packaging";
+import { init as initLexer, parse as parseModule } from "es-module-lexer";
 import {
   type AppOnDisk,
   artifactPaths,
@@ -58,7 +59,7 @@ export async function runValidate(argv: string[]): Promise<void> {
   }
   process.stdout.write(`✓ pack: ${app.manifest.id}@${app.manifest.version}\n`);
 
-  const missing = devOnlyImports(app);
+  const missing = await devOnlyImports(app);
   if (missing.length > 0) {
     throw new CliError(
       `✗ imports: ${missing.join("; ")}. An install skips devDependencies; move them to dependencies.`,
@@ -79,14 +80,11 @@ export async function runValidate(argv: string[]): Promise<void> {
   }
 }
 
-// Static, side-effect and dynamic imports and requires, in the per-file output
-// `rome build` writes for server code.
-const IMPORT = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["']([^"']+)["']/g;
-
 /** Each bare import in the code the host loads (action and hook directories,
  *  the API entry, and the files they import) whose package an install's
  *  `pnpm install --prod` leaves out, as "file imports pkg". */
-export function devOnlyImports(app: AppOnDisk): string[] {
+export async function devOnlyImports(app: AppOnDisk): Promise<string[]> {
+  await initLexer;
   const pkgPath = join(app.appDir, "package.json");
   if (!existsSync(pkgPath)) return [];
   const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as Record<string, Record<string, string>>;
@@ -105,8 +103,10 @@ export function devOnlyImports(app: AppOnDisk): string[] {
   };
   for (const path of artifactPaths(app.manifest, "actions")) addDir(join(app.builtRoot, path));
   for (const path of artifactPaths(app.manifest, "hooks")) addDir(join(app.builtRoot, path));
-  if (app.manifest.api?.entry) {
-    queue.push(resolveApiEntryPath(app.builtRoot, app.manifest.api.entry, app.manifest.id));
+  if (app.manifest.api) {
+    // The host's default entry, as in loadApiFactory.
+    const entry = app.manifest.api.entry ?? "api/index";
+    queue.push(resolveApiEntryPath(app.builtRoot, entry, app.manifest.id));
   }
 
   const seen = new Set<string>();
@@ -115,12 +115,16 @@ export function devOnlyImports(app: AppOnDisk): string[] {
     const file = queue.pop()!;
     if (seen.has(file)) continue;
     seen.add(file);
-    for (const [, specifier] of readFileSync(file, "utf8").matchAll(IMPORT)) {
-      if (specifier!.startsWith(".")) {
-        const target = resolveRelative(dirname(file), specifier!);
+    // A lexer, not a regex, so a specifier in a comment or string is not read
+    // as an import. Dynamic imports with a computed specifier have no name.
+    const [imports] = parseModule(readFileSync(file, "utf8"));
+    for (const { n: specifier } of imports) {
+      if (!specifier || specifier.startsWith("#")) continue;
+      if (specifier.startsWith(".")) {
+        const target = resolveRelative(dirname(file), specifier);
         if (target) queue.push(target);
-      } else if (!isBuiltin(specifier!) && !installed.has(packageName(specifier!))) {
-        found.add(`${relative(app.appDir, file)} imports ${packageName(specifier!)}`);
+      } else if (!isBuiltin(specifier) && !installed.has(packageName(specifier))) {
+        found.add(`${relative(app.appDir, file)} imports ${packageName(specifier)}`);
       }
     }
   }

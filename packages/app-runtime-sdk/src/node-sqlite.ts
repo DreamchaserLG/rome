@@ -78,10 +78,23 @@ export class NodeSqliteDatabase {
 
   constructor(path = ":memory:") {
     // Loaded on first use, so importing the kit prints no experimental warning.
-    const { DatabaseSync } = createRequire(import.meta.url)(
-      "node:sqlite",
-    ) as typeof import("node:sqlite");
-    this.#db = new DatabaseSync(path);
+    let sqlite: typeof import("node:sqlite") | undefined;
+    try {
+      sqlite = createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
+    } catch {}
+    const db = sqlite ? new sqlite.DatabaseSync(path) : undefined;
+    // `isTransaction` and `setReturnArrays` arrived in Node 22.16 and 24.
+    if (
+      !db ||
+      typeof db.isTransaction !== "boolean" ||
+      !("setReturnArrays" in sqlite!.StatementSync.prototype)
+    ) {
+      db?.close();
+      throw new Error(
+        `The test kit's in-memory database needs node:sqlite from Node 22.16 or later; this is Node ${process.versions.node}. Upgrade Node, or pass better-sqlite3's default export as the Database option.`,
+      );
+    }
+    this.#db = db;
   }
 
   get inTransaction(): boolean {
