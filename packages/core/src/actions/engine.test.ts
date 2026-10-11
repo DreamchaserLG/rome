@@ -527,6 +527,281 @@ describe("ActionEngine", () => {
         await blocker;
       });
     });
+
+    describe("queued roots with a started warm pool", () => {
+      const queue: ActionRunContext = { whenWorkersBusy: "queue" };
+      const ready = { type: "ready" };
+      const shutdown = { type: "shutdown" };
+
+      async function settle(): Promise<void> {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      /** An engine with one ready warm worker, `children[0]`. */
+      function createWarmEngine(maxWorkerProcesses = 8) {
+        const registry = new ActionRegistryImpl();
+        for (const name of ["submit", "explain", "root"]) registry.register(buildAction(name));
+        const clock = new FakeClock();
+        const { children, actionWorkerFork } = installFakeChildProcessFactory({
+          autoRespond: false,
+        });
+        const engine = new ActionEngine(registry, createActionEngineRepos(), {
+          processRole: "main",
+          workerWarmPoolSize: 1,
+          maxWorkerProcesses,
+          queuedRootMaxWaitMs: 60_000,
+          actionWorkerFork,
+          clock,
+        });
+        engine.startWorkerWarmPool();
+        children[0].emit("message", ready);
+        return { engine, children, actionWorkerFork, clock };
+      }
+
+      /** Starts `submit` on `submitWorker`, then dispatches `explain` while it runs.
+       * Wraps the pending run in an object so the async return does not await it. */
+      async function submitThenDispatch(engine: ActionEngine, submitWorker: FakeWorkerChild) {
+        const submit = engine.run("submit", {}, queue);
+        await rs.waitFor(() =>
+          expect(actionMessages(submitWorker).at(-1)).toMatchObject({ actionName: "submit" }),
+        );
+        await expect(engine.dispatch("explain", {})).resolves.toMatchObject({
+          executionId: expect.any(String),
+        });
+        return { submit };
+      }
+
+      it("hands a detached root the dispatcher's worker once it returns", async () => {
+        const { engine, children, actionWorkerFork } = createWarmEngine();
+
+        const { submit } = await submitThenDispatch(engine, children[0]);
+        expect(children).toHaveLength(2);
+        expect(actionMessages(children[1])).toHaveLength(0);
+
+        children[0].completeNext();
+        await expect(submit).resolves.toEqual({ status: "ok", data: "submit" });
+        await rs.waitFor(() =>
+          expect(actionMessages(children[0]).at(-1)).toMatchObject({ actionName: "explain" }),
+        );
+
+        // The fork started for explain joins the pool instead of being discarded.
+        children[1].emit("message", ready);
+        children[0].completeNext();
+        await settle();
+        expect(children.flatMap((child) => child.sent)).not.toContainEqual(shutdown);
+
+        // Later requests find a free worker for each hop and fork nothing.
+        for (let i = 0; i < 3; i++) {
+          const next = engine.run("submit", {}, queue);
+          await settle();
+          await engine.dispatch("explain", {});
+          await settle();
+          expect(children.map((child) => child.pendingActionNames.length)).toEqual([1, 1]);
+          for (const child of children) child.completeNext();
+          await expect(next).resolves.toMatchObject({ status: "ok" });
+          await settle();
+        }
+        expect(actionWorkerFork).toHaveBeenCalledTimes(2);
+        await engine.stopWorkerWarmPool();
+      });
+
+      it("runs the root on its new worker when the busy worker does not return", async () => {
+        const { engine, children } = createWarmEngine();
+
+        const { submit } = await submitThenDispatch(engine, children[0]);
+        children[1].emit("message", ready);
+        await rs.waitFor(() =>
+          expect(actionMessages(children[1])).toMatchObject([{ actionName: "explain" }]),
+        );
+
+        children[1].completeNext();
+        children[0].completeNext();
+        await expect(submit).resolves.toEqual({ status: "ok", data: "submit" });
+        await settle();
+        expect(children.flatMap((child) => child.sent)).not.toContainEqual(shutdown);
+        await engine.stopWorkerWarmPool();
+      });
+
+      it("retires a surplus idle worker after it sits idle for five minutes", async () => {
+        const { engine, children, clock } = createWarmEngine();
+
+        const { submit } = await submitThenDispatch(engine, children[0]);
+        children[1].emit("message", ready);
+        await rs.waitFor(() => expect(actionMessages(children[1])).toHaveLength(1));
+        children[1].completeNext();
+        children[0].completeNext();
+        await submit;
+        await settle();
+
+        await clock.advance("4m");
+        expect(children.flatMap((child) => child.sent)).not.toContainEqual(shutdown);
+        await clock.advance("1m");
+        const retired = children.filter((child) =>
+          child.sent.some((message) => (message as { type?: unknown }).type === "shutdown"),
+        );
+        expect(retired).toHaveLength(1);
+
+        // The worker that stays is still the pool's warm worker.
+        await engine.dispatch("root", {});
+        await settle();
+        expect(children.filter((child) => child.pendingActionNames.length === 1)).toHaveLength(1);
+        await engine.stopWorkerWarmPool();
+      });
+
+      it("falls back to a single-use fork when the new worker exits before ready", async () => {
+        const { engine, children, actionWorkerFork } = createWarmEngine();
+
+        const { submit } = await submitThenDispatch(engine, children[0]);
+        children[1].exitCode = 1;
+        children[1].emit("exit", 1, null);
+        await rs.waitFor(() =>
+          expect(actionMessages(children[2])).toMatchObject([{ actionName: "explain" }]),
+        );
+
+        children[2].completeNext();
+        await rs.waitFor(() => expect(children[2].sent).toContainEqual(shutdown));
+        children[0].completeNext();
+        await submit;
+        await settle();
+        expect(actionWorkerFork).toHaveBeenCalledTimes(3);
+        await engine.stopWorkerWarmPool();
+      });
+
+      it("waits for pooled workers again once a single-use fork reaches ready", async () => {
+        const { engine, children } = createWarmEngine();
+
+        const first = await submitThenDispatch(engine, children[0]);
+        children[1].exitCode = 1;
+        children[1].emit("exit", 1, null);
+        await rs.waitFor(() =>
+          expect(actionMessages(children[2])).toMatchObject([{ actionName: "explain" }]),
+        );
+        children[2].emit("message", ready);
+        children[2].completeNext();
+        await rs.waitFor(() => expect(children[2].sent).toContainEqual(shutdown));
+        children[0].completeNext();
+        await first.submit;
+        await settle();
+
+        const second = await submitThenDispatch(engine, children[0]);
+        expect(children).toHaveLength(4);
+        expect(actionMessages(children[3])).toHaveLength(0);
+        children[0].completeNext();
+        await second.submit;
+        await rs.waitFor(() =>
+          expect(actionMessages(children[0]).at(-1)).toMatchObject({ actionName: "explain" }),
+        );
+
+        children[0].completeNext();
+        await engine.stopWorkerWarmPool();
+      });
+
+      it("falls back to a single-use fork when the new worker fails to spawn", async () => {
+        const { engine, children } = createWarmEngine();
+
+        const { submit } = await submitThenDispatch(engine, children[0]);
+        (children[1] as { pid?: number }).pid = undefined;
+        children[1].emit("error", new Error("spawn EAGAIN"));
+        await rs.waitFor(() =>
+          expect(actionMessages(children[2])).toMatchObject([{ actionName: "explain" }]),
+        );
+
+        children[2].completeNext();
+        children[0].completeNext();
+        await submit;
+        await engine.stopWorkerWarmPool();
+      });
+
+      it("leaves the new worker idle when the waiting root is cancelled", async () => {
+        const { engine, children } = createWarmEngine();
+
+        const submit = engine.run("submit", {}, queue);
+        await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+        const queued = engine.run("explain", {}, { ...queue, executionId: "queued-root" });
+        const outcome = queued.catch((err: unknown) => err);
+        await settle();
+        expect(children).toHaveLength(2);
+
+        await expect(engine.cancel("queued-root")).resolves.toBe(true);
+        await expect(outcome).resolves.toMatchObject({ name: "ActionCancelledError" });
+
+        children[1].emit("message", ready);
+        children[0].completeNext();
+        await submit;
+        await settle();
+        expect(children.map((child) => actionMessages(child).length)).toEqual([1, 0]);
+        await engine.stopWorkerWarmPool();
+      });
+
+      it("starts a current-generation worker for a root waiting through a pool restart", async () => {
+        const { engine, children, actionWorkerFork } = createWarmEngine();
+
+        const { submit } = await submitThenDispatch(engine, children[0]);
+        await engine.restartWorkerWarmPool();
+        expect(children[1].sent).toContainEqual(shutdown);
+        expect(actionWorkerFork).toHaveBeenCalledTimes(3);
+
+        children[2].emit("message", ready);
+        await rs.waitFor(() =>
+          expect(actionMessages(children[2])).toMatchObject([{ actionName: "explain" }]),
+        );
+        children[0].completeNext();
+        await submit;
+        await rs.waitFor(() => expect(children[0].sent).toContainEqual(shutdown));
+        children[2].completeNext();
+        await engine.stopWorkerWarmPool();
+      });
+
+      it("starts at most one worker per waiting root and keeps the reserved slots", async () => {
+        // Cap 4 keeps two slots back, so queued roots hold at most two workers.
+        const { engine, children } = createWarmEngine(4);
+
+        const first = engine.run("root", {}, { ...queue, executionId: "first" });
+        await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+        const second = engine.run("root", {}, { ...queue, executionId: "second" });
+        const third = engine.run("root", {}, { ...queue, executionId: "third" });
+        await settle();
+        expect(children).toHaveLength(2);
+
+        const failFast = [engine.run("root", {}), engine.run("root", {})];
+        await settle();
+        expect(children).toHaveLength(4);
+        expect(children.map((child) => actionMessages(child).length)).toEqual([1, 0, 1, 1]);
+
+        // Two fail-fast roots still run, so the ready worker waits for a slot.
+        children[1].emit("message", ready);
+        await settle();
+        expect(actionMessages(children[1])).toHaveLength(0);
+
+        const completePending = () => {
+          for (const child of children) if (child.pendingActionNames.length) child.completeNext();
+        };
+        completePending();
+        await Promise.all([first, ...failFast]);
+        await rs.waitFor(() =>
+          expect(children.reduce((sum, child) => sum + actionMessages(child).length, 0)).toBe(5),
+        );
+        completePending();
+        await Promise.all([second, third]);
+        await engine.stopWorkerWarmPool();
+      });
+
+      it("still cold-forks a fail-fast root while the warm worker is busy", async () => {
+        const { engine, children } = createWarmEngine();
+
+        const submit = engine.run("submit", {}, queue);
+        await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+        const failFast = engine.run("root", {});
+        await rs.waitFor(() => expect(actionMessages(children[1])).toHaveLength(1));
+
+        children[1].completeNext();
+        await failFast;
+        await rs.waitFor(() => expect(children[1].sent).toContainEqual(shutdown));
+        children[0].completeNext();
+        await submit;
+        await engine.stopWorkerWarmPool();
+      });
+    });
   });
 
   // run() — root call, record mode

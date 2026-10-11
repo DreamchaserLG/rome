@@ -113,6 +113,10 @@ const DEFAULT_QUEUED_ROOT_MAX_WAIT_MS = 10 * 60_000;
  * callers — agent tool calls, nested delegations, interactive turns — whose
  * caller often holds a worker of its own and cannot wait for one. */
 const RESERVED_WORKER_SLOTS = 2;
+/** How long a warm worker beyond `workerWarmPoolSize` may sit idle before it
+ * exits. Long enough that a steady stream of requests keeps its workers warm,
+ * short enough that a burst does not hold its workers' memory indefinitely. */
+const SURPLUS_WARM_WORKER_IDLE_MS = 5 * 60_000;
 
 export interface ActionRunContext {
   initiator?: string;
@@ -198,8 +202,10 @@ interface ActionEngineOptions {
   queuedRootMaxWaitMs?: number;
   /**
    * Number of already-initialized action workers to keep ready in the main
-   * process. Root actions take a ready worker and fall back
-   * to a cold fork when the pool is busy.
+   * process. A fail-fast root with no ready worker takes a single-use cold
+   * fork. A queued root waits for the first pooled worker to free up, which
+   * can grow the pool past this size until surplus workers sit idle for
+   * SURPLUS_WARM_WORKER_IDLE_MS.
    */
   workerWarmPoolSize?: number;
   /**
@@ -296,6 +302,7 @@ interface ActionWorkerProcess {
   hasBeenReady: boolean;
   attached: boolean;
   rpc?: IpcRpc;
+  surplusIdleTimer?: ClockTimer;
 }
 
 /** Thrown by {@link ActionEngine.run} when `name` is not in the registry.
@@ -329,6 +336,10 @@ export class ActionEngine {
   private queuedRootMaxWaitMs: number;
   private queuedRoots: QueuedRoot[] = [];
   private workerWarmPoolStarted = false;
+  /** Set when a pooled worker dies before its ready message, cleared when any
+   * worker reaches ready. While set, queued roots take single-use forks
+   * instead of waiting on pooled workers that would die the same way. */
+  private warmWorkerStartFailed = false;
   private workerPoolGeneration = 0;
   private warmWorkers = new Set<ActionWorkerProcess>();
   private liveWorkers = new Set<ActionWorkerProcess>();
@@ -1221,17 +1232,8 @@ export class ActionEngine {
     // It is safe to use it for a delegated action too: worker payloads carry
     // their complete logical context, and this avoids reserving capacity for an
     // idle root-only worker while a nested call needs it.
-    for (const worker of this.warmWorkers) {
-      if (
-        worker.state === "idle" &&
-        worker.generation === this.workerPoolGeneration &&
-        worker.child.connected
-      ) {
-        worker.state = "running";
-        this.warmWorkers.delete(worker);
-        return worker;
-      }
-    }
+    const warm = this.takeIdleWarmWorker();
+    if (warm) return warm;
 
     const worker = this.createWorkerProcess({
       pooled: false,
@@ -1241,13 +1243,32 @@ export class ActionEngine {
     return worker;
   }
 
+  private takeIdleWarmWorker(): ActionWorkerProcess | null {
+    for (const worker of this.warmWorkers) {
+      if (
+        worker.state === "idle" &&
+        worker.generation === this.workerPoolGeneration &&
+        worker.child.connected
+      ) {
+        worker.state = "running";
+        this.warmWorkers.delete(worker);
+        this.clearSurplusIdleTimer(worker);
+        return worker;
+      }
+    }
+    return null;
+  }
+
   /** Resolves with a running worker for a queued root, in FIFO order with
    * every other queued root. Rejects with ActionWorkerCapacityError after
    * `queuedRootMaxWaitMs`, or with ActionCancelledError when `cancel()` names
    * the root first. */
   private waitForRootWorker(rootExecutionId: string): Promise<ActionWorkerProcess> {
     if (this.queuedRoots.length === 0 && this.canAdmitQueuedRoot()) {
-      return Promise.resolve(this.checkoutWorker(true));
+      const worker = this.queuedRootsWaitForWarmWorkers()
+        ? this.takeIdleWarmWorker()
+        : this.checkoutWorker(true);
+      if (worker) return Promise.resolve(worker);
     }
     return new Promise<ActionWorkerProcess>((resolve, reject) => {
       const queuedAt = this.clock.now().getTime();
@@ -1266,13 +1287,26 @@ export class ActionEngine {
         admit: resolve,
         reject,
       };
+      // A root also queues with slots free, to wait for a pooled worker.
+      const atCapacity = !this.canAdmitQueuedRoot();
       this.queuedRoots.push(entry);
       log.info("root queued for an action worker", {
         rootExecutionId,
         queueDepth: this.queuedRoots.length,
         liveWorkers: this.liveWorkers.size,
+        atCapacity,
       });
+      this.admitQueuedRoots();
     });
+  }
+
+  /** Whether a queued root with no idle warm worker waits for the next pooled
+   * worker to free up or reach ready, instead of taking a single-use fork. A
+   * single-use fork pays the same cold start as a pooled worker, so waiting
+   * adds none, and a detached root's dispatcher is often a worker that frees
+   * up right after the dispatch is accepted. */
+  private queuedRootsWaitForWarmWorkers(): boolean {
+    return this.workerWarmPoolStarted && this.workerWarmPoolSize > 0 && !this.warmWorkerStartFailed;
   }
 
   /** Whether a queued root may take a worker now. Queued roots stop short of
@@ -1281,9 +1315,8 @@ export class ActionEngine {
    * interactive turn until it drained. Idle and starting warm workers are
    * spare capacity, not committed work, so they do not count as busy. */
   private canAdmitQueuedRoot(): boolean {
-    const reserved = Math.min(RESERVED_WORKER_SLOTS, this.maxWorkerProcesses - 1);
     const busy = this.liveWorkers.size - this.warmWorkers.size;
-    if (busy >= this.maxWorkerProcesses - reserved) return false;
+    if (busy >= this.queuedRootSlots()) return false;
     if (this.liveWorkers.size < this.maxWorkerProcesses) return true;
     return [...this.warmWorkers].some(
       (worker) =>
@@ -1293,17 +1326,29 @@ export class ActionEngine {
     );
   }
 
+  /** The most workers queued roots may hold at once. */
+  private queuedRootSlots(): number {
+    return this.maxWorkerProcesses - Math.min(RESERVED_WORKER_SLOTS, this.maxWorkerProcesses - 1);
+  }
+
   /** Hands freed capacity to queued roots. Called wherever a slot opens: a
    * worker exits, a worker returns to the warm pool, or a warm worker becomes
    * ready. Runs before the warm pool refills, so a queued root outranks a new
    * idle worker. */
   private admitQueuedRoots(): void {
     while (this.queuedRoots.length > 0 && this.canAdmitQueuedRoot()) {
+      let worker = this.takeIdleWarmWorker();
+      if (
+        !worker &&
+        this.queuedRootsWaitForWarmWorkers() &&
+        this.startWarmWorkersForQueuedRoots()
+      ) {
+        return;
+      }
       const entry = this.queuedRoots.shift()!;
       this.clock.clearTimeout(entry.deadline);
-      let worker: ActionWorkerProcess;
       try {
-        worker = this.checkoutWorker(true);
+        worker ??= this.checkoutWorker(true);
       } catch (err) {
         entry.reject(err instanceof Error ? err : new Error(String(err)));
         continue;
@@ -1315,6 +1360,36 @@ export class ActionEngine {
       });
       entry.admit(worker);
     }
+  }
+
+  /** Starts pooled workers until every queued root has one starting, without
+   * letting queued roots grow past `queuedRootSlots()` once those workers are
+   * taken. Returns whether any pooled worker is starting. Whichever worker
+   * frees up first, a busy one returning or a starting one reaching ready,
+   * takes the root at the head of the queue. A starting worker that finds the
+   * queue empty stays in the pool. */
+  private startWarmWorkersForQueuedRoots(): boolean {
+    const busy = this.liveWorkers.size - this.warmWorkers.size;
+    let starting = [...this.warmWorkers].filter(
+      (worker) => worker.state === "starting" && worker.generation === this.workerPoolGeneration,
+    ).length;
+    while (
+      starting < this.queuedRoots.length &&
+      busy + starting < this.queuedRootSlots() &&
+      this.liveWorkers.size < this.maxWorkerProcesses
+    ) {
+      try {
+        this.startWarmWorker();
+      } catch (err) {
+        log.warn("could not start a warm action worker for a queued root", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        this.warmWorkerStartFailed = true;
+        break;
+      }
+      starting++;
+    }
+    return starting > 0;
   }
 
   private removeQueuedRoot(entry: QueuedRoot): void {
@@ -1459,8 +1534,26 @@ export class ActionEngine {
     };
     this.liveWorkers.add(worker);
     this.attachWorkerServices(worker);
-    child.once("exit", () => {
+    if (!options.pooled) {
+      // A single-use fork that reaches ready shows workers can start again, so
+      // queued roots go back to waiting for pooled workers.
+      const clearStartFailure = (message: unknown) => {
+        if (!isActionWorkerMessage(message) || message.type !== "ready") return;
+        child.off("message", clearStartFailure);
+        this.warmWorkerStartFailed = false;
+      };
+      child.on("message", clearStartFailure);
+    }
+    child.once("exit", (code: number | null, signal: NodeJS.Signals | null) => {
       worker.rpc?.dispose();
+      this.clearSurplusIdleTimer(worker);
+      if (worker.pooled && worker.state === "starting") {
+        log.warn("warm action worker exited before ready", {
+          code,
+          signal: signal ?? undefined,
+        });
+        this.warmWorkerStartFailed = true;
+      }
       this.warmWorkers.delete(worker);
       this.liveWorkers.delete(worker);
       this.admitQueuedRoots();
@@ -1504,6 +1597,7 @@ export class ActionEngine {
     this.warmWorkers.add(worker);
     this.admitQueuedRoots();
     this.ensureWorkerWarmPool();
+    this.retireWorkerIfSurplus(worker);
   }
 
   private shouldReturnWorkerToPool(worker: ActionWorkerProcess): boolean {
@@ -1528,29 +1622,73 @@ export class ActionEngine {
     ) {
       return;
     }
-    const liveCount = [...this.warmWorkers].filter(
+    for (let i = this.warmWorkerCount(); i < this.workerWarmPoolSize; i++) {
+      if (this.liveWorkers.size >= this.maxWorkerProcesses) break;
+      this.startWarmWorker();
+    }
+  }
+
+  /** Idle and starting warm workers of the current generation. */
+  private warmWorkerCount(): number {
+    return [...this.warmWorkers].filter(
       (worker) => worker.state !== "stopping" && worker.generation === this.workerPoolGeneration,
     ).length;
-    for (let i = liveCount; i < this.workerWarmPoolSize; i++) {
-      if (this.liveWorkers.size >= this.maxWorkerProcesses) break;
-      const worker = this.createWorkerProcess({ pooled: true, detached: true });
-      this.warmWorkers.add(worker);
-      const markReady = (message: unknown) => {
-        if (!isActionWorkerMessage(message) || message.type !== "ready") return;
-        worker.child.off("message", markReady);
-        if (worker.state === "starting") {
-          worker.hasBeenReady = true;
-          worker.state = "idle";
-          this.admitQueuedRoots();
-        }
-      };
-      worker.child.on("message", markReady);
-    }
+  }
+
+  /** Forks a pooled worker into the warm pool. It turns idle on its ready
+   * message and goes to the first queued root, if any. */
+  private startWarmWorker(): void {
+    const worker = this.createWorkerProcess({ pooled: true, detached: true });
+    this.warmWorkers.add(worker);
+    const stopListening = () => {
+      worker.child.off("message", markReady);
+      worker.child.off("error", failStart);
+    };
+    const markReady = (message: unknown) => {
+      if (!isActionWorkerMessage(message) || message.type !== "ready") return;
+      stopListening();
+      if (worker.state === "starting") {
+        worker.hasBeenReady = true;
+        worker.state = "idle";
+        this.warmWorkerStartFailed = false;
+        this.admitQueuedRoots();
+        this.retireWorkerIfSurplus(worker);
+      }
+    };
+    // A failed spawn emits `error` with no pid and may never emit `exit`.
+    const failStart = (err: Error) => {
+      stopListening();
+      log.warn("warm action worker failed to start", { error: err.message });
+      this.warmWorkerStartFailed = true;
+      void this.stopWorker(worker);
+    };
+    worker.child.on("message", markReady);
+    worker.child.once("error", failStart);
+  }
+
+  /** Stops `worker` once it has sat idle for SURPLUS_WARM_WORKER_IDLE_MS while
+   * the pool holds more than `workerWarmPoolSize`. Counting the way
+   * ensureWorkerWarmPool counts means a retirement never triggers a refill. */
+  private retireWorkerIfSurplus(worker: ActionWorkerProcess): void {
+    if (worker.state !== "idle" || this.warmWorkerCount() <= this.workerWarmPoolSize) return;
+    this.clearSurplusIdleTimer(worker);
+    worker.surplusIdleTimer = this.clock.setTimeout(() => {
+      worker.surplusIdleTimer = undefined;
+      if (worker.state !== "idle" || this.warmWorkerCount() <= this.workerWarmPoolSize) return;
+      void this.stopWorker(worker);
+    }, SURPLUS_WARM_WORKER_IDLE_MS);
+  }
+
+  private clearSurplusIdleTimer(worker: ActionWorkerProcess): void {
+    if (!worker.surplusIdleTimer) return;
+    this.clock.clearTimeout(worker.surplusIdleTimer);
+    worker.surplusIdleTimer = undefined;
   }
 
   private async stopWorker(worker: ActionWorkerProcess): Promise<void> {
     if (worker.state === "stopping") return;
     worker.state = "stopping";
+    this.clearSurplusIdleTimer(worker);
     this.warmWorkers.delete(worker);
     if (!worker.child.pid) {
       // A failed fork can emit an error without ever acquiring a pid (and in
