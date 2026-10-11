@@ -348,6 +348,24 @@ describe("feishu history", () => {
     expect(Number(channel.historyCalls[0]?.start_time)).toBeGreaterThanOrEqual(before);
     await talker.stop();
   });
+
+  it("reads back to the whole hour the shared-read cache keys", async () => {
+    const channel = new FakeLarkChannel();
+    const { talker } = buildTalker(channel);
+    await flush();
+
+    const before = Math.floor(Date.now() / 1000) - 3 * 3600;
+    await talker.history!.query({
+      conversationId: "oc_sales" as ConversationId,
+      since: new Date(Date.now() - 2.1 * 3_600_000),
+      limit: 10,
+    });
+
+    const startTime = Number(channel.historyCalls[0]?.start_time);
+    expect(startTime).toBeGreaterThanOrEqual(before);
+    expect(startTime).toBeLessThanOrEqual(before + 5);
+    await talker.stop();
+  });
 });
 
 // Direct-Talker harness for the raw start()/fault() contract.

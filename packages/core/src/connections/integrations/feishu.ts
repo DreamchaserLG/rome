@@ -48,7 +48,12 @@ import type {
   SecretRecord,
   Talker,
 } from "../types.js";
-import { addressIsConversationFeature, directoryPage, historyQueryLimit } from "./talk-features.js";
+import {
+  addressIsConversationFeature,
+  directoryPage,
+  historyQueryLimit,
+  historyWindowHours,
+} from "./talk-features.js";
 
 /** The `app` grant material — the custom-app credentials (see feishu.ts). */
 export interface FeishuAppMaterial {
@@ -479,10 +484,11 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
           };
           const history: TalkHistory = {
             async query(input) {
-              const since = input.since ?? new Date(Date.now() - 24 * 3_600_000);
+              // Whole hours back, as the channel layer's shared-read cache keys it.
+              const hours = historyWindowHours(input.since);
               return adapter.fetchHistory(
                 input.conversationId ?? null,
-                since,
+                new Date(Date.now() - hours * 3_600_000),
                 historyQueryLimit(input.limit),
               );
             },

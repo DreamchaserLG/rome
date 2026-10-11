@@ -239,6 +239,8 @@ export class FeishuAdapter {
    * started when `chatId` is null: the newest `limit` messages created at or
    * after `since`, oldest first. Messages from apps, this bot included, are left
    * out, as Discord's read leaves out bots, and so are messages with no text.
+   * Across every chat, one chat that fails is logged and skipped; when all of
+   * them fail the read rejects with the first error.
    *
    * Reading a group's messages that do not mention the bot needs the app's
    * `im:message.group_msg:readonly` scope, which the agent-ready registration
@@ -246,21 +248,24 @@ export class FeishuAdapter {
    */
   async fetchHistory(chatId: string | null, since: Date, limit: number): Promise<ChannelMessage[]> {
     if (chatId !== null) return this.fetchChatHistory(chatId, since, limit);
-    const perChat = await Promise.all(
-      [...this.observedConversations.keys()].map(async (id) => {
-        try {
-          return await this.fetchChatHistory(id, since, limit);
-        } catch (err) {
-          log.warn("failed to read Feishu chat history", {
-            chatId: id,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          return [];
-        }
-      }),
+    const chatIds = [...this.observedConversations.keys()];
+    const perChat = await Promise.allSettled(
+      chatIds.map((id) => this.fetchChatHistory(id, since, limit)),
     );
+    const failures = perChat.flatMap((result, i) =>
+      result.status === "rejected" ? [{ chatId: chatIds[i], reason: result.reason }] : [],
+    );
+    // Every chat failing means Feishu refused the read itself (a missing scope,
+    // revoked credentials), which an empty answer would pass off as silence.
+    if (failures.length > 0 && failures.length === perChat.length) throw failures[0]?.reason;
+    for (const { chatId: id, reason } of failures) {
+      log.warn("failed to read Feishu chat history", {
+        chatId: id,
+        error: reason instanceof Error ? reason.message : String(reason),
+      });
+    }
     return perChat
-      .flat()
+      .flatMap((result) => (result.status === "fulfilled" ? result.value : []))
       .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
       .slice(-limit);
   }

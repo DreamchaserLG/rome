@@ -1071,6 +1071,30 @@ describe("FeishuAdapter history", () => {
     expect(messages.map((m) => m.messageId)).toStrictEqual(["om_b", "om_a"]);
   });
 
+  it("skips a group it cannot read when another group answers", async () => {
+    await channel.emit({ chatId: "oc_a", chatType: "group", mentionedBot: true });
+    await channel.emit({ chatId: "oc_b", chatType: "group", mentionedBot: true });
+    channel.rawClient.im.v1.message.list = (async (payload: {
+      params: { container_id: string };
+    }) =>
+      payload.params.container_id === "oc_a"
+        ? { code: 230027, msg: "no permission", data: { items: [] } }
+        : { code: 0, data: { items: [historyItem({ message_id: "om_b" })] } }) as never;
+
+    const messages = await adapter.fetchHistory(null, new Date(0), 100);
+
+    expect(messages.map((m) => m.messageId)).toStrictEqual(["om_b"]);
+  });
+
+  it("rejects the read of every group when Feishu refuses all of them", async () => {
+    await channel.emit({ chatId: "oc_a", chatType: "group", mentionedBot: true });
+    await channel.emit({ chatId: "oc_b", chatType: "group", mentionedBot: true });
+    channel.rawClient.im.v1.message.list = async () =>
+      ({ code: 99991663, msg: "invalid tenant access token", data: { items: [] } }) as never;
+
+    await expect(adapter.fetchHistory(null, new Date(0), 100)).rejects.toThrow(/99991663/);
+  });
+
   it("rejects when Feishu refuses the read of a named chat", async () => {
     channel.rawClient.im.v1.message.list = async () =>
       ({ code: 230027, msg: "no permission", data: { items: [] } }) as never;
