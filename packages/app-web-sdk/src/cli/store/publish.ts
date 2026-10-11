@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { isBlockedSourceFile } from "@rome-os/app-runtime/packaging";
 import { create as tarCreate } from "tar";
 import YAML from "yaml";
 import { CliError, requireBearer } from "./config.js";
@@ -29,14 +30,6 @@ const SOURCE_EXCLUDES = [
   ".next",
   "coverage",
 ];
-const ALLOWED_ENV_EXAMPLE_FILES = new Set([".env.example", ".env.sample", ".env.template"]);
-const PRIVATE_KEY_FILE_PATTERN = /^(?:id_(?:rsa|dsa|ecdsa|ed25519)|.*\.(?:pem|key|p12|pfx))$/i;
-const CREDENTIAL_FILE_NAMES = new Set([
-  "credentials.json",
-  "service-account.json",
-  "service_account.json",
-]);
-
 interface PublishResponse {
   listing: { id: string; handle: string; slug: string };
   version: { version: string; contentHash: string; sizeBytes: number; sourceAvailable?: boolean };
@@ -202,18 +195,6 @@ async function validatePublishedSourceTree(sourceRoot: string, currentDir: strin
       );
     }
   }
-}
-
-function isBlockedSourceFile(fileName: string): boolean {
-  const normalizedFileName = fileName.toLowerCase();
-  if (normalizedFileName === ".env") return true;
-  if (
-    normalizedFileName.startsWith(".env.") &&
-    !ALLOWED_ENV_EXAMPLE_FILES.has(normalizedFileName)
-  ) {
-    return true;
-  }
-  return PRIVATE_KEY_FILE_PATTERN.test(fileName) || CREDENTIAL_FILE_NAMES.has(normalizedFileName);
 }
 
 async function packDirectory(

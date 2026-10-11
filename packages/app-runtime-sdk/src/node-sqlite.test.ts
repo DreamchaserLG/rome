@@ -49,4 +49,17 @@ describe("NodeSqliteDatabase", () => {
     expect(count()).toBe(2);
     expect(db.inTransaction).toBe(false);
   });
+
+  it("refuses an async transaction body, as better-sqlite3 does", () => {
+    const db = open();
+
+    expect(() =>
+      db.transaction(async () => {
+        db.prepare("INSERT INTO notes (body) VALUES (?)").run("late");
+      })(),
+    ).toThrow("cannot return a promise");
+    expect(db.inTransaction).toBe(false);
+    // The body ran up to its first await; the rollback undoes that write.
+    expect(db.prepare("SELECT count(*) AS n FROM notes").get()).toEqual({ n: 0 });
+  });
 });

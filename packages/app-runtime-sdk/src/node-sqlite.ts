@@ -63,6 +63,15 @@ type Transaction<F extends (...args: never[]) => unknown> = F & {
   exclusive: F;
 };
 
+// better-sqlite3 refuses an async transaction body, since its statements would
+// run after the commit. Refuse it here too, so a test fails where Rome would.
+function syncResult<T>(result: T): T {
+  if (typeof (result as { then?: unknown } | null)?.then === "function") {
+    throw new TypeError("Transaction function cannot return a promise");
+  }
+  return result;
+}
+
 export class NodeSqliteDatabase {
   readonly #db: DatabaseSync;
   #savepoints = 0;
@@ -106,7 +115,7 @@ export class NodeSqliteDatabase {
           const name = `rome_sp${++this.#savepoints}`;
           this.#db.exec(`SAVEPOINT ${name}`);
           try {
-            const result = fn(...args);
+            const result = syncResult(fn(...args));
             this.#db.exec(`RELEASE ${name}`);
             return result;
           } catch (err) {
@@ -119,7 +128,7 @@ export class NodeSqliteDatabase {
         }
         this.#db.exec(begin);
         try {
-          const result = fn(...args);
+          const result = syncResult(fn(...args));
           this.#db.exec("COMMIT");
           return result;
         } catch (err) {
