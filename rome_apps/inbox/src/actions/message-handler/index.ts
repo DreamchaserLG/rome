@@ -1,4 +1,9 @@
-import { createAppLogger, getCurrentActionContext } from "@rome-os/app-runtime";
+import {
+  channelSessionKey,
+  createAppLogger,
+  getCurrentActionContext,
+  sentinelSessionKey,
+} from "@rome-os/app-runtime";
 import type {
   Action,
   ActionConfig,
@@ -496,7 +501,7 @@ async function handleUntrustedMessage(
     {
       agentName: "sentinel",
       prompt: `Triage this message from ${displayName} (${bondLevel}):\n\n${text}`,
-      channelThreadKey: `sentinel:${channelThreadKey}`,
+      channelThreadKey: sentinelSessionKey(channelThreadKey),
       contextSuffix,
       workingDir,
     },
@@ -685,7 +690,7 @@ export function createMessageHandlerAction(
           return { status: "ok", data: { action: "ignored_by_reply_settings", bondLevel } };
         }
 
-        const channelThreadKey = `${channel}:${threadId}`;
+        const channelThreadKey = channelSessionKey(channel, threadId);
         const contextSuffix = buildMessageContext({
           channel,
           threadId,

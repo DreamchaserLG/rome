@@ -6,6 +6,7 @@ import type { ConversationSettingsControl } from "./conversation-settings.js";
 export { z };
 export type { JSONSchema };
 export * from "./conversation-settings.js";
+export * from "./session-key.js";
 
 // Browser-safe package entry point. Node-only CDP helpers live under the `/browser` subpath.
 

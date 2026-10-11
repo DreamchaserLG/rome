@@ -2,7 +2,11 @@ import { mkdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { EdgeTTS } from "node-edge-tts";
-import { isCoreMainAgentId } from "@rome-os/app-runtime";
+import {
+  isCoreMainAgentId,
+  sessionKeyChannel,
+  webchatConversationOfKey,
+} from "@rome-os/app-runtime";
 import type {
   AgentLifecycleHookDeps,
   AgentMessage,
@@ -103,7 +107,7 @@ function shouldRecapTurnShape(event: AgentTurnFinishedEvent): boolean {
     event.status === "completed" &&
     isCoreMainAgentId(event.turn.agentName) &&
     event.turn.parent === undefined &&
-    event.turn.channelThreadKey?.startsWith("webchat:") === true &&
+    sessionKeyChannel(event.turn.channelThreadKey ?? "") === "webchat" &&
     context?.channel === "webchat" &&
     context.threadType === "private" &&
     event.output.state === "final"
@@ -126,12 +130,8 @@ export function resolveWebchatSessionId(event: AgentTurnFinishedEvent): string {
   if (threadId) return threadId;
 
   const channelThreadKey = event.turn.channelThreadKey;
-  if (channelThreadKey?.startsWith("webchat:")) {
-    const [, sessionId] = channelThreadKey.split(":");
-    if (sessionId) return sessionId;
-  }
-
-  return event.turn.sessionId;
+  const fromKey = channelThreadKey ? webchatConversationOfKey(channelThreadKey) : undefined;
+  return fromKey ?? event.turn.sessionId;
 }
 
 export async function runForkedRecapTurn(
