@@ -716,8 +716,9 @@ function postText(content: object): string {
   for (const paragraph of Array.isArray(post.content) ? post.content : []) {
     if (!Array.isArray(paragraph)) continue;
     const line = paragraph
-      .map((run: { tag?: string; text?: string; user_name?: string }) => {
-        if (run.tag === "at") return run.user_name ? `@${run.user_name}` : "";
+      .map((run: { tag?: string; text?: string; user_id?: string; user_name?: string }) => {
+        // Without a name, keep the `@_user_N` key so the message's mentions can name it.
+        if (run.tag === "at") return run.user_name ? `@${run.user_name}` : (run.user_id ?? "");
         return typeof run.text === "string" ? run.text : "";
       })
       .join("");

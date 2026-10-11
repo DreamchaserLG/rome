@@ -1144,6 +1144,25 @@ describe("historyItemText", () => {
     );
   });
 
+  it("names a post mention that carries only its key from the message's mentions", () => {
+    const content = {
+      content: [
+        [
+          { tag: "at", user_id: "@_user_1" },
+          { tag: "text", text: " ping" },
+        ],
+      ],
+    };
+
+    expect(
+      historyItemText({
+        msg_type: "post",
+        body: { content: JSON.stringify(content) },
+        mentions: [{ key: "@_user_1", name: "Bob" }],
+      }),
+    ).toBe("Bob ping");
+  });
+
   it("answers nothing for content that is not JSON", () => {
     expect(historyItemText({ msg_type: "text", body: { content: "not json" } })).toBe("");
   });
