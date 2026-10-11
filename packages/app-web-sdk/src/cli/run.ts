@@ -47,8 +47,9 @@ app-started hook, and serves:
 Give conversationId the threadId an action runs in, or a history query for
 that conversation finds nothing.
 State lives in memory and resets on restart. Agents, favors and real
-channels are not available; actions that call them get an error result.
-Routines do not run, so listRoutines returns an empty list.
+channels are not available; an action that calls them fails with an error
+naming the service. Routines do not run, so listRoutines returns an empty
+list.
 `;
 
 export interface RunOptions {
