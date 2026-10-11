@@ -762,10 +762,12 @@ describe("ActionEngine", () => {
         await engine.stopWorkerWarmPool();
       });
 
-      it("does not wait on a slow worker again after a later worker reaches ready", async () => {
-        const { engine, children, clock } = createWarmEngine();
+      it("takes single-use forks while a pooled worker is overdue for ready", async () => {
+        const { engine, children, clock } = createWarmEngine(4);
 
-        const first = await submitThenDispatch(engine, children[0]);
+        const submit = engine.run("submit", {}, queue);
+        await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+        await engine.dispatch("explain", {});
         await clock.advance("1m");
         await rs.waitFor(() =>
           expect(actionMessages(children[2])).toMatchObject([{ actionName: "explain" }]),
@@ -773,21 +775,54 @@ describe("ActionEngine", () => {
         children[2].emit("message", ready);
         children[2].completeNext();
         await rs.waitFor(() => expect(children[2].sent).toContainEqual(shutdown));
+
+        // children[1] is still starting, so each later root forks a single-use
+        // worker and no new pooled worker joins it in holding a slot.
+        for (const child of [3, 4]) {
+          await engine.dispatch("explain", {});
+          await rs.waitFor(() =>
+            expect(actionMessages(children[child])).toMatchObject([{ actionName: "explain" }]),
+          );
+          children[child].completeNext();
+          await rs.waitFor(() => expect(children[child].sent).toContainEqual(shutdown));
+        }
+        const failFast = engine.run("root", {});
+        await rs.waitFor(() => expect(actionMessages(children[5])).toHaveLength(1));
+        children[5].completeNext();
+        await expect(failFast).resolves.toEqual({ status: "ok", data: "root" });
+
         children[0].completeNext();
-        await first.submit;
+        await submit;
+        expect(children).toHaveLength(6);
+        await engine.stopWorkerWarmPool();
+      });
+
+      it("stops a pooled worker that never becomes ready and keeps the healthy one", async () => {
+        const { engine, children, actionWorkerFork, clock } = createWarmEngine();
+
+        const { submit } = await submitThenDispatch(engine, children[0]);
+        await clock.advance("1m");
+        await rs.waitFor(() => expect(actionMessages(children[2])).toHaveLength(1));
+        children[2].completeNext();
+        children[0].completeNext();
+        await submit;
         await settle();
 
-        // children[1] is still starting, so the next queued root starts its own worker.
-        const second = await submitThenDispatch(engine, children[0]);
-        expect(children).toHaveLength(4);
-        children[3].emit("message", ready);
-        await rs.waitFor(() =>
-          expect(actionMessages(children[3])).toMatchObject([{ actionName: "explain" }]),
-        );
+        await clock.advance("239s");
+        expect(children[1].sent).not.toContainEqual(shutdown);
+        await clock.advance("1s");
+        expect(children[1].sent).toContainEqual(shutdown);
 
-        children[3].completeNext();
+        // The healthy worker is not retired as surplus and still serves runs.
+        await clock.advance("5m");
+        expect(children[0].sent).not.toContainEqual(shutdown);
+        const run = engine.run("root", {});
+        await rs.waitFor(() =>
+          expect(actionMessages(children[0]).at(-1)).toMatchObject({ actionName: "root" }),
+        );
         children[0].completeNext();
-        await second.submit;
+        await expect(run).resolves.toEqual({ status: "ok", data: "root" });
+        expect(actionWorkerFork).toHaveBeenCalledTimes(3);
         await engine.stopWorkerWarmPool();
       });
 

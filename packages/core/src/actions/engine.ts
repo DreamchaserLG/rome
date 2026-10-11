@@ -125,6 +125,10 @@ const SURPLUS_WARM_WORKER_IDLE_MS = 5 * 60_000;
  * waiting on it. A cold start takes a few seconds, and a slow or hung one must
  * not hold queued roots until `queuedRootMaxWaitMs`. */
 const WARM_WORKER_READY_TIMEOUT_MS = 60_000;
+/** How long a pooled worker may take to send ready before main stops it. Past
+ * WARM_WORKER_READY_TIMEOUT_MS it may still be a slow start, but one this late
+ * is hung, and it would otherwise hold a worker slot until the pool restarts. */
+const WARM_WORKER_START_ABANDON_MS = 5 * 60_000;
 
 export interface ActionRunContext {
   initiator?: string;
@@ -307,13 +311,18 @@ interface ActionWorkerProcess {
   retireAfterRun: boolean;
   cancelRequested?: boolean;
   /** A starting pooled worker past WARM_WORKER_READY_TIMEOUT_MS. Queued roots
-   * no longer wait on it, but it still joins the pool if it reaches ready. */
+   * no longer wait on it, but it still joins the pool if it reaches ready
+   * before WARM_WORKER_START_ABANDON_MS. */
   readyOverdue?: boolean;
   useCount: number;
   hasBeenReady: boolean;
   attached: boolean;
   rpc?: IpcRpc;
   surplusIdleTimer?: ClockTimer;
+}
+
+function isReadyOverdue(worker: ActionWorkerProcess): boolean {
+  return worker.state === "starting" && worker.readyOverdue === true;
 }
 
 /** Thrown by {@link ActionEngine.run} when `name` is not in the registry.
@@ -1315,9 +1324,16 @@ export class ActionEngine {
    * worker to free up or reach ready, instead of taking a single-use fork. A
    * single-use fork pays the same cold start as a pooled worker, so waiting
    * adds none, and a detached root's dispatcher is often a worker that frees
-   * up right after the dispatch is accepted. */
+   * up right after the dispatch is accepted. While a pooled worker is overdue
+   * for ready, queued roots take single-use forks, so repeated slow starts
+   * cannot pile up pooled workers that hold slots without serving roots. */
   private queuedRootsWaitForWarmWorkers(): boolean {
-    return this.workerWarmPoolStarted && this.workerWarmPoolSize > 0 && !this.warmWorkerStartFailed;
+    return (
+      this.workerWarmPoolStarted &&
+      this.workerWarmPoolSize > 0 &&
+      !this.warmWorkerStartFailed &&
+      ![...this.warmWorkers].some(isReadyOverdue)
+    );
   }
 
   /** Whether a queued root may take a worker now. Queued roots stop short of
@@ -1382,10 +1398,7 @@ export class ActionEngine {
   private startWarmWorkersForQueuedRoots(): boolean {
     const busy = this.liveWorkers.size - this.warmWorkers.size;
     let starting = [...this.warmWorkers].filter(
-      (worker) =>
-        worker.state === "starting" &&
-        !worker.readyOverdue &&
-        worker.generation === this.workerPoolGeneration,
+      (worker) => worker.state === "starting" && worker.generation === this.workerPoolGeneration,
     ).length;
     while (
       starting < this.queuedRoots.length &&
@@ -1648,16 +1661,22 @@ export class ActionEngine {
     }
   }
 
-  /** Idle and starting warm workers of the current generation. */
-  private warmWorkerCount(): number {
+  /** Idle and starting warm workers of the current generation. With
+   * `excludeOverdue`, a worker overdue for ready does not count, so surplus
+   * retirement never stops a healthy worker to make room for a hung one. */
+  private warmWorkerCount(options?: { excludeOverdue?: boolean }): number {
     return [...this.warmWorkers].filter(
-      (worker) => worker.state !== "stopping" && worker.generation === this.workerPoolGeneration,
+      (worker) =>
+        worker.state !== "stopping" &&
+        worker.generation === this.workerPoolGeneration &&
+        !(options?.excludeOverdue && isReadyOverdue(worker)),
     ).length;
   }
 
   /** Forks a pooled worker into the warm pool. It turns idle on its ready
    * message and goes to the first queued root, if any. A worker slow to send
-   * ready is left running, since stopping it would leave the pool empty. */
+   * ready keeps running until WARM_WORKER_START_ABANDON_MS, since a slow start
+   * is not a failed one. */
   private startWarmWorker(): void {
     const worker = this.createWorkerProcess({ pooled: true, detached: true });
     this.warmWorkers.add(worker);
@@ -1684,13 +1703,20 @@ export class ActionEngine {
       this.warmWorkerStartFailed = true;
       void this.stopWorker(worker);
     };
-    const readyDeadline = this.clock.setTimeout(() => {
+    let readyDeadline = this.clock.setTimeout(() => {
       if (worker.state !== "starting") return;
       log.warn("warm action worker is slow to become ready", {
         timeoutMs: WARM_WORKER_READY_TIMEOUT_MS,
       });
       worker.readyOverdue = true;
       this.warmWorkerStartFailed = true;
+      readyDeadline = this.clock.setTimeout(() => {
+        if (worker.state !== "starting") return;
+        log.warn("stopping a warm action worker that never became ready", {
+          timeoutMs: WARM_WORKER_START_ABANDON_MS,
+        });
+        void this.stopWorker(worker);
+      }, WARM_WORKER_START_ABANDON_MS - WARM_WORKER_READY_TIMEOUT_MS);
       this.admitQueuedRoots();
     }, WARM_WORKER_READY_TIMEOUT_MS);
     worker.child.on("message", markReady);
@@ -1699,14 +1725,17 @@ export class ActionEngine {
   }
 
   /** Stops `worker` once it has sat idle for SURPLUS_WARM_WORKER_IDLE_MS while
-   * the pool holds more than `workerWarmPoolSize`. Counting the way
-   * ensureWorkerWarmPool counts means a retirement never triggers a refill. */
+   * the pool holds more than `workerWarmPoolSize`. ensureWorkerWarmPool counts
+   * every worker this count does, so a retirement never triggers a refill. */
   private retireWorkerIfSurplus(worker: ActionWorkerProcess): void {
-    if (worker.state !== "idle" || this.warmWorkerCount() <= this.workerWarmPoolSize) return;
+    const isSurplus = () =>
+      worker.state === "idle" &&
+      this.warmWorkerCount({ excludeOverdue: true }) > this.workerWarmPoolSize;
+    if (!isSurplus()) return;
     this.clearSurplusIdleTimer(worker);
     worker.surplusIdleTimer = this.clock.setTimeout(() => {
       worker.surplusIdleTimer = undefined;
-      if (worker.state !== "idle" || this.warmWorkerCount() <= this.workerWarmPoolSize) return;
+      if (!isSurplus()) return;
       void this.stopWorker(worker);
     }, SURPLUS_WARM_WORKER_IDLE_MS);
   }
