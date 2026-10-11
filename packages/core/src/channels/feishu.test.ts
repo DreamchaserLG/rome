@@ -1156,6 +1156,18 @@ describe("FeishuAdapter history", () => {
     await expect(adapter.fetchHistory(null, new Date(0), 100)).rejects.toThrow(/99991663/);
   });
 
+  it("names Feishu's code when the refusal arrives as an HTTP error", async () => {
+    channel.rawClient.im.v1.message.list = async () => {
+      throw Object.assign(new Error("Request failed with status code 400"), {
+        response: { status: 400, data: { code: 230027, msg: "no permission" } },
+      });
+    };
+
+    await expect(adapter.fetchHistory("oc_sales", new Date(0), 100)).rejects.toThrow(
+      "Feishu message list failed (230027): no permission",
+    );
+  });
+
   it("rejects when Feishu refuses the read of a named chat", async () => {
     channel.rawClient.im.v1.message.list = async () =>
       ({ code: 230027, msg: "no permission", data: { items: [] } }) as never;

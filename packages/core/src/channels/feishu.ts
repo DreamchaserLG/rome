@@ -300,16 +300,26 @@ export class FeishuAdapter {
     const newestFirst: ChannelMessage[] = [];
     let pageToken: string | undefined;
     for (let page = 0; page < maxPages && newestFirst.length < limit; page++) {
-      const res = await this.channel.rawClient.im.v1.message.list({
-        params: {
-          container_id_type: "chat",
-          container_id: chatId,
-          start_time: String(Math.floor(since.getTime() / 1000)),
-          sort_type: "ByCreateTimeDesc",
-          page_size: HISTORY_PAGE_SIZE,
-          ...(pageToken ? { page_token: pageToken } : {}),
-        },
-      });
+      let res: Awaited<ReturnType<typeof this.channel.rawClient.im.v1.message.list>>;
+      try {
+        res = await this.channel.rawClient.im.v1.message.list({
+          params: {
+            container_id_type: "chat",
+            container_id: chatId,
+            start_time: String(Math.floor(since.getTime() / 1000)),
+            sort_type: "ByCreateTimeDesc",
+            page_size: HISTORY_PAGE_SIZE,
+            ...(pageToken ? { page_token: pageToken } : {}),
+          },
+        });
+      } catch (err) {
+        // Feishu answers most refusals with HTTP 400, which the SDK throws with
+        // the Feishu code in the response body.
+        const body = (err as { response?: { data?: { code?: unknown; msg?: unknown } } }).response
+          ?.data;
+        if (typeof body?.code !== "number") throw err;
+        res = { code: body.code, msg: typeof body.msg === "string" ? body.msg : undefined };
+      }
       if (res.code !== undefined && res.code !== 0) {
         throw new Error(`Feishu message list failed (${res.code}): ${res.msg ?? "no message"}`);
       }
