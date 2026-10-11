@@ -495,7 +495,15 @@ try {
 }
 
 function readChannelFile(path: string): ChannelMessage[] {
-  const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch (err) {
+    throw new CliError(
+      `rome run: cannot read ${path}: ${err instanceof Error ? err.message : String(err)}`,
+      2,
+    );
+  }
   if (!Array.isArray(parsed))
     throw new CliError(`rome run: ${path} must hold a JSON array of messages`, 2);
   return parsed.map((value) => toChannelMessage(value, (message) => new CliError(message, 2)));
