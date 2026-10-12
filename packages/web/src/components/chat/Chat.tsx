@@ -1949,6 +1949,7 @@ export function Chat({
                   subagentIconByName={subagentIconByName}
                   actions={blockActions}
                   feedback
+                  awaitingGuardian={awaitingGuardian}
                 />
               ) : (
                 emptyState
