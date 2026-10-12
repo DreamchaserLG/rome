@@ -575,7 +575,12 @@ export class ConversationSettingsService implements ConversationSettingsControl 
             : row.sourceThreadType === "group"
               ? "group"
               : "channel",
-      displayName: row.sourceThreadName ?? remembered?.displayName ?? row.name,
+      // Rows written before an adapter could resolve names hold the bare id;
+      // a name learned since then wins, and the next write persists it.
+      displayName:
+        [row.sourceThreadName, remembered?.displayName, row.name].find(
+          (name) => name && name !== row.sourceThreadId,
+        ) ?? row.sourceThreadId,
     };
     if (row.parentSessionId) {
       const parent = this.deps.repository
@@ -615,7 +620,19 @@ export class ConversationSettingsService implements ConversationSettingsControl 
   }
 
   private remember(descriptor: ConversationDescriptor): void {
-    this.descriptors.set(this.key(descriptor.ref), descriptor);
+    const key = this.key(descriptor.ref);
+    const known = this.descriptors.get(key);
+    // An adapter that has only the id (a send before any inbound event, or a
+    // failed name lookup) must not erase a name another path already learned.
+    if (
+      known &&
+      descriptor.displayName === descriptor.ref.conversationId &&
+      known.displayName !== known.ref.conversationId
+    ) {
+      this.descriptors.set(key, { ...descriptor, displayName: known.displayName });
+      return;
+    }
+    this.descriptors.set(key, descriptor);
   }
 
   private supportedFields(

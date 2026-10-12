@@ -32,6 +32,10 @@ class FakeLarkChannel {
   removedReactions: Array<{ messageId: string; reactionId: string }> = [];
   connected = false;
   botIdentity = { openId: "ou_bot", name: "Rome" };
+  /** Group names `getChatInfo` answers with; a chat missing here fails the
+   *  lookup the way a missing `im:chat:read` scope does. */
+  chatNames = new Map<string, string>();
+  chatInfoCalls: string[] = [];
 
   on(name: string, handler: (arg: unknown) => unknown): () => void {
     this.handlers.set(name, handler);
@@ -63,6 +67,13 @@ class FakeLarkChannel {
 
   async removeReaction(messageId: string, reactionId: string): Promise<void> {
     this.removedReactions.push({ messageId, reactionId });
+  }
+
+  async getChatInfo(chatId: string) {
+    this.chatInfoCalls.push(chatId);
+    const name = this.chatNames.get(chatId);
+    if (name === undefined) throw new Error("permission denied");
+    return { chatId, name, chatType: "group" as const };
   }
 
   /** Replay an inbound normalized message through the registered handler. */
@@ -330,6 +341,28 @@ describe("FeishuAdapter", () => {
     });
 
     expect(captured).toHaveLength(0);
+  });
+
+  it("names an observed group after its Feishu chat name", async () => {
+    channel.chatNames.set("oc_chat", "Launch crew");
+
+    await channel.emit({ chatType: "group", mentionedBot: true });
+    await channel.emit({ chatType: "group", mentionedBot: true });
+
+    expect(adapter.listObservedConversations()).toStrictEqual([
+      { id: "oc_chat", displayName: "Launch crew", kind: "group" },
+    ]);
+    expect(channel.chatInfoCalls).toStrictEqual(["oc_chat"]);
+  });
+
+  it("keeps the chat id as the group name when the lookup fails, without retrying per message", async () => {
+    await channel.emit({ chatType: "group", mentionedBot: true });
+    await channel.emit({ chatType: "group", mentionedBot: true });
+
+    expect(adapter.listObservedConversations()).toStrictEqual([
+      { id: "oc_chat", displayName: "oc_chat", kind: "group" },
+    ]);
+    expect(channel.chatInfoCalls).toStrictEqual(["oc_chat"]);
   });
 
   it("ignores group messages that do not mention the bot by default", async () => {

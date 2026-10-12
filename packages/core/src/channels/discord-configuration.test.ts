@@ -6,7 +6,12 @@ import type {
   ConversationSettingsControl,
   ConversationSettingsSnapshot,
 } from "@rome-os/app-runtime";
-import type { AutocompleteInteraction, ChatInputCommandInteraction } from "discord.js";
+import {
+  ChannelType,
+  type AutocompleteInteraction,
+  type ChatInputCommandInteraction,
+  type Message,
+} from "discord.js";
 import { buildDiscordSlashCommands, DiscordAdapter } from "./discord.js";
 
 const CONNECTION_ID = "connection:discord";
@@ -261,5 +266,47 @@ describe("Discord configuration command authorization", () => {
     expect(resolveDiscordPerson).toHaveBeenCalledWith(UNLINKED_ID);
     expect(listAgents).not.toHaveBeenCalled();
     expect(respond).toHaveBeenCalledWith([]);
+  });
+});
+
+describe("Discord conversation names", () => {
+  async function observedFor(message: Message) {
+    const settings = makeConversationSettings();
+    const adapter = new DiscordAdapter({
+      botToken: "test-token",
+      connectionId: CONNECTION_ID,
+      conversationSettings: settings.control,
+    });
+    await (
+      adapter as unknown as { settingsForMessage(message: Message): Promise<unknown> }
+    ).settingsForMessage(message);
+    return (settings.control.observe as ReturnType<typeof rs.fn>).mock.calls[0]![0];
+  }
+
+  it("names a direct message after the person on the other end", async () => {
+    const observed = await observedFor({
+      channelId: "dm-1",
+      channel: {
+        type: ChannelType.DM,
+        name: null,
+        recipient: { displayName: "Alice" },
+        isThread: () => false,
+      },
+      author: { displayName: "Alice" },
+      guild: null,
+    } as unknown as Message);
+
+    expect(observed).toMatchObject({ displayName: "Alice" });
+  });
+
+  it("names a guild channel after the channel", async () => {
+    const observed = await observedFor({
+      channelId: CHANNEL_ID,
+      channel: { type: ChannelType.GuildText, name: "general", isThread: () => false },
+      author: { displayName: "Alice" },
+      guild: { name: "Rome" },
+    } as unknown as Message);
+
+    expect(observed).toMatchObject({ displayName: "general", containerName: "Rome" });
   });
 });

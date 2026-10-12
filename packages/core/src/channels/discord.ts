@@ -10,6 +10,7 @@ import {
   RESTEvents,
   Routes,
   SlashCommandBuilder,
+  type Channel,
   type Message,
   type TextChannel,
   type DMChannel,
@@ -174,6 +175,12 @@ function isThreadType(type: ChannelType): boolean {
     type === ChannelType.PrivateThread ||
     type === ChannelType.AnnouncementThread
   );
+}
+
+/** A one-to-one DM has no channel name; the person on the other end names it. */
+function channelDisplayName(channel: Channel): string | undefined {
+  if (channel.type === ChannelType.DM) return channel.recipient?.displayName;
+  return ("name" in channel ? channel.name : null) ?? undefined;
 }
 
 export function buildDiscordSlashCommands() {
@@ -631,7 +638,9 @@ export class DiscordAdapter {
       message.channel && "isThread" in message.channel && message.channel.isThread()
         ? message.channel.parentId
         : null;
-    const displayName = "name" in message.channel ? (message.channel.name ?? undefined) : undefined;
+    const displayName =
+      channelDisplayName(message.channel) ??
+      (message.channel.type === ChannelType.DM ? message.author.displayName : undefined);
     const containerName = message.guild?.name;
     const descriptor = this.descriptor(message.channelId, displayName, parentId, containerName);
     this.conversationSettings.observe?.(descriptor);
@@ -1335,7 +1344,7 @@ export class DiscordAdapter {
     if (!channelName || parentId === undefined || !containerName) {
       const channel = await this.client.channels.fetch(channelId).catch(() => null);
       if (channel) {
-        if (!channelName && "name" in channel) channelName = channel.name ?? undefined;
+        channelName ??= channelDisplayName(channel);
         if (parentId === undefined) parentId = channel.isThread() ? channel.parentId : null;
         if (!containerName && "guild" in channel) containerName = channel.guild?.name;
       }

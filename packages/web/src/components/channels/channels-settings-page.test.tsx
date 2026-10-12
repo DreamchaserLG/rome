@@ -83,7 +83,7 @@ function item(input: {
  */
 function mockApi(options: { failPatch?: boolean; deferFirstPatch?: boolean } = {}) {
   const patchBodies: unknown[] = [];
-  const row = item({ id: "engineering", name: "engineering" });
+  const row = item({ id: "1180", name: "engineering" });
   // Lets a test hold the first PATCH open, edit another field while it is in
   // flight, and only then decide the outcome — the race is scripted, not timed.
   let settleFirst: ((outcome: { fail: boolean }) => void) | null = null;
@@ -142,7 +142,7 @@ const PAST_DEBOUNCE_MS = 800;
 describe("ChannelsSettingsPage", () => {
   it("auto-saves each edit, exposes provider fields and catalog agents, and paginates", async () => {
     const parent = item({
-      id: "engineering",
+      id: "1180",
       name: "engineering",
       overrides: { activation: { mode: "mention" } },
     });
@@ -176,7 +176,7 @@ describe("ChannelsSettingsPage", () => {
       }
       if (url.startsWith("/api/conversation-settings?") && !init?.method) {
         return url.includes("cursor=next")
-          ? ok({ items: [item({ id: "releases", name: "releases" })] })
+          ? ok({ items: [item({ id: "1181", name: "releases" })] })
           : ok({ items: [parent], nextCursor: "next" });
       }
       if (url === "/api/conversation-settings" && init?.method === "PATCH") {
@@ -233,7 +233,7 @@ describe("ChannelsSettingsPage", () => {
     // because they landed inside a single debounce window.
     await waitFor(() => expect(patchBodies).toHaveLength(1));
     expect(patchBodies[0]).toMatchObject({
-      ref: { connectionId: "discord-1", conversationId: "engineering" },
+      ref: { connectionId: "discord-1", conversationId: "1180" },
       set: {
         enabled: false,
         activation: { mode: "all" },
@@ -339,6 +339,24 @@ describe("ChannelsSettingsPage", () => {
 
     await waitFor(() => expect(patchBodies).toHaveLength(2));
     expect(patchBodies[1]).toMatchObject({ set: { enabled: true } });
+  });
+
+  it("titles a conversation the provider gave no name as unnamed, with its id beside the kind", async () => {
+    const row = item({ id: "oc_5f2a", service: "feishu", name: "oc_5f2a" });
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/connections") return ok({ connections: [] });
+      if (url === "/api/agents") return ok({ agents: [] });
+      if (url.startsWith("/api/conversation-settings?")) return ok({ items: [row] });
+      throw new Error(`Unexpected request: GET ${url}`);
+    }) as typeof fetch);
+
+    renderPage();
+
+    const heading = await screen.findByRole("heading", { name: /Unnamed conversation/ });
+    expect(heading.textContent).toBe("Rome / Unnamed conversation");
+    const article = heading.closest("article") as HTMLElement;
+    expect(within(article).getByText(/Channel · oc_5f2a/)).toBeTruthy();
   });
 
   it("shows a retryable error without the empty-state onboarding copy", async () => {

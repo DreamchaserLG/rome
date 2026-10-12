@@ -319,6 +319,7 @@
         "dm": "私聊",
         "topic": "话题"
       },
+      "unnamed": "未命名会话",
       "loading": "正在加载会话…",
       "emptyTitle": "未找到可配置的会话",
       "emptyDescription": "连接受支持的对话服务，或发送一条消息让 Rome 发现该会话。",

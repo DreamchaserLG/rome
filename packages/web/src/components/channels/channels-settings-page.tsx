@@ -282,6 +282,10 @@ function ConversationRow({
   const headingId = useId();
   const { snapshot } = item;
   const conversation = snapshot.conversation;
+  // Adapters fall back to the provider id when they cannot resolve a name.
+  const unnamed =
+    !conversation.displayName.trim() ||
+    conversation.displayName === conversation.ref.conversationId;
   const supported = new Set(snapshot.supportedFields);
   const overrideCount = snapshot.supportedFields.filter(
     (field) => settingSource(snapshot, field) === "overridden",
@@ -470,7 +474,7 @@ function ConversationRow({
               {conversation.containerName && (
                 <span className="text-muted-foreground">{conversation.containerName} / </span>
               )}
-              {conversation.displayName}
+              {unnamed ? t("channels.conversationSettings.unnamed") : conversation.displayName}
             </h3>
             <Badge variant={item.availability === "online" ? "success" : "muted"}>
               {t(
@@ -490,6 +494,8 @@ function ConversationRow({
               list the service would otherwise be absent from the a11y tree. */}
           <p className="mt-1 truncate text-aux text-muted-foreground">
             {t(`channels.conversationSettings.kinds.${conversation.kind}`)}
+            {/* Unnamed, the provider id is the only thing that tells two rows apart. */}
+            {unnamed && ` · ${conversation.ref.conversationId}`}
             <span className="sr-only">{` · ${serviceLabel(conversation.service)}`}</span>
           </p>
         </div>

@@ -263,6 +263,32 @@ describe("ConversationSettingsService", () => {
     });
   });
 
+  it("replaces a stored bare-id name with one learned later, and never erases it", async () => {
+    const { service, repository, feishu } = await setup();
+    const ref: ConversationRef = {
+      connectionId: feishu.id,
+      conversationId: "oc_launch" as ConversationId,
+    };
+    const unnamed: ConversationDescriptor = {
+      ref,
+      service: "feishu",
+      kind: "group",
+      displayName: "oc_launch",
+    };
+    service.observe(unnamed);
+    await service.update({ ref, set: { enabled: false }, clear: [], actor: { kind: "guardian" } });
+    expect(repository.find("feishu", ref.conversationId)?.sourceThreadName).toBe("oc_launch");
+
+    service.observe({ ...unnamed, displayName: "Launch crew" });
+    await expect(service.get(ref)).resolves.toMatchObject({
+      conversation: { displayName: "Launch crew" },
+    });
+    service.observe(unnamed);
+    await service.update({ ref, set: { enabled: true }, clear: [], actor: { kind: "guardian" } });
+
+    expect(repository.find("feishu", ref.conversationId)?.sourceThreadName).toBe("Launch crew");
+  });
+
   it("round-trips reset modes and rejects invalid atomic values", async () => {
     const { service, parent } = await setup();
     await expect(service.get(parent)).resolves.toMatchObject({

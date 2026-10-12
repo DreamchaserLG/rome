@@ -319,6 +319,7 @@
         "dm": "Direct message",
         "topic": "Topic"
       },
+      "unnamed": "Unnamed conversation",
       "loading": "Loading conversations…",
       "emptyTitle": "No configurable conversations found",
       "emptyDescription": "Connect a supported chat service, or send a message so Rome can discover the conversation.",

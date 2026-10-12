@@ -22,6 +22,7 @@ import type {
 } from "@rome-os/app-runtime";
 
 const log = createLogger("feishu");
+const CHAT_NAME_RETRY_MS = 10 * 60_000;
 const PROCESSING_REACTION_EMOJI = "Typing";
 /** Feishu content types whose bot mention can be the whole message. */
 const TEXT_BEARING_CONTENT_TYPES: ReadonlySet<string> = new Set(["text", "post"]);
@@ -125,6 +126,12 @@ export class FeishuAdapter {
     string,
     { id: string; displayName: string; kind: "group" | "channel" }
   >();
+  /** Group names from `im.v1.chat.get`, keyed by chat id. Inbound events carry
+   *  only the id, so without this lookup Settings → Channels titles every
+   *  group with it. A failed lookup is retried after a cooldown rather than on
+   *  every message, so a manual app without `im:chat:read` costs one call per
+   *  window. */
+  private readonly chatNames = new Map<string, { name?: string; failedAt?: number }>();
   /** Unsubscribe callbacks from channel.on(), cleared on stop() so handlers
    *  don't accumulate if the adapter is ever started again. */
   private unsubscribes: Array<() => void> = [];
@@ -257,7 +264,7 @@ export class FeishuAdapter {
     if (threadType === "group") {
       this.observedConversations.set(m.chatId, {
         id: m.chatId,
-        displayName: m.chatId,
+        displayName: (await this.chatName(m.chatId)) ?? m.chatId,
         kind: "group",
       });
     }
@@ -324,6 +331,25 @@ export class FeishuAdapter {
     const value = evt.action.value;
     if (isFeishuGroupConfigAction(value)) {
       await this.handleGroupConfigAction(evt);
+    }
+  }
+
+  private async chatName(chatId: string): Promise<string | undefined> {
+    const cached = this.chatNames.get(chatId);
+    if (cached?.name) return cached.name;
+    if (cached?.failedAt && Date.now() - cached.failedAt < CHAT_NAME_RETRY_MS) return undefined;
+    try {
+      const name = (await this.channel.getChatInfo(chatId)).name?.trim();
+      if (!name) throw new Error("chat has no name");
+      this.chatNames.set(chatId, { name });
+      return name;
+    } catch (err) {
+      log.warn("feishu chat name lookup failed", {
+        chatId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      this.chatNames.set(chatId, { failedAt: Date.now() });
+      return undefined;
     }
   }
 
@@ -487,7 +513,7 @@ export class FeishuAdapter {
       ref: { connectionId: this.connectionId, conversationId: chatId as ConversationId },
       service: "feishu",
       kind: observed?.kind ?? "group",
-      displayName: observed?.displayName ?? chatId,
+      displayName: observed?.displayName ?? this.chatNames.get(chatId)?.name ?? chatId,
     };
     this.conversationSettings.observe?.(descriptor);
     const snapshot = await this.conversationSettings.get(descriptor.ref);
