@@ -81,7 +81,8 @@ export interface MessageListProps {
   // while read-only surfaces (public share, sessions viewer) omit them.
   feedback?: boolean;
   // The chat is parked on a card the guardian has not answered. Lets the
-  // latest turn's unfinished plan read "Waiting for you".
+  // latest turn's unfinished plan read "Waiting for you". Read-only surfaces
+  // leave it out, so they never say so.
   awaitingGuardian?: boolean;
 }
 
@@ -463,21 +464,13 @@ function rowPlanSteps(row: ChatRow) {
   return [];
 }
 
-function hasApprovalCard(row: ChatRow): boolean {
-  if (row.kind !== "agent") return false;
-  const { messages } = row;
-  return messages.some((message) =>
-    parseMessageEntries(message).some((block) => block.type === "approval_card"),
-  );
-}
-
 // For each row whose turn left its plan unfinished, what came after it in the
 // same session. A plan has no id, so any later plan counts as "new plan
-// below", and later turns without one only say how many there were. The
-// latest turn waits on the guardian when the chat is parked on an unanswered
-// card, or when it raised an approval card: approving resumes as a new turn.
-// An approval card is saved as its own message with no turn id, so it is
-// looked for anywhere from the turn's first row on and is not a later turn.
+// below", and later turns without one only say how many there were. Only the
+// latest turn can wait on the guardian, and only when the chat is parked on an
+// unanswered card. An approval card does not count: its stored status stays
+// "pending" after it resolves. A message with no turn id (such as an approval
+// card sent through the channel) is not a later turn.
 export function settledPlanContexts(
   rows: ChatRow[],
   awaitingGuardian: boolean,
@@ -488,25 +481,15 @@ export function settledPlanContexts(
     const steps = rowPlanSteps(row);
     if (steps.length === 0 || steps.every((step) => step.status === "completed")) return;
     const { turnId, sessionId } = rowTurnRef(row);
-    const sameSession = (other: ChatRow) => rowTurnRef(other).sessionId === sessionId;
     const later = rows.slice(index + 1).filter((next) => {
       const ref = rowTurnRef(next);
-      return sameSession(next) && ref.turnId !== null && ref.turnId !== turnId;
+      return ref.sessionId === sessionId && ref.turnId !== null && ref.turnId !== turnId;
     });
     const laterTurns = new Set(later.map((next) => rowTurnRef(next).turnId)).size;
-    const turnStart = rows.findIndex(
-      (other) => sameSession(other) && rowTurnRef(other).turnId === turnId,
-    );
-    const raisedApproval =
-      laterTurns === 0 &&
-      rows
-        .slice(Math.max(turnStart, 0))
-        .some((other) => sameSession(other) && hasApprovalCard(other));
     contexts.set(row.key, {
       laterPlan: later.some((next) => rowPlanSteps(next).length > 0),
       laterTurns,
-      waiting:
-        laterTurns === 0 && ((awaitingGuardian && sessionId === lastSessionId) || raisedApproval),
+      waiting: laterTurns === 0 && awaitingGuardian && sessionId === lastSessionId,
     });
   });
   return contexts;

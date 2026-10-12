@@ -782,11 +782,17 @@ describe("settledPlanContexts", () => {
       waiting: true,
     });
     expect(
-      contextOfFirstPlan(turn("t1", { plan: "unfinished", approval: true }), false)?.waiting,
-    ).toBe(true);
-    expect(
       contextOfFirstPlan([...turn("t1", { plan: "unfinished" }), ...turn("t2")], true)?.waiting,
     ).toBe(false);
+  });
+
+  it("neither waits on nor counts a turnless approval card", () => {
+    // Its stored status stays "pending" after it resolves, so it proves nothing.
+    expect(contextOfFirstPlan(turn("t1", { plan: "unfinished", approval: true }))).toEqual({
+      laterPlan: false,
+      laterTurns: 0,
+      waiting: false,
+    });
   });
 
   it("leaves a finished plan alone", () => {
