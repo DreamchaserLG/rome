@@ -1,4 +1,4 @@
-import { and, asc, eq, like } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import type {
   ConversationDescriptor,
   ConversationId,
@@ -38,13 +38,10 @@ export class ConversationSettingsRepository {
     return rowByAddress(this.db, service, conversationId) ?? null;
   }
 
-  listKnown(input: { service?: string; query?: string }): StoredConversationRow[] {
+  listKnown(input: { service?: string }): StoredConversationRow[] {
     const predicates = [isChannelConversation];
     if (input.service) {
       predicates.push(eq(romeSessions.sourceChannel, input.service));
-    }
-    if (input.query?.trim()) {
-      predicates.push(like(romeSessions.sourceThreadName, `%${input.query.trim()}%`));
     }
     return this.db
       .select()
