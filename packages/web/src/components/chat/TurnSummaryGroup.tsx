@@ -129,7 +129,7 @@ export function TurnSummaryGroup({
       : settled?.waiting
         ? t("plan.waitingForYou")
         : superseded
-          ? t("plan.newPlanBelow")
+          ? t("plan.continuedBelow")
           : settled?.laterTurns
             ? `${t("plan.incomplete")} · ${t("plan.laterTurns", { count: settled.laterTurns })}`
             : t("plan.incomplete");

@@ -62,7 +62,7 @@
     "completed": "Completed",
     "incomplete": "Incomplete",
     "waitingForYou": "Waiting for you",
-    "newPlanBelow": "New plan below ↓",
+    "continuedBelow": "Continued below ↓",
     "laterTurns_one": "{{count}} more turn after this",
     "laterTurns_other": "{{count}} more turns after this"
   },

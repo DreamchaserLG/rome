@@ -144,7 +144,7 @@ describe("TurnSummaryGroup plan", () => {
         settled={{ laterPlan: true, laterTurns: 2, waiting: false }}
       />,
     );
-    const toggle = screen.getByRole("button", { name: /Plan New plan below ↓ 1 of 2/ });
+    const toggle = screen.getByRole("button", { name: /Plan Continued below ↓ 1 of 2/ });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
   });
 

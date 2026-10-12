@@ -62,7 +62,7 @@
     "completed": "已完成",
     "incomplete": "未完成",
     "waitingForYou": "等你处理",
-    "newPlanBelow": "后面有新计划 ↓",
+    "continuedBelow": "在下方继续 ↓",
     "laterTurns_one": "之后还有 {{count}} 轮对话",
     "laterTurns_other": "之后还有 {{count}} 轮对话"
   },
