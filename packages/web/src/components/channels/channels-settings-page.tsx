@@ -475,6 +475,9 @@ function ConversationRow({
                 <span className="text-muted-foreground">{conversation.containerName} / </span>
               )}
               {unnamed ? t("channels.conversationSettings.unnamed") : conversation.displayName}
+              {/* The visible id sits in the meta line; repeat it here so the
+                  rows' accessible names stay distinct. */}
+              {unnamed && <span className="sr-only">{` ${conversation.ref.conversationId}`}</span>}
             </h3>
             <Badge variant={item.availability === "online" ? "success" : "muted"}>
               {t(

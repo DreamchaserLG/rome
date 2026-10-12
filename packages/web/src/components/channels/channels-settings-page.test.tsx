@@ -354,7 +354,7 @@ describe("ChannelsSettingsPage", () => {
     renderPage();
 
     const heading = await screen.findByRole("heading", { name: /Unnamed conversation/ });
-    expect(heading.textContent).toBe("Rome / Unnamed conversation");
+    expect(heading.textContent).toBe("Rome / Unnamed conversation oc_5f2a");
     const article = heading.closest("article") as HTMLElement;
     expect(within(article).getByText(/Channel · oc_5f2a/)).toBeTruthy();
   });
