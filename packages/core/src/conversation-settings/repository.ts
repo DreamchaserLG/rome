@@ -5,7 +5,7 @@ import type {
   StoredConversationSettings,
 } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
-import { channelConversationId } from "../db/repositories/webchat.js";
+import { channelConversationId, channelPlaceholderName } from "../db/repositories/webchat.js";
 import { romeAgentMessages, romeSessions } from "../db/schema/system.js";
 import { isChannelConversation } from "../db/session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
@@ -107,9 +107,16 @@ export class ConversationSettingsRepository {
         );
       }
 
+      // The title follows the provider's name only while nobody has changed it,
+      // so a settings write never undoes a guardian's rename.
+      const untitled = [
+        current.sourceThreadId,
+        current.sourceThreadName,
+        channelPlaceholderName(descriptor.service, descriptor.ref.conversationId),
+      ].includes(current.name);
       tx.update(romeSessions)
         .set({
-          name: descriptor.displayName,
+          ...(untitled ? { name: descriptor.displayName } : {}),
           sourceChannel: descriptor.service,
           sourceThreadName: descriptor.displayName,
           sourceThreadType,

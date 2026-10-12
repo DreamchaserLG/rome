@@ -7,7 +7,7 @@ import { ConnectionRegistry } from "../connections/registry.js";
 import type { Channels } from "../channels/channel.js";
 import { connectionPorts } from "../channels/connection-ports.js";
 import type { ConnectionDescriptor, Talker } from "../connections/types.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { channelConversationId, WebChatRepository } from "../db/repositories/webchat.js";
 import { ConversationSettingsRepository } from "./repository.js";
 import { ConversationSettingsService } from "./service.js";
 
@@ -310,7 +310,38 @@ describe("ConversationSettingsService", () => {
     });
     await service.update({ ref, set: { enabled: true }, clear: [], actor: { kind: "guardian" } });
 
-    expect(repository.find("feishu", ref.conversationId)?.sourceThreadName).toBe("Launch team");
+    expect(repository.find("feishu", ref.conversationId)).toMatchObject({
+      name: "Launch team",
+      sourceThreadName: "Launch team",
+    });
+  });
+
+  it("keeps a guardian's session title when a settings write records a new name", async () => {
+    const { service, repository, feishu } = await setup();
+    const ref: ConversationRef = {
+      connectionId: feishu.id,
+      conversationId: "oc_titled" as ConversationId,
+    };
+    const named: ConversationDescriptor = {
+      ref,
+      service: "feishu",
+      kind: "group",
+      displayName: "Launch crew",
+    };
+    service.observe(named);
+    await service.update({ ref, set: { enabled: false }, clear: [], actor: { kind: "guardian" } });
+    await new WebChatRepository(testDb!.db).updateSessionName(
+      channelConversationId("feishu", "oc_titled"),
+      "Rocket chat",
+    );
+
+    service.observe({ ...named, displayName: "Launch team" });
+    await service.update({ ref, set: { enabled: true }, clear: [], actor: { kind: "guardian" } });
+
+    expect(repository.find("feishu", ref.conversationId)).toMatchObject({
+      name: "Rocket chat",
+      sourceThreadName: "Launch team",
+    });
   });
 
   it("searches a live id-only entry by the stored name of its row", async () => {
