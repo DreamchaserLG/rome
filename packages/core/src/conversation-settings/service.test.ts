@@ -289,6 +289,30 @@ describe("ConversationSettingsService", () => {
     expect(repository.find("feishu", ref.conversationId)?.sourceThreadName).toBe("Launch crew");
   });
 
+  it("shows and persists a rename observed after the row was saved", async () => {
+    const { service, repository, feishu } = await setup();
+    const ref: ConversationRef = {
+      connectionId: feishu.id,
+      conversationId: "oc_crew" as ConversationId,
+    };
+    const named: ConversationDescriptor = {
+      ref,
+      service: "feishu",
+      kind: "group",
+      displayName: "Launch crew",
+    };
+    service.observe(named);
+    await service.update({ ref, set: { enabled: false }, clear: [], actor: { kind: "guardian" } });
+
+    service.observe({ ...named, displayName: "Launch team" });
+    await expect(service.get(ref)).resolves.toMatchObject({
+      conversation: { displayName: "Launch team" },
+    });
+    await service.update({ ref, set: { enabled: true }, clear: [], actor: { kind: "guardian" } });
+
+    expect(repository.find("feishu", ref.conversationId)?.sourceThreadName).toBe("Launch team");
+  });
+
   it("treats a session row's service:id placeholder name as unnamed", async () => {
     const { service, feishu } = await setup();
     await new WebChatRepository(testDb!.db).ensureChannelConversation({
