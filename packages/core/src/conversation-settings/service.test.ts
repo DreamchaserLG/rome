@@ -440,6 +440,29 @@ describe("ConversationSettingsService", () => {
     expect(repository.find("discord", parent.conversationId)?.sourceThreadName).toBe("ops-room");
   });
 
+  it("never takes a guardian's session title as the conversation's name", async () => {
+    const { service, repository, feishu } = await setup();
+    const webchat = new WebChatRepository(testDb!.db);
+    await webchat.ensureChannelConversation({
+      channel: "feishu",
+      threadId: "oc_retitled",
+      threadType: "group",
+      agentName: "main",
+    });
+    await webchat.updateSessionName(channelConversationId("feishu", "oc_retitled"), "Rocket chat");
+    const ref = { connectionId: feishu.id, conversationId: "oc_retitled" as ConversationId };
+
+    await expect(service.get(ref)).resolves.toMatchObject({
+      conversation: { displayName: "oc_retitled" },
+    });
+    await service.update({ ref, set: { enabled: false }, clear: [], actor: { kind: "guardian" } });
+
+    expect(repository.find("feishu", ref.conversationId)).toMatchObject({
+      name: "Rocket chat",
+      sourceThreadName: "oc_retitled",
+    });
+  });
+
   it("treats a session row's service:id placeholder name as unnamed", async () => {
     const { service, feishu } = await setup();
     await new WebChatRepository(testDb!.db).ensureChannelConversation({

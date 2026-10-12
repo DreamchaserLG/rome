@@ -588,8 +588,9 @@ export class ConversationSettingsService implements ConversationSettingsControl 
       // A name observed live wins over the stored one, so renames reach
       // Settings and the next write persists them. Neither counts while it is
       // the bare id or the `service:id` placeholder a channel row starts with.
+      // The session title (`row.name`) is the guardian's, so it never stands in.
       displayName:
-        [remembered?.displayName, row.sourceThreadName, row.name].find(
+        [remembered?.displayName, row.sourceThreadName].find(
           (name) => name && name !== row.sourceThreadId && name !== placeholder,
         ) ?? row.sourceThreadId,
     };

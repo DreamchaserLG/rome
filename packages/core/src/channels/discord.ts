@@ -1344,7 +1344,7 @@ export class DiscordAdapter {
     if (!channelName || parentId === undefined || !containerName) {
       const channel = await this.client.channels.fetch(channelId).catch(() => null);
       if (channel) {
-        channelName ??= channelDisplayName(channel);
+        if (!channelName) channelName = channelDisplayName(channel);
         if (parentId === undefined) parentId = channel.isThread() ? channel.parentId : null;
         if (!containerName && "guild" in channel) containerName = channel.guild?.name;
       }
