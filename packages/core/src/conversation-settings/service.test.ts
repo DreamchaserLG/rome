@@ -340,7 +340,7 @@ describe("ConversationSettingsService", () => {
     await new WebChatRepository(testDb!.db).ensureChannelConversation({
       channel: "discord",
       threadId: "ops",
-      threadName: "ops",
+      threadName: "ops-room",
       threadType: "group",
       agentName: "main",
     });
@@ -358,7 +358,7 @@ describe("ConversationSettingsService", () => {
     });
 
     await expect(service.get(parent)).resolves.toMatchObject({
-      conversation: { displayName: "ops" },
+      conversation: { displayName: "ops-room" },
     });
     await service.update({
       ref: parent,
@@ -366,7 +366,7 @@ describe("ConversationSettingsService", () => {
       clear: [],
       actor: { kind: "guardian" },
     });
-    expect(repository.find("discord", parent.conversationId)?.sourceThreadName).toBe("ops");
+    expect(repository.find("discord", parent.conversationId)?.sourceThreadName).toBe("ops-room");
   });
 
   it("treats a session row's service:id placeholder name as unnamed", async () => {
