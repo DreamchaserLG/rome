@@ -24,6 +24,7 @@ import type { ConnectionRegistry } from "../connections/registry.js";
 import type { Channels } from "../channels/channel.js";
 import type { StoredConversationRow } from "./repository.js";
 import { ConversationSettingsRepository } from "./repository.js";
+import { channelPlaceholderName } from "../db/repositories/webchat.js";
 import {
   CONVERSATION_SETTING_FIELDS_BY_SERVICE,
   CORE_CONVERSATION_SETTING_FIELDS,
@@ -269,7 +270,10 @@ export class ConversationSettingsService implements ConversationSettingsControl 
       // enter this page only after Rome has persisted the conversation.
       if (descriptor.kind === "dm") continue;
       this.remember(descriptor);
-      byRef.set(this.key(descriptor.ref), { descriptor, source: "live" });
+      // remember() may keep a name learned elsewhere when the directory has
+      // only the id; filter, sort, and title all use that merged descriptor.
+      const key = this.key(descriptor.ref);
+      byRef.set(key, { descriptor: this.descriptors.get(key) ?? descriptor, source: "live" });
     }
     for (const row of known) {
       // Native threads inherit from their parent. Persisted DMs are included
@@ -553,6 +557,7 @@ export class ConversationSettingsService implements ConversationSettingsControl 
     if (!row.sourceThreadId || !row.sourceChannel) {
       throw new Error(`Channel conversation "${row.id}" has no channel address`);
     }
+    const placeholder = channelPlaceholderName(row.sourceChannel, row.sourceThreadId);
     const connections = this.deps.connections.find(row.sourceChannel);
     if (connections.length !== 1) {
       throw new Error(
@@ -584,7 +589,7 @@ export class ConversationSettingsService implements ConversationSettingsControl 
           (name) =>
             name &&
             name !== row.sourceThreadId &&
-            name !== `${row.sourceChannel}:${row.sourceThreadId}`,
+            name !== placeholder,
         ) ?? row.sourceThreadId,
     };
     if (row.parentSessionId) {

@@ -346,8 +346,9 @@ export class FeishuAdapter {
     if (entry?.pending) return;
     const ttl = entry?.name ? CHAT_NAME_TTL_MS : CHAT_NAME_RETRY_MS;
     if (entry && Date.now() - entry.checkedAt < ttl) return;
-    const pending = this.channel
-      .getChatInfo(chatId)
+    // Started inside a promise so a synchronous throw lands in the catch below.
+    const pending = Promise.resolve()
+      .then(() => this.channel.getChatInfo(chatId))
       .then((info) => info.name?.trim() || undefined)
       .catch((err: unknown) => {
         log.warn("feishu chat name lookup failed", {

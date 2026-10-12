@@ -3,10 +3,11 @@ import {
   type CurrentActionContext,
   type RomeSessionType,
 } from "@rome-os/app-runtime";
-import type {
-  RomeAgentTranscriptMessageInput,
-  RomeAgentTraceTriggerMetadata,
-  WebChatRepository,
+import {
+  channelPlaceholderName,
+  type RomeAgentTranscriptMessageInput,
+  type RomeAgentTraceTriggerMetadata,
+  type WebChatRepository,
 } from "../db/repositories/webchat.js";
 import type { AgentEvent, MessagePart } from "../types.js";
 import type { ThreadContext } from "./types.js";
@@ -188,7 +189,7 @@ export class AgentTraceRecorder {
       name:
         sourceThreadName ??
         (thread
-          ? `${thread.channel}:${thread.threadId}`
+          ? channelPlaceholderName(thread.channel, thread.threadId)
           : (this.input.channelThreadKey ?? this.input.agentName)),
       agentName: isCoreMainAgentId(this.input.agentName) ? null : this.input.agentName,
       projectName: thread?.projectName,

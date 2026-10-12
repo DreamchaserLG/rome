@@ -359,6 +359,12 @@ export function channelConversationId(channel: string, threadId: string): string
   return `channel:${channel}:${threadId}`;
 }
 
+/** The name a channel session row takes when the provider gave none. Settings
+ *  recognize it to show such a row as unnamed. */
+export function channelPlaceholderName(channel: string, threadId: string): string {
+  return `${channel}:${threadId}`;
+}
+
 /** The row id a recorded outbound message takes when the provider named it.
  *  Derived rather than random so a caller that knows the provider's id can
  *  predict the timeline `ref` the message will carry — which is how the
@@ -975,7 +981,7 @@ export class WebChatRepository {
       .insert(romeSessions)
       .values({
         id,
-        name: input.threadName ?? `${input.channel}:${input.threadId}`,
+        name: input.threadName ?? channelPlaceholderName(input.channel, input.threadId),
         personaId: null,
         projectName: input.projectName ?? DEFAULT_WEBCHAT_PROJECT_NAME,
         projectPath: input.projectPath ?? null,
