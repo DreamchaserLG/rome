@@ -586,10 +586,7 @@ export class ConversationSettingsService implements ConversationSettingsControl 
       // the bare id or the `service:id` placeholder a channel row starts with.
       displayName:
         [remembered?.displayName, row.sourceThreadName, row.name].find(
-          (name) =>
-            name &&
-            name !== row.sourceThreadId &&
-            name !== placeholder,
+          (name) => name && name !== row.sourceThreadId && name !== placeholder,
         ) ?? row.sourceThreadId,
     };
     if (row.parentSessionId) {
