@@ -254,13 +254,12 @@ export class ConversationSettingsService implements ConversationSettingsControl 
     const selectedConnection = input.connectionId
       ? this.deps.connections.all().find((connection) => connection.id === input.connectionId)
       : undefined;
+    // The query is applied below to the resolved descriptor, not in SQL: a
+    // row's stored name can lag the name observed live.
     const known =
       input.connectionId && !selectedConnection
         ? []
-        : this.deps.repository.listKnown({
-            service: selectedConnection?.service,
-            query: input.query,
-          });
+        : this.deps.repository.listKnown({ service: selectedConnection?.service });
     const byRef = new Map<
       string,
       { descriptor: ConversationDescriptor; source: "live" | "known" | "configured" }

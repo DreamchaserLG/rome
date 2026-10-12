@@ -313,6 +313,28 @@ describe("ConversationSettingsService", () => {
     expect(repository.find("feishu", ref.conversationId)?.sourceThreadName).toBe("Launch team");
   });
 
+  it("finds a saved conversation by a name observed after it was saved", async () => {
+    const { service, feishu } = await setup();
+    await new WebChatRepository(testDb!.db).ensureChannelConversation({
+      channel: "feishu",
+      threadId: "oc_named_later",
+      threadType: "group",
+      agentName: "main",
+    });
+    service.observe({
+      ref: { connectionId: feishu.id, conversationId: "oc_named_later" as ConversationId },
+      service: "feishu",
+      kind: "group",
+      displayName: "Launch crew",
+    });
+
+    const page = await service.list({ query: "launch crew" });
+
+    expect(page.items.map((item) => item.snapshot.conversation.displayName)).toEqual([
+      "Launch crew",
+    ]);
+  });
+
   it("keeps a parent's stored name when a thread is observed before it", async () => {
     const { service, repository, discord } = await setup();
     await new WebChatRepository(testDb!.db).ensureChannelConversation({

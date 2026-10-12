@@ -292,11 +292,22 @@ describe("Discord conversation names", () => {
         recipient: { displayName: "Alice" },
         isThread: () => false,
       },
-      author: { displayName: "Alice" },
+      author: { displayName: "Alice (author)" },
       guild: null,
     } as unknown as Message);
 
     expect(observed).toMatchObject({ displayName: "Alice" });
+  });
+
+  it("names a direct message after its author when the recipient is not cached", async () => {
+    const observed = await observedFor({
+      channelId: "dm-2",
+      channel: { type: ChannelType.DM, name: null, recipient: null, isThread: () => false },
+      author: { displayName: "Bob" },
+      guild: null,
+    } as unknown as Message);
+
+    expect(observed).toMatchObject({ displayName: "Bob" });
   });
 
   it("names a guild channel after the channel", async () => {
