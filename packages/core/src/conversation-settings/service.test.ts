@@ -313,6 +313,46 @@ describe("ConversationSettingsService", () => {
     expect(repository.find("feishu", ref.conversationId)?.sourceThreadName).toBe("Launch team");
   });
 
+  it("searches a live id-only entry by the stored name of its row", async () => {
+    testDb = createTestDb();
+    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
+    // The directory knows only the id, as Feishu's does before a name lookup lands.
+    registry.register(
+      directoryDescriptor("feishu", (connectionId) => [
+        {
+          ref: { connectionId, conversationId: "oc_stored" as ConversationId },
+          service: "feishu",
+          kind: "group",
+          displayName: "oc_stored",
+        },
+      ]),
+    );
+    const feishu = await registry.connect("feishu");
+    const repository = new ConversationSettingsRepository(testDb.db);
+    const makeService = () =>
+      new ConversationSettingsService({
+        repository,
+        connections: registry,
+        channels: channelsOver(registry),
+        listAgents: () => [],
+        onChanged: rs.fn(),
+      });
+    const ref: ConversationRef = {
+      connectionId: feishu.id,
+      conversationId: "oc_stored" as ConversationId,
+    };
+    const before = makeService();
+    before.observe({ ref, service: "feishu", kind: "group", displayName: "Launch crew" });
+    await before.update({ ref, set: { enabled: false }, clear: [], actor: { kind: "guardian" } });
+
+    // A restarted service has forgotten the observed name.
+    const page = await makeService().list({ query: "launch crew" });
+
+    expect(page.items.map((item) => item.snapshot.conversation.displayName)).toEqual([
+      "Launch crew",
+    ]);
+  });
+
   it("finds a saved conversation by a name observed after it was saved", async () => {
     const { service, feishu } = await setup();
     await new WebChatRepository(testDb!.db).ensureChannelConversation({

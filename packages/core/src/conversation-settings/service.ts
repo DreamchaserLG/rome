@@ -304,7 +304,11 @@ export class ConversationSettingsService implements ConversationSettingsControl 
         row.channelSettings !== null || row.agentName !== null ? "configured" : "known";
       const current = byRef.get(key);
       byRef.set(key, {
-        descriptor: current?.descriptor ?? descriptor,
+        // The live entry wins, but takes the row's resolved name: one with only
+        // the id must not hide the stored name from search and sort.
+        descriptor: current
+          ? { ...current.descriptor, displayName: descriptor.displayName }
+          : descriptor,
         source: source === "configured" ? "configured" : (current?.source ?? source),
       });
     }
