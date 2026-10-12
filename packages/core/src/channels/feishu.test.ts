@@ -32,10 +32,11 @@ class FakeLarkChannel {
   removedReactions: Array<{ messageId: string; reactionId: string }> = [];
   connected = false;
   botIdentity = { openId: "ou_bot", name: "Rome" };
-  /** Group names `getChatInfo` answers with; a chat missing here fails the
-   *  lookup the way a missing `im:chat:read` scope does. */
-  chatNames = new Map<string, string>();
   chatInfoCalls: string[] = [];
+  chatInfo: (chatId: string) => Promise<{ chatId: string; name?: string }> = async (chatId) => ({
+    chatId,
+    name: "Design Team",
+  });
 
   on(name: string, handler: (arg: unknown) => unknown): () => void {
     this.handlers.set(name, handler);
@@ -59,6 +60,11 @@ class FakeLarkChannel {
     this.updatedCards.push({ messageId, card });
   }
 
+  async getChatInfo(chatId: string) {
+    this.chatInfoCalls.push(chatId);
+    return this.chatInfo(chatId);
+  }
+
   async addReaction(messageId: string, emojiType: string): Promise<string> {
     const reactionId = `reaction-${this.addedReactions.length + 1}`;
     this.addedReactions.push({ messageId, emojiType, reactionId });
@@ -67,13 +73,6 @@ class FakeLarkChannel {
 
   async removeReaction(messageId: string, reactionId: string): Promise<void> {
     this.removedReactions.push({ messageId, reactionId });
-  }
-
-  async getChatInfo(chatId: string) {
-    this.chatInfoCalls.push(chatId);
-    const name = this.chatNames.get(chatId);
-    if (name === undefined) throw new Error("permission denied");
-    return { chatId, name, chatType: "group" as const };
   }
 
   /** Replay an inbound normalized message through the registered handler. */
@@ -94,11 +93,6 @@ class FakeLarkChannel {
     if (!handler) throw new Error("no error handler registered");
     (handler as (e: unknown) => void)(err);
   }
-}
-
-/** Let background chat-name lookups started by an inbound message finish. */
-async function settleLookups(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function makeMessage(over: Partial<LarkMessage> = {}): LarkMessage {
@@ -283,8 +277,108 @@ describe("FeishuAdapter", () => {
 
   it("maps group chat type to a group thread", async () => {
     await channel.emit({ chatType: "group", mentionedBot: true });
-    expect(captured[0].thread).toStrictEqual({ kind: "group" });
+    expect(captured[0].thread).toStrictEqual({ kind: "group", name: "Design Team" });
     expect(captured[0].addressing).toBe("mention");
+  });
+
+  it("lists an observed group under its Feishu name, fetched once per chat", async () => {
+    await channel.emit({ chatType: "group", mentionedBot: true });
+    await channel.emit({ chatType: "group", mentionedBot: true, messageId: "om_456" });
+
+    expect(adapter.listObservedConversations()).toStrictEqual([
+      { id: "oc_chat", displayName: "Design Team", kind: "group" },
+    ]);
+    expect(channel.chatInfoCalls).toStrictEqual(["oc_chat"]);
+  });
+
+  it("falls back to the chat id when the name lookup fails, and retries it later", async () => {
+    rs.useFakeTimers();
+    try {
+      channel.chatInfo = async () => {
+        throw new Error("permission denied");
+      };
+      await channel.emit({ chatType: "group", mentionedBot: true });
+      await channel.emit({ chatType: "group", mentionedBot: true, messageId: "om_456" });
+
+      expect(captured).toHaveLength(2);
+      expect(captured[0].thread).toStrictEqual({ kind: "group" });
+      expect(adapter.listObservedConversations()).toStrictEqual([
+        { id: "oc_chat", displayName: "oc_chat", kind: "group" },
+      ]);
+      expect(channel.chatInfoCalls).toStrictEqual(["oc_chat"]);
+
+      channel.chatInfo = async (chatId) => ({ chatId, name: "Design Team" });
+      rs.advanceTimersByTime(10 * 60_000);
+      await channel.emit({ chatType: "group", mentionedBot: true, messageId: "om_789" });
+
+      expect(adapter.listObservedConversations()[0]?.displayName).toBe("Design Team");
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("retries a lookup that answered without a name", async () => {
+    rs.useFakeTimers();
+    try {
+      channel.chatInfo = async (chatId) => ({ chatId });
+      await channel.emit({ chatType: "group", mentionedBot: true });
+      expect(captured[0].thread).toStrictEqual({ kind: "group" });
+
+      channel.chatInfo = async (chatId) => ({ chatId, name: "Design Team" });
+      rs.advanceTimersByTime(10 * 60_000);
+      await channel.emit({ chatType: "group", mentionedBot: true, messageId: "om_456" });
+
+      expect(captured[1].thread).toStrictEqual({ kind: "group", name: "Design Team" });
+      expect(channel.chatInfoCalls).toStrictEqual(["oc_chat", "oc_chat"]);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("stops waiting on a name lookup that does not answer", async () => {
+    rs.useFakeTimers();
+    try {
+      channel.chatInfo = () => new Promise(() => {});
+      const delivered = channel.emit({ chatType: "group", mentionedBot: true });
+      await rs.advanceTimersByTimeAsync(5_000);
+      await delivered;
+
+      expect(captured).toHaveLength(1);
+      expect(captured[0].thread).toStrictEqual({ kind: "group" });
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("keeps a name that arrives after the lookup timed out", async () => {
+    rs.useFakeTimers();
+    try {
+      channel.chatInfo = (chatId) =>
+        new Promise((resolve) => setTimeout(() => resolve({ chatId, name: "Design Team" }), 6_000));
+      const delivered = channel.emit({ chatType: "group", mentionedBot: true });
+      await rs.advanceTimersByTimeAsync(5_000);
+      await delivered;
+      expect(captured[0].thread).toStrictEqual({ kind: "group" });
+
+      await rs.advanceTimersByTimeAsync(1_000);
+      await channel.emit({ chatType: "group", mentionedBot: true, messageId: "om_456" });
+
+      expect(captured[1].thread).toStrictEqual({ kind: "group", name: "Design Team" });
+      expect(adapter.listObservedConversations()[0]?.displayName).toBe("Design Team");
+      expect(channel.chatInfoCalls).toStrictEqual(["oc_chat"]);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("drops an unaddressed group message without waiting on the name lookup", async () => {
+    channel.chatInfo = () => new Promise(() => {});
+    await channel.emit({ chatType: "group", mentionedBot: false });
+
+    expect(captured).toHaveLength(0);
+    expect(adapter.listObservedConversations()).toStrictEqual([
+      { id: "oc_chat", displayName: "oc_chat", kind: "group" },
+    ]);
   });
 
   it("carries the replied-to message and a fallback sender name", async () => {
@@ -346,32 +440,6 @@ describe("FeishuAdapter", () => {
     });
 
     expect(captured).toHaveLength(0);
-  });
-
-  it("names a group after its Feishu chat name, looked up once", async () => {
-    channel.chatNames.set("oc_chat", "Launch crew");
-
-    await channel.emit({ chatType: "group", mentionedBot: true });
-    await channel.emit({ chatType: "group", mentionedBot: true });
-    await settleLookups();
-    await channel.emit({ chatType: "group", mentionedBot: true });
-
-    expect(adapter.listObservedConversations()).toStrictEqual([
-      { id: "oc_chat", displayName: "Launch crew", kind: "group" },
-    ]);
-    expect(channel.chatInfoCalls).toStrictEqual(["oc_chat"]);
-  });
-
-  it("keeps the chat id when the lookup fails, without retrying per message", async () => {
-    await channel.emit({ chatType: "group", mentionedBot: true });
-    await settleLookups();
-    await channel.emit({ chatType: "group", mentionedBot: true });
-    await settleLookups();
-
-    expect(adapter.listObservedConversations()).toStrictEqual([
-      { id: "oc_chat", displayName: "oc_chat", kind: "group" },
-    ]);
-    expect(channel.chatInfoCalls).toStrictEqual(["oc_chat"]);
   });
 
   it("ignores group messages that do not mention the bot by default", async () => {
