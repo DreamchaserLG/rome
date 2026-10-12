@@ -96,6 +96,11 @@ class FakeLarkChannel {
   }
 }
 
+/** Let background chat-name lookups started by an inbound message finish. */
+async function settleLookups(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function makeMessage(over: Partial<LarkMessage> = {}): LarkMessage {
   return {
     messageId: "om_123",
@@ -343,10 +348,12 @@ describe("FeishuAdapter", () => {
     expect(captured).toHaveLength(0);
   });
 
-  it("names an observed group after its Feishu chat name", async () => {
+  it("names a group after its Feishu chat name, looked up once", async () => {
     channel.chatNames.set("oc_chat", "Launch crew");
 
     await channel.emit({ chatType: "group", mentionedBot: true });
+    await channel.emit({ chatType: "group", mentionedBot: true });
+    await settleLookups();
     await channel.emit({ chatType: "group", mentionedBot: true });
 
     expect(adapter.listObservedConversations()).toStrictEqual([
@@ -355,9 +362,11 @@ describe("FeishuAdapter", () => {
     expect(channel.chatInfoCalls).toStrictEqual(["oc_chat"]);
   });
 
-  it("keeps the chat id as the group name when the lookup fails, without retrying per message", async () => {
+  it("keeps the chat id when the lookup fails, without retrying per message", async () => {
     await channel.emit({ chatType: "group", mentionedBot: true });
+    await settleLookups();
     await channel.emit({ chatType: "group", mentionedBot: true });
+    await settleLookups();
 
     expect(adapter.listObservedConversations()).toStrictEqual([
       { id: "oc_chat", displayName: "oc_chat", kind: "group" },

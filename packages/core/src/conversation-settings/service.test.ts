@@ -289,6 +289,20 @@ describe("ConversationSettingsService", () => {
     expect(repository.find("feishu", ref.conversationId)?.sourceThreadName).toBe("Launch crew");
   });
 
+  it("treats a session row's service:id placeholder name as unnamed", async () => {
+    const { service, feishu } = await setup();
+    await new WebChatRepository(testDb!.db).ensureChannelConversation({
+      channel: "feishu",
+      threadId: "oc_quiet",
+      threadType: "group",
+      agentName: "main",
+    });
+
+    await expect(
+      service.get({ connectionId: feishu.id, conversationId: "oc_quiet" as ConversationId }),
+    ).resolves.toMatchObject({ conversation: { displayName: "oc_quiet" } });
+  });
+
   it("round-trips reset modes and rejects invalid atomic values", async () => {
     const { service, parent } = await setup();
     await expect(service.get(parent)).resolves.toMatchObject({

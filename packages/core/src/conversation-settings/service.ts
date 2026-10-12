@@ -575,11 +575,15 @@ export class ConversationSettingsService implements ConversationSettingsControl 
             : row.sourceThreadType === "group"
               ? "group"
               : "channel",
-      // Rows written before an adapter could resolve names hold the bare id;
-      // a name learned since then wins, and the next write persists it.
+      // Rows written before an adapter could resolve names hold the bare id, or
+      // the `service:id` placeholder a channel session row is created with; a
+      // name learned since then wins, and the next write persists it.
       displayName:
         [row.sourceThreadName, remembered?.displayName, row.name].find(
-          (name) => name && name !== row.sourceThreadId,
+          (name) =>
+            name &&
+            name !== row.sourceThreadId &&
+            name !== `${row.sourceChannel}:${row.sourceThreadId}`,
         ) ?? row.sourceThreadId,
     };
     if (row.parentSessionId) {

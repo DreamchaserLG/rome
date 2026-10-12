@@ -22,6 +22,9 @@ import type {
 } from "@rome-os/app-runtime";
 
 const log = createLogger("feishu");
+/** How long a resolved group name is trusted before it is looked up again,
+ *  so a rename shows up without a restart. */
+const CHAT_NAME_TTL_MS = 60 * 60_000;
 const CHAT_NAME_RETRY_MS = 10 * 60_000;
 const PROCESSING_REACTION_EMOJI = "Typing";
 /** Feishu content types whose bot mention can be the whole message. */
@@ -128,10 +131,13 @@ export class FeishuAdapter {
   >();
   /** Group names from `im.v1.chat.get`, keyed by chat id. Inbound events carry
    *  only the id, so without this lookup Settings → Channels titles every
-   *  group with it. A failed lookup is retried after a cooldown rather than on
-   *  every message, so a manual app without `im:chat:read` costs one call per
-   *  window. */
-  private readonly chatNames = new Map<string, { name?: string; failedAt?: number }>();
+   *  group with it. Lookups run off the message path, one at a time per chat.
+   *  A failed lookup is retried after a cooldown rather than on every message,
+   *  so a manual app without `im:chat:read` costs one call per window. */
+  private readonly chatNames = new Map<
+    string,
+    { name?: string; checkedAt: number; pending?: Promise<void> }
+  >();
   /** Unsubscribe callbacks from channel.on(), cleared on stop() so handlers
    *  don't accumulate if the adapter is ever started again. */
   private unsubscribes: Array<() => void> = [];
@@ -264,9 +270,10 @@ export class FeishuAdapter {
     if (threadType === "group") {
       this.observedConversations.set(m.chatId, {
         id: m.chatId,
-        displayName: (await this.chatName(m.chatId)) ?? m.chatId,
+        displayName: this.chatNames.get(m.chatId)?.name ?? m.chatId,
         kind: "group",
       });
+      this.refreshChatName(m.chatId);
     }
 
     if (threadType === "group") {
@@ -334,23 +341,30 @@ export class FeishuAdapter {
     }
   }
 
-  private async chatName(chatId: string): Promise<string | undefined> {
-    const cached = this.chatNames.get(chatId);
-    if (cached?.name) return cached.name;
-    if (cached?.failedAt && Date.now() - cached.failedAt < CHAT_NAME_RETRY_MS) return undefined;
-    try {
-      const name = (await this.channel.getChatInfo(chatId)).name?.trim();
-      if (!name) throw new Error("chat has no name");
-      this.chatNames.set(chatId, { name });
-      return name;
-    } catch (err) {
-      log.warn("feishu chat name lookup failed", {
-        chatId,
-        error: err instanceof Error ? err.message : String(err),
+  private refreshChatName(chatId: string): void {
+    const entry = this.chatNames.get(chatId);
+    if (entry?.pending) return;
+    const ttl = entry?.name ? CHAT_NAME_TTL_MS : CHAT_NAME_RETRY_MS;
+    if (entry && Date.now() - entry.checkedAt < ttl) return;
+    const pending = this.channel
+      .getChatInfo(chatId)
+      .then((info) => info.name?.trim() || undefined)
+      .catch((err: unknown) => {
+        log.warn("feishu chat name lookup failed", {
+          chatId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return undefined;
+      })
+      .then((name) => {
+        // A failed refresh keeps the name already known.
+        this.chatNames.set(chatId, { name: name ?? entry?.name, checkedAt: Date.now() });
+        if (!name) return;
+        const observed = this.observedConversations.get(chatId);
+        if (observed) observed.displayName = name;
+        if (this.connectionId) this.conversationSettings?.observe?.(this.descriptorFor(chatId));
       });
-      this.chatNames.set(chatId, { failedAt: Date.now() });
-      return undefined;
-    }
+    this.chatNames.set(chatId, { ...entry, checkedAt: entry?.checkedAt ?? 0, pending });
   }
 
   listObservedConversations() {
@@ -506,15 +520,20 @@ export class FeishuAdapter {
       .slice(0, 20);
   }
 
-  private async getChannelConfig(chatId: string): Promise<FeishuChannelConfig> {
-    if (!this.conversationSettings || !this.connectionId) return {};
+  private descriptorFor(chatId: string): ConversationDescriptor {
+    if (!this.connectionId) throw new Error("Feishu connection id is unavailable");
     const observed = this.observedConversations.get(chatId);
-    const descriptor: ConversationDescriptor = {
+    return {
       ref: { connectionId: this.connectionId, conversationId: chatId as ConversationId },
       service: "feishu",
       kind: observed?.kind ?? "group",
       displayName: observed?.displayName ?? this.chatNames.get(chatId)?.name ?? chatId,
     };
+  }
+
+  private async getChannelConfig(chatId: string): Promise<FeishuChannelConfig> {
+    if (!this.conversationSettings || !this.connectionId) return {};
+    const descriptor = this.descriptorFor(chatId);
     this.conversationSettings.observe?.(descriptor);
     const snapshot = await this.conversationSettings.get(descriptor.ref);
     return {

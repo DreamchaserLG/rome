@@ -341,7 +341,7 @@ describe("ChannelsSettingsPage", () => {
     expect(patchBodies[1]).toMatchObject({ set: { enabled: true } });
   });
 
-  it("titles a conversation the provider gave no name as unnamed, with its id beside the kind", async () => {
+  it("titles a nameless conversation as unnamed, with its id beside the kind", async () => {
     const row = item({ id: "oc_5f2a", service: "feishu", name: "oc_5f2a" });
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
