@@ -313,6 +313,40 @@ describe("ConversationSettingsService", () => {
     expect(repository.find("feishu", ref.conversationId)?.sourceThreadName).toBe("Launch team");
   });
 
+  it("keeps a parent's stored name when a thread is observed before it", async () => {
+    const { service, repository, discord } = await setup();
+    await new WebChatRepository(testDb!.db).ensureChannelConversation({
+      channel: "discord",
+      threadId: "ops",
+      threadName: "ops",
+      threadType: "group",
+      agentName: "main",
+    });
+    const parent: ConversationRef = {
+      connectionId: discord.id,
+      conversationId: "ops" as ConversationId,
+    };
+    service.observe({
+      ref: { connectionId: discord.id, conversationId: "ops-thread" as ConversationId },
+      service: "discord",
+      kind: "topic",
+      displayName: "incident",
+      containerName: "Rome",
+      parent,
+    });
+
+    await expect(service.get(parent)).resolves.toMatchObject({
+      conversation: { displayName: "ops" },
+    });
+    await service.update({
+      ref: parent,
+      set: { enabled: false },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    expect(repository.find("discord", parent.conversationId)?.sourceThreadName).toBe("ops");
+  });
+
   it("treats a session row's service:id placeholder name as unnamed", async () => {
     const { service, feishu } = await setup();
     await new WebChatRepository(testDb!.db).ensureChannelConversation({

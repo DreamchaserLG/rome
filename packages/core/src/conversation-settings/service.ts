@@ -234,7 +234,9 @@ export class ConversationSettingsService implements ConversationSettingsControl 
           ref: descriptor.parent,
           service: descriptor.service,
           kind: "channel",
-          displayName: descriptor.containerName ?? descriptor.parent.conversationId,
+          // Only the id is known here; the guild in containerName is not the
+          // channel's name, and a placeholder must not outrank a stored one.
+          displayName: descriptor.parent.conversationId,
           containerName: descriptor.containerName,
         });
       }

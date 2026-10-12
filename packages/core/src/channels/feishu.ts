@@ -363,6 +363,12 @@ export class FeishuAdapter {
         const observed = this.observedConversations.get(chatId);
         if (observed) observed.displayName = name;
         if (this.connectionId) this.conversationSettings?.observe?.(this.descriptorFor(chatId));
+      })
+      .catch((err: unknown) => {
+        log.warn("feishu chat name update failed", {
+          chatId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       });
     this.chatNames.set(chatId, { ...entry, checkedAt: entry?.checkedAt ?? 0, pending });
   }
