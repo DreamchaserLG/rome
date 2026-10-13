@@ -335,8 +335,9 @@ describe("bundled Codex app-server", () => {
 
   // Codex cancels a Rome tool call that a yielded `exec` cell still awaits
   // when the turn ends, so its result can only reach the model through
-  // onOrphanedToolResult. If a Codex upgrade keeps such calls alive across
-  // turns, this fails and the hand-off would deliver results twice.
+  // onOrphanedToolResult. The `wait` in the next turn pins that: if a Codex
+  // upgrade hands the late result to the cell, the model gets it twice and
+  // this fails.
   it("hands over an action result that outlives its yielded exec cell", async () => {
     let finishAction!: (value: unknown) => void;
     const actionDone = new Promise((resolve) => {
@@ -347,8 +348,18 @@ describe("bundled Codex app-server", () => {
       markActionStarted = resolve;
     });
     const onOrphanedToolResult = rs.fn();
-    script = (body) =>
-      hasToolOutput(body)
+    script = (body) => {
+      if (JSON.stringify(body.input?.at(-1) ?? {}).includes("Check the report.")) {
+        return [
+          {
+            type: "function_call",
+            call_id: "call-wait",
+            name: "wait",
+            arguments: JSON.stringify({ cell_id: "1", yield_time_ms: 500 }),
+          },
+        ];
+      }
+      return hasToolOutput(body)
         ? undefined
         : [
             {
@@ -361,6 +372,7 @@ describe("bundled Codex app-server", () => {
                 "text(JSON.stringify(r));",
             },
           ];
+    };
     const session = await provider.openSession({
       ...sessionParams(codexModels[0]!, "codex-orphaned-result", []),
       executeAction: async () => {
@@ -386,6 +398,13 @@ describe("bundled Codex app-server", () => {
           interrupted: false,
         }),
       );
+      // The cell never sees the late result, so the hand-off is its only copy.
+      await runTurn(session, "Check the report.");
+      const input = requests.at(-1)?.input ?? "";
+      const waitOutput = input.slice(input.lastIndexOf('"call_id":"call-wait"'));
+      expect(waitOutput).toContain(`"output":`);
+      expect(waitOutput).toContain("cancelled before receiving a response");
+      expect(waitOutput).not.toContain("ready");
     } finally {
       script = undefined;
       await session.close();

@@ -203,13 +203,15 @@ function buildThreadConfig(
   };
 }
 
-// An orphaned result is delivered as the prompt of a new turn, so a large
-// action output must not flood that turn's context.
-const ORPHANED_RESULT_TEXT_LIMIT = 4_000;
+// An orphaned result becomes the prompt of a new turn. In its turn, the model
+// would have read it through `wait`, whose output Codex caps at 10,000 tokens
+// by default, so the cap here is about the same and the model loses no more.
+const ORPHANED_RESULT_TEXT_LIMIT = 40_000;
 
 function truncateOrphanedText(text: string): string {
   if (text.length <= ORPHANED_RESULT_TEXT_LIMIT) return text;
-  return `${text.slice(0, ORPHANED_RESULT_TEXT_LIMIT)}\n[truncated ${text.length - ORPHANED_RESULT_TEXT_LIMIT} characters]`;
+  const omitted = text.length - ORPHANED_RESULT_TEXT_LIMIT;
+  return `${text.slice(0, ORPHANED_RESULT_TEXT_LIMIT)}\n[result truncated: ${omitted} more characters not shown]`;
 }
 
 const ISOLATED_FORK_INSTRUCTION = `<rome_isolated_fork>

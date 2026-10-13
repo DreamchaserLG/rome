@@ -2898,7 +2898,11 @@ describe("CodexAppServerProvider tool calls that outlive their turn", () => {
   // `execute_action`. Codex fails the nested call's item and ends the turn
   // without waiting for the response; Rome's action finishes later.
   async function runTurnWithSlowAction(
-    opts: { settle?: "in_turn" | "after_turn" | "after_close"; status?: string } = {},
+    opts: {
+      settle?: "in_turn" | "after_turn" | "after_close";
+      status?: string;
+      result?: unknown;
+    } = {},
   ) {
     const settle = opts.settle ?? "after_turn";
     let finishAction!: (value: unknown) => void;
@@ -2927,7 +2931,7 @@ describe("CodexAppServerProvider tool calls that outlive their turn", () => {
         arguments: { action_name: "slow_report", json_args: {} },
       });
       if (settle === "in_turn") {
-        finishAction({ report: "ready" });
+        finishAction(opts.result ?? { report: "ready" });
         await toolResponse;
       }
       n("item/completed", {
@@ -2955,7 +2959,7 @@ describe("CodexAppServerProvider tool calls that outlive their turn", () => {
     const messages = await collected;
     // The idle sweeper closes a quiescent session before a defer can fire.
     if (settle === "after_close") await session.close();
-    finishAction({ report: "ready" });
+    finishAction(opts.result ?? { report: "ready" });
     const response = await toolResponse;
     return { session, messages, response, executeAction, onOrphanedToolResult };
   }
@@ -2995,6 +2999,18 @@ describe("CodexAppServerProvider tool calls that outlive their turn", () => {
     expect(onOrphanedToolResult).toHaveBeenCalledWith(
       expect.objectContaining({ callId: "call-slow", interrupted: true }),
     );
+    await session.close();
+  });
+
+  it("cuts a long result to about what `wait` would have shown", async () => {
+    const { session, onOrphanedToolResult } = await runTurnWithSlowAction({
+      result: { report: "x".repeat(50_000) },
+    });
+
+    const [orphan] = onOrphanedToolResult.mock.calls[0] as [{ text: string }];
+    expect(orphan.text.length).toBeGreaterThan(40_000);
+    expect(orphan.text.length).toBeLessThan(40_100);
+    expect(orphan.text).toMatch(/\[result truncated: \d+ more characters not shown\]$/);
     await session.close();
   });
 

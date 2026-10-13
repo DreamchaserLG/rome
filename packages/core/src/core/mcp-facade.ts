@@ -589,8 +589,8 @@ function buildActionFacadeTools(
       description:
         "Execute one available action with object arguments in json_args. Wait for the call to " +
         "finish before you end your turn. If the turn ends first, the action keeps running even " +
-        "when the call is reported as cancelled, so do not run it again: in a conversation, its " +
-        "result arrives as a new turn.",
+        "when the call is reported as cancelled, so do not run it again. Where `defer` is " +
+        "available, its result arrives as a new turn.",
       inputSchema: {
         type: "object",
         properties: {
