@@ -13,7 +13,11 @@ import type { ActionEngine } from "../actions/engine.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import { decodeAppApiPath, decodeAppIdPathSegment } from "../api/helpers.js";
-import { isAllowedInternalHost, MISDIRECTED_REQUEST } from "../lib/host-guard.js";
+import {
+  isAllowedInternalHost,
+  MISDIRECTED_REQUEST,
+  restorePublicHost,
+} from "../lib/host-guard.js";
 import { isSameOriginMutationRequest } from "../lib/mutation-origin.js";
 import { stripInternalHeaders } from "../relay/protocol.js";
 import { COOKIE_NAME, VISITOR_COOKIE_NAME, verifyVisitorSession } from "../lib/auth.js";
@@ -302,6 +306,7 @@ export function attachAppWebSocket(server: Server, deps: AppWebSocketDeps): { cl
     delete headers["x-rome-user-id"];
     delete headers["x-rome-visitor-account-id"];
     delete headers["x-rome-visitor-email"];
+    restorePublicHost(headers);
     const viewer = resolveWsViewer(req);
 
     // Fail closed with a clean handshake rejection: a resolution error must

@@ -53,3 +53,14 @@ export function internalHostGuard(): MiddlewareHandler {
     await next();
   };
 }
+
+/**
+ * Puts the public name back in `host` before app handlers see the headers.
+ * Caddy addresses this listener by its upstream Host and carries the public
+ * name in `X-Forwarded-Host`, and apps read `host` as the name the client
+ * addressed. Mutates `headers`, whose keys must be lower-case.
+ */
+export function restorePublicHost(headers: Record<string, string>): void {
+  const forwarded = headers["x-forwarded-host"]?.split(",")[0]?.trim();
+  if (forwarded) headers.host = forwarded;
+}

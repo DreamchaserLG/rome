@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { isAllowedInternalHost } from "./host-guard.js";
+import { isAllowedInternalHost, restorePublicHost } from "./host-guard.js";
 
 describe("isAllowedInternalHost", () => {
   it.each([
@@ -35,5 +35,19 @@ describe("isAllowedInternalHost", () => {
     ["localhost:4141:4141"],
   ])("refuses %s", (host) => {
     expect(isAllowedInternalHost(host)).toBe(false);
+  });
+});
+
+describe("restorePublicHost", () => {
+  it("replaces host with the first X-Forwarded-Host value", () => {
+    const headers = { host: "127.0.0.1:4141", "x-forwarded-host": "rome.example, proxy.example" };
+    restorePublicHost(headers);
+    expect(headers.host).toBe("rome.example");
+  });
+
+  it("leaves host alone without X-Forwarded-Host", () => {
+    const headers: Record<string, string> = { host: "127.0.0.1:4141" };
+    restorePublicHost(headers);
+    expect(headers.host).toBe("127.0.0.1:4141");
   });
 });

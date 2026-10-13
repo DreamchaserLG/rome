@@ -52,6 +52,7 @@ The rule exists for the in-container browser. A page there whose name an attacke
 - Every front proxy addresses the listener by an allowed name. The edge proxy rewrites `Host` to its upstream on every hop, the verify probe included, and carries the public name in `X-Forwarded-Host`.
 - A front proxy that forwards the public name unchanged gets 421 for every request. A new front door has to rewrite `Host` or arrive on an allowed name.
 - Checks that need the public name, such as the same-origin checks on cookie-authenticated requests, read `X-Forwarded-Host` before `Host`.
+- An app handler sees the public name in `host`. The app dispatch copies it from `X-Forwarded-Host` when the edge carried one.
 
 ## Visitor sign-in
 
