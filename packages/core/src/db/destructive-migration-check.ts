@@ -1,5 +1,5 @@
 // Rollback-safety check for system migrations. The rule it enforces, and the
-// two-release sequence that satisfies it, are in DEVELOPMENT.md under
+// two-release sequences that satisfy it, are in DEVELOPMENT.md under
 // "Established patterns". The CLI that feeds it from git lives in
 // src/bin/check-destructive-migrations.ts.
 import { z } from "zod";
@@ -10,12 +10,12 @@ export interface SchemaSnapshot {
 }
 
 /**
- * An object whose last reader is gone. A table entry covers every column of
- * the table. A column entry covers only that column, never its table.
+ * A table whose last reader is gone, which covers its columns too. Columns
+ * cannot be retired this way: drizzle names every declared column in each
+ * select and insert, so a release reads every column its schema declares.
  */
 export interface RetiredEntry {
   table: string;
-  column?: string;
 }
 
 export interface MigrationSql {
@@ -33,12 +33,13 @@ export interface UnretiredRemoval {
 }
 
 const retiredManifestSchema = z.object({
-  retired: z.array(z.object({ table: z.string().min(1), column: z.string().min(1).optional() })),
+  retired: z.array(z.strictObject({ table: z.string().min(1) })),
 });
 
 /**
  * Parses `drizzle/system/retired.json`. Null, for a release that predates the
- * manifest, means nothing was retired. Throws on a malformed manifest.
+ * manifest, means nothing was retired. Throws on a malformed manifest,
+ * including a column entry.
  */
 export function parseRetiredManifest(json: string | null): RetiredEntry[] {
   if (json === null) return [];
@@ -53,12 +54,14 @@ export function parseRetiredManifest(json: string | null): RetiredEntry[] {
  * has them. An entry added in the same unreleased change as the drop retires
  * nothing, because the release a rollback lands on still reads the object.
  *
- * Removals come from two sources. The snapshot diff covers drops, renames and
- * columns a table rebuild leaves out. The SQL scan covers hand-written drops
- * and renames in migrations the last release did not ship. Index drops are
- * ignored, since no reader fails when an index is gone. Only objects the last
- * release declares count, so an object created and dropped before a release
- * passes.
+ * Table removals come from the snapshot diff and from the SQL of migrations
+ * the last release did not ship. Column removals come from that SQL only, so a
+ * release can stop declaring a column while a no-op migration keeps it in the
+ * database. A table rebuild removes every shipped column its copy statement
+ * leaves out, and removes the table when no copy statement matches. Index
+ * drops are ignored, since no reader fails when an index is gone. Only objects
+ * the last release declares count, so an object created and dropped before a
+ * release passes. Identifiers match case-insensitively, as in SQLite.
  */
 export function findUnretiredRemovals(input: {
   shippedSnapshot: SchemaSnapshot;
@@ -67,11 +70,27 @@ export function findUnretiredRemovals(input: {
   shippedRetired: readonly RetiredEntry[];
 }): UnretiredRemoval[] {
   const { shippedSnapshot, headSnapshot, unshippedMigrations, shippedRetired } = input;
+  const shippedTables = new Map(
+    Object.entries(shippedSnapshot.tables).map(([name, table]) => [
+      name.toLowerCase(),
+      {
+        name,
+        columns: new Map(
+          Object.keys(table.columns).map((column) => [column.toLowerCase(), column]),
+        ),
+      },
+    ]),
+  );
+  const headTables = new Set(Object.keys(headSnapshot.tables).map((name) => name.toLowerCase()));
+
   const removals = new Map<string, UnretiredRemoval>();
-  const record = (table: string, column: string | undefined, foundIn: string) => {
-    const shippedTable = shippedSnapshot.tables[table];
+  const record = (tableName: string, columnName: string | undefined, foundIn: string) => {
+    const shippedTable = shippedTables.get(tableName.toLowerCase());
     if (!shippedTable) return;
-    if (column !== undefined && !(column in shippedTable.columns)) return;
+    const table = shippedTable.name;
+    const column =
+      columnName === undefined ? undefined : shippedTable.columns.get(columnName.toLowerCase());
+    if (columnName !== undefined && column === undefined) return;
     const key = column === undefined ? table : `${table}.${column}`;
     const existing = removals.get(key);
     if (!existing) {
@@ -86,88 +105,134 @@ export function findUnretiredRemovals(input: {
     }
   };
 
-  for (const [table, shippedTable] of Object.entries(shippedSnapshot.tables)) {
-    const headTable = headSnapshot.tables[table];
-    if (!headTable) {
-      record(table, undefined, "schema");
-      continue;
-    }
-    for (const column of Object.keys(shippedTable.columns)) {
-      if (!(column in headTable.columns)) record(table, column, "schema");
-    }
+  for (const [key, shippedTable] of shippedTables) {
+    if (!headTables.has(key)) record(shippedTable.name, undefined, "schema");
   }
 
   for (const migration of unshippedMigrations) {
-    for (const removal of scanSqlForRemovals(migration.sql)) {
-      record(removal.table, removal.column, migration.name);
+    for (const effect of scanSqlForRemovals(migration.sql)) {
+      if (effect.kind === "removal") {
+        record(effect.table, effect.column, migration.name);
+        continue;
+      }
+      const shippedTable = shippedTables.get(effect.table);
+      for (const [key, column] of shippedTable?.columns ?? []) {
+        if (!effect.keptColumns.has(key)) record(effect.table, column, migration.name);
+      }
     }
   }
 
-  const isRetired = (removal: UnretiredRemoval) =>
-    shippedRetired.some(
-      (entry) =>
-        entry.table === removal.table &&
-        (entry.column === undefined || entry.column === removal.column),
-    );
-  return [...removals.values()].filter((removal) => !isRetired(removal));
+  const retiredTables = new Set(shippedRetired.map((entry) => entry.table.toLowerCase()));
+  return [...removals.values()].filter(
+    (removal) => !retiredTables.has(removal.table.toLowerCase()),
+  );
 }
 
-const IDENT = String.raw`[\`"\[]?([A-Za-z_][\w$]*)[\`"\]]?`;
-const DROP_TABLE = new RegExp(String.raw`\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?${IDENT}`, "gi");
-const DROP_COLUMN = new RegExp(
-  String.raw`\bALTER\s+TABLE\s+${IDENT}\s+DROP\s+(?:COLUMN\s+)?${IDENT}`,
+type SqlEffect =
+  | { kind: "removal"; table: string; column?: string }
+  | { kind: "rebuild"; table: string; keptColumns: Set<string> };
+
+const NAME = String.raw`[\`"\[]?([A-Za-z_][\w$]*)[\`"\]]?`;
+// SQLite accepts a schema qualifier such as `main.` before a table name.
+const TABLE = String.raw`(?:[\`"\[]?[A-Za-z_][\w$]*[\`"\]]?\s*\.\s*)?${NAME}`;
+const DROP_TABLE = new RegExp(String.raw`\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?${TABLE}`, "gi");
+const CREATE_TABLE = new RegExp(
+  String.raw`\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?${TABLE}`,
   "gi",
 );
 const RENAME_TABLE = new RegExp(
-  String.raw`\bALTER\s+TABLE\s+${IDENT}\s+RENAME\s+TO\s+${IDENT}`,
+  String.raw`\bALTER\s+TABLE\s+${TABLE}\s+RENAME\s+TO\s+${TABLE}`,
   "gi",
 );
-const CREATE_TABLE = new RegExp(
-  String.raw`\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?${IDENT}`,
+const DROP_COLUMN = new RegExp(
+  String.raw`\bALTER\s+TABLE\s+${TABLE}\s+DROP\s+(?:COLUMN\s+)?${NAME}`,
   "gi",
 );
 const RENAME_COLUMN = new RegExp(
-  String.raw`\bALTER\s+TABLE\s+${IDENT}\s+RENAME\s+(?:COLUMN\s+)?(?!TO\b)${IDENT}\s+TO\s+${IDENT}`,
+  String.raw`\bALTER\s+TABLE\s+${TABLE}\s+RENAME\s+(?:COLUMN\s+)?(?!TO\b)${NAME}\s+TO\s+${NAME}`,
+  "gi",
+);
+// `INSERT INTO copy (columns) SELECT ... FROM source`, within one statement.
+const COPY_ROWS = new RegExp(
+  String.raw`\bINSERT\s+INTO\s+${TABLE}\s*\(([^)]*)\)\s*SELECT\b[^;]*?\bFROM\s+${TABLE}`,
   "gi",
 );
 
-function scanSqlForRemovals(sql: string): { table: string; column?: string }[] {
+function scanSqlForRemovals(sql: string): SqlEffect[] {
   const code = sql
     .replace(/\/\*[\s\S]*?\*\//g, " ")
     .split("\n")
     .map((line) => line.replace(/--.*$/, ""))
     .join("\n");
+  const lower = (name: string) => name.toLowerCase();
 
-  // A SQLite table rebuild removes the table under its name and then gives the
-  // name back: drizzle-kit drops `t` and renames `__new_t` onto it, and a
-  // hand-written rebuild may rename `t` away and create a new `t`. The table
-  // survives either way, and any column the rebuild leaves out shows in the
-  // snapshot diff. So a removal followed in the same migration by a create or
-  // rename onto the same name is not a removal.
-  const renames = [...code.matchAll(RENAME_TABLE)].map((match) => ({
-    from: match[1],
-    to: match[2],
-    at: match.index,
+  const drops = [...code.matchAll(DROP_TABLE)].map((m) => ({ table: lower(m[1]), at: m.index }));
+  const creates = [...code.matchAll(CREATE_TABLE)].map((m) => ({
+    table: lower(m[1]),
+    at: m.index,
   }));
-  const restored = [
-    ...renames.map((rename) => ({ table: rename.to, at: rename.at })),
-    ...[...code.matchAll(CREATE_TABLE)].map((match) => ({ table: match[1], at: match.index })),
-  ];
-  const isRestoredAfter = (table: string, removedAt: number) =>
-    restored.some((entry) => entry.table === table && entry.at > removedAt);
+  const renames = [...code.matchAll(RENAME_TABLE)].map((m) => ({
+    from: lower(m[1]),
+    to: lower(m[2]),
+    at: m.index,
+  }));
+  const copies = [...code.matchAll(COPY_ROWS)].map((m) => ({
+    into: lower(m[1]),
+    columns: new Set(
+      m[2]
+        .split(",")
+        .map((column) => lower(column.trim().replace(/^[`"[]|[`"\]]$/g, "")))
+        .filter(Boolean),
+    ),
+    from: lower(m[3]),
+    at: m.index,
+  }));
 
-  const removals: { table: string; column?: string }[] = [];
-  for (const match of code.matchAll(DROP_TABLE)) {
-    if (!isRestoredAfter(match[1], match.index)) removals.push({ table: match[1] });
+  // A SQLite table rebuild removes a table under its name, then gives the name
+  // back to a copy of its rows. drizzle-kit fills `__new_t` from `t`, drops `t`
+  // and renames the copy onto it. A hand-written rebuild may instead rename `t`
+  // away, create `t` again and fill it from the old one. The rebuilt table keeps
+  // only the columns its copy statement names.
+  const effects: SqlEffect[] = [];
+  for (const drop of drops) {
+    const restore = renames.find((rename) => rename.to === drop.table && rename.at > drop.at);
+    const copy =
+      restore &&
+      copies.find(
+        (candidate) =>
+          candidate.into === restore.from &&
+          candidate.from === drop.table &&
+          candidate.at < drop.at,
+      );
+    effects.push(
+      copy
+        ? { kind: "rebuild", table: drop.table, keptColumns: copy.columns }
+        : { kind: "removal", table: drop.table },
+    );
   }
   for (const rename of renames) {
-    if (!isRestoredAfter(rename.from, rename.at)) removals.push({ table: rename.from });
+    const recreate = creates.find(
+      (create) => create.table === rename.from && create.at > rename.at,
+    );
+    const copy =
+      recreate &&
+      copies.find(
+        (candidate) =>
+          candidate.into === rename.from &&
+          candidate.from === rename.to &&
+          candidate.at > recreate.at,
+      );
+    effects.push(
+      copy
+        ? { kind: "rebuild", table: rename.from, keptColumns: copy.columns }
+        : { kind: "removal", table: rename.from },
+    );
   }
   for (const [, table, column] of code.matchAll(DROP_COLUMN)) {
-    removals.push({ table, column });
+    effects.push({ kind: "removal", table, column });
   }
   for (const [, table, column] of code.matchAll(RENAME_COLUMN)) {
-    removals.push({ table, column });
+    effects.push({ kind: "removal", table, column });
   }
-  return removals;
+  return effects;
 }

@@ -70,7 +70,7 @@ describe("findUnretiredRemovals", () => {
     expect(violations.map((violation) => violation.table)).toEqual(["provider_accounts"]);
   });
 
-  it("flags a column removed through drizzle's table recreate", () => {
+  it("flags a column a drizzle table rebuild leaves out", () => {
     const violations = findUnretiredRemovals({
       shippedSnapshot: snapshot({ routines: ["id", "name", "legacy_trigger"] }),
       headSnapshot: snapshot({ routines: ["id", "name"] }),
@@ -92,22 +92,22 @@ describe("findUnretiredRemovals", () => {
     });
 
     expect(violations).toEqual([
-      { table: "routines", column: "legacy_trigger", foundIn: ["schema"] },
+      { table: "routines", column: "legacy_trigger", foundIn: ["0080_drop_legacy_trigger"] },
     ]);
   });
 
-  it("treats a hand-written rebuild that renames a copy onto the table as no removal", () => {
+  it("passes a drizzle table rebuild that keeps every shipped column", () => {
     const violations = findUnretiredRemovals({
       shippedSnapshot: snapshot({ routines: ["id", "name"] }),
-      headSnapshot: snapshot({ routines: ["id", "name"] }),
+      headSnapshot: snapshot({ routines: ["id", "name", "paused"] }),
       unshippedMigrations: [
         {
-          name: "0083_rebuild_routines",
+          name: "0080_add_paused",
           sql: [
-            "CREATE TABLE `routines_new` (`id` text PRIMARY KEY NOT NULL, `name` text NOT NULL UNIQUE);",
-            'INSERT INTO `routines_new` SELECT "id", "name" FROM `routines`;',
+            "CREATE TABLE `__new_routines` (`id` text PRIMARY KEY NOT NULL, `name` text NOT NULL, `paused` integer DEFAULT 0 NOT NULL);",
+            'INSERT INTO `__new_routines`("id", "name") SELECT "id", "name" FROM `routines`;',
             "DROP TABLE `routines`;",
-            "ALTER TABLE `routines_new` RENAME TO `routines`;",
+            "ALTER TABLE `__new_routines` RENAME TO `routines`;",
           ].join("\n"),
         },
       ],
@@ -117,7 +117,30 @@ describe("findUnretiredRemovals", () => {
     expect(violations).toEqual([]);
   });
 
-  it("treats a rebuild that renames the table away and creates it again as no removal", () => {
+  it("flags a column a hand-written rebuild leaves out while the snapshots agree", () => {
+    const violations = findUnretiredRemovals({
+      shippedSnapshot: snapshot({ routines: ["id", "name"] }),
+      headSnapshot: snapshot({ routines: ["id", "name"] }),
+      unshippedMigrations: [
+        {
+          name: "0083_rebuild_routines",
+          sql: [
+            "CREATE TABLE `routines_new` (`id` text PRIMARY KEY NOT NULL);",
+            'INSERT INTO `routines_new` ("id") SELECT "id" FROM `routines`;',
+            "DROP TABLE `routines`;",
+            "ALTER TABLE `routines_new` RENAME TO `routines`;",
+          ].join("\n"),
+        },
+      ],
+      shippedRetired: [],
+    });
+
+    expect(violations).toEqual([
+      { table: "routines", column: "name", foundIn: ["0083_rebuild_routines"] },
+    ]);
+  });
+
+  it("passes a rebuild that renames the table away and creates it again", () => {
     const violations = findUnretiredRemovals({
       shippedSnapshot: snapshot({ routines: ["id", "name"] }),
       headSnapshot: snapshot({ routines: ["id", "name"] }),
@@ -127,7 +150,7 @@ describe("findUnretiredRemovals", () => {
           sql: [
             "ALTER TABLE `routines` RENAME TO `routines_old`;",
             "CREATE TABLE `routines` (`id` text PRIMARY KEY NOT NULL, `name` text NOT NULL);",
-            'INSERT INTO `routines` SELECT "id", "name" FROM `routines_old`;',
+            'INSERT INTO `routines` ("id", "name") SELECT "id", "name" FROM `routines_old`;',
             "DROP TABLE `routines_old`;",
           ].join("\n"),
         },
@@ -138,38 +161,98 @@ describe("findUnretiredRemovals", () => {
     expect(violations).toEqual([]);
   });
 
+  it("flags the table when a rebuild's copy statement names no columns", () => {
+    const violations = findUnretiredRemovals({
+      shippedSnapshot: snapshot({ routines: ["id", "name"] }),
+      headSnapshot: snapshot({ routines: ["id", "name"] }),
+      unshippedMigrations: [
+        {
+          name: "0085_rebuild_routines",
+          sql: [
+            "CREATE TABLE `routines_new` (`id` text PRIMARY KEY NOT NULL, `name` text);",
+            "INSERT INTO `routines_new` SELECT * FROM `routines`;",
+            "DROP TABLE `routines`;",
+            "ALTER TABLE `routines_new` RENAME TO `routines`;",
+          ].join("\n"),
+        },
+      ],
+      shippedRetired: [],
+    });
+
+    expect(violations).toEqual([{ table: "routines", foundIn: ["0085_rebuild_routines"] }]);
+  });
+
   it("flags a drop that comes after the rename onto the same name", () => {
     const violations = findUnretiredRemovals({
       shippedSnapshot: snapshot({ routines: ["id"] }),
       headSnapshot: snapshot({ routines: ["id"] }),
       unshippedMigrations: [
         {
-          name: "0085_misordered",
+          name: "0086_misordered",
           sql: "ALTER TABLE `routines_new` RENAME TO `routines`;\nDROP TABLE `routines`;",
         },
       ],
       shippedRetired: [],
     });
 
-    expect(violations).toEqual([{ table: "routines", foundIn: ["0085_misordered"] }]);
+    expect(violations).toEqual([{ table: "routines", foundIn: ["0086_misordered"] }]);
   });
 
-  it("does not let a retired column cover its whole table", () => {
+  it("matches schema-qualified and differently cased table names", () => {
     const violations = findUnretiredRemovals({
-      shippedSnapshot: shippedWithProviderAccounts,
-      headSnapshot: headWithoutProviderAccounts,
-      unshippedMigrations: [],
-      shippedRetired: [{ table: "provider_accounts", column: "token" }],
+      shippedSnapshot: snapshot({ routines: ["id", "name"], outbox: ["id", "body"] }),
+      headSnapshot: snapshot({ routines: ["id", "name"], outbox: ["id", "body"] }),
+      unshippedMigrations: [
+        {
+          name: "0087_custom",
+          sql: 'DROP TABLE main.ROUTINES;\nALTER TABLE "main"."OUTBOX" DROP COLUMN BODY;',
+        },
+      ],
+      shippedRetired: [],
     });
 
-    expect(violations).toEqual([{ table: "provider_accounts", foundIn: ["schema"] }]);
+    expect(violations).toEqual([
+      { table: "routines", foundIn: ["0087_custom"] },
+      { table: "outbox", column: "body", foundIn: ["0087_custom"] },
+    ]);
+  });
+
+  it("passes a column the schema stops declaring while a no-op migration keeps it", () => {
+    // The first release of a column drop: drizzle stops naming the column, and
+    // the database keeps it for the release before.
+    const violations = findUnretiredRemovals({
+      shippedSnapshot: snapshot({ routines: ["id", "legacy_trigger"] }),
+      headSnapshot: snapshot({ routines: ["id"] }),
+      unshippedMigrations: [{ name: "0088_stop_declaring_legacy_trigger", sql: "SELECT 1;" }],
+      shippedRetired: [],
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it("passes a column drop once the last release stopped declaring the column", () => {
+    const violations = findUnretiredRemovals({
+      shippedSnapshot: snapshot({ routines: ["id"] }),
+      headSnapshot: snapshot({ routines: ["id"] }),
+      unshippedMigrations: [
+        {
+          name: "0089_drop_legacy_trigger",
+          sql: "ALTER TABLE `routines` DROP COLUMN `legacy_trigger`;",
+        },
+      ],
+      shippedRetired: [],
+    });
+
+    expect(violations).toEqual([]);
   });
 
   it("lets a retired table cover its columns", () => {
     const violations = findUnretiredRemovals({
       shippedSnapshot: snapshot({ routines: ["id", "legacy_trigger"] }),
       headSnapshot: snapshot({ routines: ["id"] }),
-      unshippedMigrations: [],
+      unshippedMigrations: [
+        { name: "0090_drop", sql: "ALTER TABLE `routines` DROP COLUMN `legacy_trigger`;" },
+      ],
       shippedRetired: [{ table: "routines" }],
     });
 
@@ -243,14 +326,16 @@ describe("findUnretiredRemovals", () => {
 });
 
 describe("parseRetiredManifest", () => {
-  it("reads table and column entries", () => {
+  it("reads table entries", () => {
     expect(
-      parseRetiredManifest(
-        JSON.stringify({
-          retired: [{ table: "provider_accounts" }, { table: "routines", column: "legacy" }],
-        }),
-      ),
-    ).toEqual([{ table: "provider_accounts" }, { table: "routines", column: "legacy" }]);
+      parseRetiredManifest(JSON.stringify({ retired: [{ table: "provider_accounts" }] })),
+    ).toEqual([{ table: "provider_accounts" }]);
+  });
+
+  it("rejects a column entry, since a declared column is still read", () => {
+    expect(() =>
+      parseRetiredManifest(JSON.stringify({ retired: [{ table: "routines", column: "legacy" }] })),
+    ).toThrow();
   });
 
   it("treats a release without the manifest as retiring nothing", () => {

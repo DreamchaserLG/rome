@@ -1,6 +1,6 @@
 // Fails when an unreleased system migration drops or renames a table or column
-// that the last release still declares and has not retired. The rule is in
-// DEVELOPMENT.md under "Established patterns".
+// that the last release still declares, unless that release retired the table.
+// The rule is in DEVELOPMENT.md under "Established patterns".
 //
 // Usage: pnpm db:check:destructive [--since <rev>]
 //
@@ -149,14 +149,12 @@ function main(): number {
 
   console.error(
     `check-destructive-migrations: ERROR: these objects are removed, but ${release} still declares them\n` +
-      `and did not retire them. Rolling back to ${release} after this migration fails on any read of them.\n`,
+      `and did not retire their table. Rolling back to ${release} after this migration fails on any read of them.\n`,
   );
   for (const violation of violations) {
     const name = violation.column ? `${violation.table}.${violation.column}` : violation.table;
     const retiredAtHead = headRetired.some(
-      (entry) =>
-        entry.table === violation.table &&
-        (entry.column === undefined || entry.column === violation.column),
+      (entry) => entry.table.toLowerCase() === violation.table.toLowerCase(),
     );
     console.error(
       `  ${name} (found in ${violation.foundIn.join(", ")})` +
@@ -164,8 +162,9 @@ function main(): number {
     );
   }
   console.error(
-    `\nRemove the last reader and add the object to ${RETIRED_MANIFEST} while the schema\n` +
-      "still declares it. Generate the drop only after a release that contains the entry is tagged.\n" +
+    `\nFor a table, remove the last reader and add the table to ${RETIRED_MANIFEST} while the\n` +
+      "schema still declares it. Generate the drop only after a release that contains the entry is tagged.\n" +
+      "For a column, stop declaring it in a release whose migration keeps it, and drop it in a later one.\n" +
       "See DEVELOPMENT.md, Established patterns.",
   );
   return 1;
