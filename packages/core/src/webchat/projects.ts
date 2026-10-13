@@ -87,12 +87,7 @@ function isStrictSubpath(fromRoot: string): boolean {
 
 /** A working dir that exists but whose real path falls outside the root it was checked against. */
 export class WorkingDirOutsideRootError extends Error {
-  constructor(
-    readonly requestedPath: string,
-    /** The root as the caller named it, before symlinks are resolved. */
-    readonly rootPath: string,
-    rootLabel: string,
-  ) {
+  constructor(requestedPath: string, rootPath: string, rootLabel: string) {
     super(`Working directory "${requestedPath}" is not inside ${rootLabel} (${rootPath})`);
     this.name = "WorkingDirOutsideRootError";
   }
@@ -102,7 +97,7 @@ export interface WorkingDirRoot {
   path: string;
   /** Names the root in the error message, such as "the projects root". */
   label: string;
-  /** Accept the root itself as a working dir. Defaults to false. */
+  /** Accept the root itself as a working dir. */
   allowRoot?: boolean;
 }
 
