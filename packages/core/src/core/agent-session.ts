@@ -833,6 +833,17 @@ interface ForkOpen {
 
 type BuildForkOpenParams = (fork: ForkTurnContext) => ForkOpen;
 
+// A late result becomes the prompt of a new turn. In its turn, the model
+// would have read it through `wait`, whose output Codex caps at 10,000 tokens
+// by default, so the cap here is about the same and the model loses no more.
+const ORPHANED_RESULT_TEXT_LIMIT = 40_000;
+
+function truncateOrphanedText(text: string): string {
+  if (text.length <= ORPHANED_RESULT_TEXT_LIMIT) return text;
+  const omitted = text.length - ORPHANED_RESULT_TEXT_LIMIT;
+  return `${text.slice(0, ORPHANED_RESULT_TEXT_LIMIT)}\n[result truncated: ${omitted} more characters not shown]`;
+}
+
 /** Tells the agent to ask in a plain message what a card it cannot show would have asked. */
 function askInWords(promptText: string): string {
   return (
@@ -877,9 +888,12 @@ function formatOrphanedToolResult(orphan: OrphanedToolResult): string {
   const outcome = failed
     ? "failed after that turn ended. It is no longer running: decide from its result whether to retry."
     : "returned after that turn ended. It is no longer running: do not run it again.";
-  return [`${lead} ${outcome} Its result:`, "<tool_result>", orphan.text, "</tool_result>"].join(
-    "\n",
-  );
+  return [
+    `${lead} ${outcome} Its result:`,
+    "<tool_result>",
+    truncateOrphanedText(orphan.text),
+    "</tool_result>",
+  ].join("\n");
 }
 
 /** The recorded dir when it still exists, else undefined. The default project is recreated. */

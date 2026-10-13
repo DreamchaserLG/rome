@@ -177,6 +177,25 @@ describe("tool results that finish after their turn", () => {
     expect(pickSlot.calls).toHaveLength(1);
   });
 
+  it("reads a long result before cutting it to about what `wait` would show", async () => {
+    const flaky = recordingAction("flaky_report", {
+      execute: async () => ({ status: "error", error: "x".repeat(50_000) }),
+    });
+    await startReportInChat([flaky.action]);
+    const testRome = rome!;
+    const text = await facadeTextFor(flaky, "Run the flaky report");
+
+    testRome.model.sessions.at(-1)!.onOrphanedToolResult!(
+      orphan({ arguments: { action_name: "flaky_report", json_args: {} }, text }),
+    );
+
+    await rs.waitFor(() => expect(testRome.model.calls).toHaveLength(3));
+    const prompt = testRome.model.lastPrompt() ?? "";
+    expect(prompt).toContain("decide from its result whether to retry");
+    expect(prompt).toMatch(/\[result truncated: \d+ more characters not shown\]/);
+    expect(prompt.length).toBeLessThan(41_000);
+  });
+
   it("starts no turn for a result that outlived an interrupted turn", async () => {
     await startReportInChat();
     const testRome = rome!;

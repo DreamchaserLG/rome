@@ -217,7 +217,7 @@ export interface OrphanedToolResult {
   /** Arguments the model passed to the tool. */
   arguments: unknown;
   success: boolean;
-  /** The model-facing result text, truncated. */
+  /** The model-facing result text, in full. */
   text: string;
   /** True when the turn ended because it was interrupted, such as a user stop. */
   interrupted: boolean;

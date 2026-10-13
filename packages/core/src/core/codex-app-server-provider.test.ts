@@ -2901,9 +2901,9 @@ describe("CodexAppServerProvider tool calls that outlive their turn", () => {
     opts: {
       settle?: "in_turn" | "after_turn" | "after_close";
       status?: string;
-      result?: unknown;
-      /** Stop the turn while the call runs; Codex still reports `status`. */
-      stop?: boolean;
+      /** Stop the turn while the call runs (Codex still reports `status`), or
+       *  after Codex completed it. */
+      stop?: "before_completion" | "after_completion";
     } = {},
   ) {
     const settle = opts.settle ?? "after_turn";
@@ -2934,10 +2934,10 @@ describe("CodexAppServerProvider tool calls that outlive their turn", () => {
         arguments: { action_name: "slow_report", json_args: {} },
       });
       if (settle === "in_turn") {
-        finishAction(opts.result ?? { report: "ready" });
+        finishAction({ report: "ready" });
         await toolResponse;
       }
-      if (opts.stop) await session.interrupt("user stop");
+      if (opts.stop === "before_completion") await session.interrupt("user stop");
       n("item/completed", {
         threadId: "thr-1",
         turnId: "turn-1",
@@ -2953,6 +2953,7 @@ describe("CodexAppServerProvider tool calls that outlive their turn", () => {
         threadId: "thr-1",
         turn: { id: "turn-1", status: opts.status ?? "completed" },
       });
+      if (opts.stop === "after_completion") await session.interrupt("user stop");
       return { turn: { id: "turn-1" } };
     });
     session = await new CodexAppServerProvider().openSession(
@@ -2963,7 +2964,7 @@ describe("CodexAppServerProvider tool calls that outlive their turn", () => {
     const messages = await collected;
     // The idle sweeper closes a quiescent session before a defer can fire.
     if (settle === "after_close") await session.close();
-    finishAction(opts.result ?? { report: "ready" });
+    finishAction({ report: "ready" });
     const response = await toolResponse;
     return { session, messages, response, executeAction, onOrphanedToolResult };
   }
@@ -3007,7 +3008,9 @@ describe("CodexAppServerProvider tool calls that outlive their turn", () => {
   });
 
   it("marks a result as interrupted when the turn finished before a Stop landed", async () => {
-    const { session, onOrphanedToolResult } = await runTurnWithSlowAction({ stop: true });
+    const { session, onOrphanedToolResult } = await runTurnWithSlowAction({
+      stop: "before_completion",
+    });
 
     expect(requestMock).toHaveBeenCalledWith("turn/interrupt", expect.anything());
     expect(onOrphanedToolResult).toHaveBeenCalledWith(
@@ -3016,15 +3019,14 @@ describe("CodexAppServerProvider tool calls that outlive their turn", () => {
     await session.close();
   });
 
-  it("cuts a long result to about what `wait` would have shown", async () => {
+  it("delivers a result whose turn Codex completed before the Stop", async () => {
     const { session, onOrphanedToolResult } = await runTurnWithSlowAction({
-      result: { report: "x".repeat(50_000) },
+      stop: "after_completion",
     });
 
-    const [orphan] = onOrphanedToolResult.mock.calls[0] as [{ text: string }];
-    expect(orphan.text.length).toBeGreaterThan(40_000);
-    expect(orphan.text.length).toBeLessThan(40_100);
-    expect(orphan.text).toMatch(/\[result truncated: \d+ more characters not shown\]$/);
+    expect(onOrphanedToolResult).toHaveBeenCalledWith(
+      expect.objectContaining({ callId: "call-slow", interrupted: false }),
+    );
     await session.close();
   });
 

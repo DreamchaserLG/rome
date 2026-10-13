@@ -203,17 +203,6 @@ function buildThreadConfig(
   };
 }
 
-// An orphaned result becomes the prompt of a new turn. In its turn, the model
-// would have read it through `wait`, whose output Codex caps at 10,000 tokens
-// by default, so the cap here is about the same and the model loses no more.
-const ORPHANED_RESULT_TEXT_LIMIT = 40_000;
-
-function truncateOrphanedText(text: string): string {
-  if (text.length <= ORPHANED_RESULT_TEXT_LIMIT) return text;
-  const omitted = text.length - ORPHANED_RESULT_TEXT_LIMIT;
-  return `${text.slice(0, ORPHANED_RESULT_TEXT_LIMIT)}\n[result truncated: ${omitted} more characters not shown]`;
-}
-
 const ISOLATED_FORK_INSTRUCTION = `<rome_isolated_fork>
 This is an isolated side-channel turn. Do not invoke any tool, even if provider metadata lists tools inherited from the source thread. Answer only from the inherited conversation and the user prompt.
 </rome_isolated_fork>`;
@@ -1035,11 +1024,9 @@ export class CodexAppServerProvider implements ModelProvider {
           callId: call.callId,
           arguments: call.arguments,
           success: response.success,
-          text: truncateOrphanedText(
-            response.contentItems
-              .map((item) => (item.type === "inputText" ? item.text : `[${item.type}]`))
-              .join("\n"),
-          ),
+          text: response.contentItems
+            .map((item) => (item.type === "inputText" ? item.text : `[${item.type}]`))
+            .join("\n"),
           interrupted,
         });
       } catch (err) {
@@ -1368,7 +1355,9 @@ export class CodexAppServerProvider implements ModelProvider {
     const interruptOwnerTurn = async (ownerSessionId: string, reason?: string): Promise<void> => {
       if (closed || !threadId || !activeTurn?.turnId) return;
       if (activeTurn.ownerSessionId !== ownerSessionId) return;
-      activeTurn.interruptRequested = true;
+      // A Stop after Codex completed the turn stops nothing, so the turn's
+      // late results still count.
+      if (!activeTurn.completed) activeTurn.interruptRequested = true;
       log.info("codex app-server interrupt", { reason, ownerSessionId });
       try {
         await this.appServerManager.requestForThread(threadId, Method.turnInterrupt, {
