@@ -364,6 +364,34 @@ describe("settleResolvedParkedRuns", () => {
     expect((await executions.findById("row-legacy"))?.status).toBe("cancelled");
   });
 
+  it("fails an approved replay a stop interrupted and copies its root's error", async () => {
+    const interrupted = await seedParkedRun("interrupted", "approve");
+    const [approval] = await approvals.findByType("action_execution");
+    expect(await approvals.claimExecution(approval!.id)).toBe(true);
+    // As endInterruptedRuns leaves the root the replay was running.
+    await executions.update(interrupted.rootExecutionId, {
+      status: "error",
+      error: "Rome stopped while this was running",
+    });
+
+    expect(await settleResolvedParkedRuns({ executions, approvals, routineRuns }, boot)).toBe(1);
+
+    const run = await routineRuns.findById(interrupted.runId);
+    expect(run?.status).toBe("error");
+    expect(run?.error).toBe("Rome stopped while this was running");
+    expect(await approvals.findById(approval!.id)).toMatchObject({
+      executionState: "failed",
+      executionError: "Rome stopped while the approved action was running",
+    });
+    expect(await routines.deleteIfNoActiveRuns(interrupted.routineId)).toMatchObject({
+      status: "deleted",
+    });
+    // Failed, the approval is retryable again; `running` never was.
+    expect(await approvals.retryFailedExecution(approval!.id)).toMatchObject({
+      outcome: "queued",
+    });
+  });
+
   it("copies the outcome of a root whose approved replay finished", async () => {
     const done = await seedParkedRun("done", "approve");
     const [approval] = await approvals.findByType("action_execution");

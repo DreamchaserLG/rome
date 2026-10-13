@@ -1,7 +1,7 @@
 import { PersonMappingRepository } from "./person-mapping.js";
 import { STRANGER_PERSON_ID } from "../../constants.js";
 import { loadPairingKey, pairingCode, matchesPairingCode } from "../../channels/pairing-code.js";
-import { and, eq, or, desc, sql, ne, count, gte, inArray } from "drizzle-orm";
+import { and, eq, or, desc, sql, ne, count, gte, inArray, notInArray } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { approvals, channelMappings, connections, connectionGrants } from "../schema.js";
 import type { DrizzleDb, SqliteExec } from "../index.js";
@@ -500,9 +500,11 @@ export class ApprovalsRepository {
 
   /** Whether an action_execution approval for the root can still run or change
    * it: one pending, or approved and not executed yet, a failed execution
-   * included. `excludeId` leaves out the approval the caller is resolving,
-   * whose executionState still reads `running` while it settles. */
-  hasActiveApprovalForRoot(rootExecutionId: string, excludeId?: string): boolean {
+   * included. `excludeIds` leaves out approvals the caller knows have settled
+   * the root although their own state still reads as live: the one it is
+   * resolving, whose executionState reads `running` while it settles, or ones
+   * failInterruptedExecutions just failed. */
+  hasActiveApprovalForRoot(rootExecutionId: string, excludeIds: readonly string[] = []): boolean {
     const row = this.db
       .select({ id: approvals.id })
       .from(approvals)
@@ -510,7 +512,7 @@ export class ApprovalsRepository {
         and(
           activeActionApproval,
           sql`json_extract(${approvals.payload}, '$.rootExecutionId') = ${rootExecutionId}`,
-          excludeId ? ne(approvals.id, excludeId) : undefined,
+          excludeIds.length > 0 ? notInArray(approvals.id, [...excludeIds]) : undefined,
         ),
       )
       .limit(1)
@@ -533,6 +535,27 @@ export class ApprovalsRepository {
       .limit(1)
       .get();
     return row !== undefined;
+  }
+
+  /**
+   * Fails every approved action_execution approval whose execution was still
+   * `running`, with `error`, and returns the ids it failed. The guardian can
+   * then retry them. Call only at boot, before any approval executes: nothing
+   * runs one then, so a `running` state was left by a stopped process.
+   */
+  async failInterruptedExecutions(error: string): Promise<string[]> {
+    const rows = await this.db
+      .update(approvals)
+      .set({ executionState: "failed", executionError: error })
+      .where(
+        and(
+          eq(approvals.type, "action_execution"),
+          eq(approvals.status, "approved"),
+          eq(approvals.executionState, "running"),
+        ),
+      )
+      .returning({ id: approvals.id });
+    return rows.map((row) => row.id);
   }
 
   async retryFailedExecution(id: string): Promise<RetryExecutionResult> {

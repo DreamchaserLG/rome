@@ -275,7 +275,7 @@ export class ApprovalHandler {
     if (
       this.settlement &&
       typeof rootExecutionId === "string" &&
-      !this.approvalsRepo.hasActiveApprovalForRoot(rootExecutionId, approvalId)
+      !this.approvalsRepo.hasActiveApprovalForRoot(rootExecutionId, [approvalId])
     ) {
       try {
         await this.settlement.executions.markParkedRootRejected(rootExecutionId, new Date());

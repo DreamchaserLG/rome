@@ -86,7 +86,8 @@ export class RoutineRunsRepository {
    * `executionId`, and returns whether a run changed. Only a run still
    * `pending_approval`, or `error` from an approved replay that threw, takes
    * the outcome, so a retried approval can still settle it. A run that ended
-   * any other way keeps its status.
+   * any other way keeps its status. `durationMs` keeps the time the run took
+   * to park.
    */
   async syncFromRoot(
     executionId: string,
