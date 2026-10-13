@@ -1,0 +1,4 @@
+{
+  "$comment": "Tables and columns whose last reader is gone. A migration may drop or rename one only after a release tag includes its entry. Checked by pnpm db:check:destructive. The sequence is in DEVELOPMENT.md under Established patterns.",
+  "retired": []
+}
