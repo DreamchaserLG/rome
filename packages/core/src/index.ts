@@ -102,6 +102,7 @@ import { PromptBuilder } from "./core/prompt-builder.js";
 import { ActionRegistryImpl } from "./actions/registry.js";
 import { ActionLoader } from "./actions/loader.js";
 import { ActionEngine } from "./actions/engine.js";
+import { createRunsRootInMain } from "./actions/main-process-actions.js";
 import { bumpModuleEnvEpoch } from "./actions/module-loader.js";
 import { ActionWorkerCoordinator } from "./actions/action-subprocess.js";
 import { endInterruptedRuns } from "./actions/restart-recovery.js";
@@ -551,6 +552,7 @@ async function main() {
       onWorkerInterrupted: createHostWorkerRecovery(actionExecutionsRepo),
       maxWorkerProcesses: config.actionWorkerMaxProcesses,
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
+      runsRootInMain: createRunsRootInMain(actionRegistry),
       onApprovalCreated: (approval) => sendApprovalCard(channelsService, approval),
     },
   );
