@@ -392,6 +392,22 @@ describe("settleResolvedParkedRuns", () => {
     });
   });
 
+  it("makes an approval a stop left unclaimed retryable and keeps its run waiting", async () => {
+    const unclaimed = await seedParkedRun("unclaimed", "approve");
+    const [approval] = await approvals.findByType("action_execution");
+
+    expect(await settleResolvedParkedRuns({ executions, approvals, routineRuns }, boot)).toBe(0);
+
+    expect((await routineRuns.findById(unclaimed.runId))?.status).toBe("pending_approval");
+    expect(await approvals.findById(approval!.id)).toMatchObject({
+      executionState: "failed",
+      executionError: "Rome stopped before the approved action started",
+    });
+    expect(await approvals.retryFailedExecution(approval!.id)).toMatchObject({
+      outcome: "queued",
+    });
+  });
+
   it("copies the outcome of a root whose approved replay finished", async () => {
     const done = await seedParkedRun("done", "approve");
     const [approval] = await approvals.findByType("action_execution");

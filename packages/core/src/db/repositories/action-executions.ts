@@ -244,8 +244,8 @@ export class ActionExecutionsRepository {
    * Top-level executions (no parent) that finished as success, error, or
    * cancelled, in (finishedAt, id) order: strictly after `after` and no later
    * than `until`. Pass the last row's (finishedAt, id) as the next `after` to
-   * page. A routine's top-level execution carries the routine run's root id,
-   * not its own, so `parentId` is the test for top level.
+   * page. A routine run fired before its top-level row took the run's root id
+   * carries that root id, not its own, so `parentId` is the test for top level.
    */
   async findFinishedTopLevelAfter(params: {
     after: { finishedAt: Date; id: string };

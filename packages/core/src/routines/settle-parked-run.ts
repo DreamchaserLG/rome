@@ -64,8 +64,9 @@ export function routineRunApprovalSettlement(
  *  - A root still parked behind a rejected approval is first recorded as
  *    rejected.
  *  - An approved action a stop interrupted is failed first, so the guardian
- *    can retry it. Its run then takes the root's outcome, as after an action
- *    that threw: endInterruptedRuns has already ended that root as an error.
+ *    can retry it. If it had started, its run then takes the root's outcome,
+ *    as after an action that threw: endInterruptedRuns has already ended that
+ *    root as an error. If it had not, its run keeps waiting for the retry.
  * Call at boot, after endInterruptedRuns and before any approval executes.
  */
 export async function settleResolvedParkedRuns(
@@ -79,9 +80,7 @@ export async function settleResolvedParkedRuns(
   },
   now: Date,
 ): Promise<number> {
-  const interrupted = await repos.approvals.failInterruptedExecutions(
-    "Rome stopped while the approved action was running",
-  );
+  const interrupted = await repos.approvals.failInterruptedExecutions();
   let settled = 0;
   for (const rootExecutionId of await repos.routineRuns.findParkedExecutionIds()) {
     if (repos.approvals.hasActiveApprovalForRoot(rootExecutionId, interrupted)) continue;

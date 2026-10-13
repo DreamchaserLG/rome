@@ -538,24 +538,31 @@ export class ApprovalsRepository {
   }
 
   /**
-   * Fails every approved action_execution approval whose execution was still
-   * `running`, with `error`, and returns the ids it failed. The guardian can
-   * then retry them. Call only at boot, before any approval executes: nothing
-   * runs one then, so a `running` state was left by a stopped process.
+   * Fails every approved action_execution approval a stopped process left
+   * `queued` or `running`, so the guardian can retry it, and returns the ids of
+   * the `running` ones: their execution started, and its root has an outcome.
+   * Call only at boot, before any approval executes: nothing claims or runs
+   * one then.
    */
-  async failInterruptedExecutions(error: string): Promise<string[]> {
-    const rows = await this.db
-      .update(approvals)
-      .set({ executionState: "failed", executionError: error })
-      .where(
-        and(
-          eq(approvals.type, "action_execution"),
-          eq(approvals.status, "approved"),
-          eq(approvals.executionState, "running"),
-        ),
-      )
-      .returning({ id: approvals.id });
-    return rows.map((row) => row.id);
+  async failInterruptedExecutions(): Promise<string[]> {
+    const interrupted = (state: "queued" | "running", error: string) =>
+      this.db
+        .update(approvals)
+        .set({ executionState: "failed", executionError: error })
+        .where(
+          and(
+            eq(approvals.type, "action_execution"),
+            eq(approvals.status, "approved"),
+            eq(approvals.executionState, state),
+          ),
+        )
+        .returning({ id: approvals.id });
+    await interrupted("queued", "Rome stopped before the approved action started");
+    const started = await interrupted(
+      "running",
+      "Rome stopped while the approved action was running",
+    );
+    return started.map((row) => row.id);
   }
 
   async retryFailedExecution(id: string): Promise<RetryExecutionResult> {
