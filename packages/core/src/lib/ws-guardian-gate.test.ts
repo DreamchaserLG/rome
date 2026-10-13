@@ -148,6 +148,17 @@ describe("gateGuardianUpgrade", () => {
     expect(response()).toContain("HTTP/1.1 421 Misdirected Request");
   });
 
+  it("rejects a loopback-addressed caller whose Origin is another name despite same-origin metadata", async () => {
+    // The Host passes the listener's name check, so only the Origin rule stops it.
+    const { socket, response } = captureSocket();
+    const req = request({
+      origin: "http://evil.example:4141",
+      "sec-fetch-site": "same-origin",
+    });
+    expect(await gateGuardianUpgrade(req, socket, testDb.db)).toBe(false);
+    expect(response()).toContain("HTTP/1.1 403 Forbidden");
+  });
+
   it("admits an allow-listed dashboard visitor only when dashboard access is passed", async () => {
     const dashboardAccess = new DashboardAccessState();
     dashboardAccess.setCloudEmailAccess(["visitor@example.com"]);

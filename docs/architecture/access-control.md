@@ -42,7 +42,7 @@ The edge consults the probe on routes configured with `forward_auth` and forward
 
 ## Listener host names
 
-The [single HTTP listener](api.md#http-surface) answers only to names nobody outside the instance can point at it: loopback names, IP literals, and Tailscale tailnet names. Any other name gets 421 Misdirected Request, on HTTP routes and WebSocket upgrades alike.
+The [single HTTP listener](api.md#http-surface) answers only to names nobody outside the instance can point at it: loopback names, IP literals, and Tailscale tailnet names. Any other name gets 421 Misdirected Request, on HTTP routes and WebSocket upgrades alike. The health daemon's listener applies the same rule.
 
 The rule exists for the in-container browser. A page there whose name an attacker rebinds to 127.0.0.1 becomes same-origin with the listener. Its requests come from a loopback peer with no forwarding headers, so peer address, forwarding headers, and Origin cannot tell it from the dashboard. Only the name it addressed can.
 
