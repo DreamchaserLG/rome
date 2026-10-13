@@ -101,15 +101,21 @@ export class RoutineRunsRepository {
   }
 
   /**
-   * Returns the `error` run rooted at `executionId` to `pending_approval`, for
-   * a retried approval that replays its root again: the run stays active until
+   * Returns the `error` or `cancelled` run rooted at `executionId` to
+   * `pending_approval`, for a retried approval that replays its root again,
+   * as after a replay that threw or was stopped: the run stays active until
    * that replay settles it. Returns whether a run changed.
    */
   async reopenForReplay(executionId: string): Promise<boolean> {
     const result = await this.db
       .update(routineRuns)
       .set({ status: "pending_approval", error: null })
-      .where(and(eq(routineRuns.executionId, executionId), eq(routineRuns.status, "error")));
+      .where(
+        and(
+          eq(routineRuns.executionId, executionId),
+          inArray(routineRuns.status, ["error", "cancelled"]),
+        ),
+      );
     return Number(result.changes ?? 0) > 0;
   }
 

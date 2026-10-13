@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { ActionCancelledError } from "../actions/action-errors.js";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { ApprovalHandler } from "../actions/approval-handler.js";
@@ -514,6 +515,41 @@ describe("routine runs parked on approval", () => {
     expect(await routines.deleteIfNoActiveRuns(routineId)).toMatchObject({ status: "deleted" });
     gateReleased.resolve();
     await replaying;
+  });
+
+  it("keeps a run active while the retry of a stopped replay runs", async () => {
+    let attempts = 0;
+    const retryRunning = deferred();
+    const retryReleased = deferred();
+    registry.register(
+      makeAction(
+        "export",
+        async () => {
+          attempts++;
+          if (attempts === 1) throw new ActionCancelledError("Cancelled by user");
+          retryRunning.resolve();
+          await retryReleased.promise;
+          return { status: "ok" };
+        },
+        true,
+      ),
+    );
+    const { routineId, runId } = await fire("export");
+    const approvalId = await pendingApprovalFor("export");
+    await approve(approvalId);
+    expect(await runStatus(runId)).toBe("cancelled");
+
+    expect((await approvals.retryFailedExecution(approvalId)).outcome).toBe("queued");
+    const retrying = handler.onApproved(approvalId);
+    await retryRunning.promise;
+
+    expect(await runStatus(runId)).toBe("pending_approval");
+    expect(await routines.deleteIfNoActiveRuns(routineId)).toMatchObject({
+      status: "active-runs",
+    });
+    retryReleased.resolve();
+    await retrying;
+    expect(await runStatus(runId)).toBe("success");
   });
 
   it("reopens a failed run when its retry is claimed, before the retry waits its turn", async () => {
