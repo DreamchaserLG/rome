@@ -96,6 +96,64 @@ describe("findUnretiredRemovals", () => {
     ]);
   });
 
+  it("treats a hand-written rebuild that renames a copy onto the table as no removal", () => {
+    const violations = findUnretiredRemovals({
+      shippedSnapshot: snapshot({ routines: ["id", "name"] }),
+      headSnapshot: snapshot({ routines: ["id", "name"] }),
+      unshippedMigrations: [
+        {
+          name: "0083_rebuild_routines",
+          sql: [
+            "CREATE TABLE `routines_new` (`id` text PRIMARY KEY NOT NULL, `name` text NOT NULL UNIQUE);",
+            'INSERT INTO `routines_new` SELECT "id", "name" FROM `routines`;',
+            "DROP TABLE `routines`;",
+            "ALTER TABLE `routines_new` RENAME TO `routines`;",
+          ].join("\n"),
+        },
+      ],
+      shippedRetired: [],
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it("treats a rebuild that renames the table away and creates it again as no removal", () => {
+    const violations = findUnretiredRemovals({
+      shippedSnapshot: snapshot({ routines: ["id", "name"] }),
+      headSnapshot: snapshot({ routines: ["id", "name"] }),
+      unshippedMigrations: [
+        {
+          name: "0084_rebuild_routines",
+          sql: [
+            "ALTER TABLE `routines` RENAME TO `routines_old`;",
+            "CREATE TABLE `routines` (`id` text PRIMARY KEY NOT NULL, `name` text NOT NULL);",
+            'INSERT INTO `routines` SELECT "id", "name" FROM `routines_old`;',
+            "DROP TABLE `routines_old`;",
+          ].join("\n"),
+        },
+      ],
+      shippedRetired: [],
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it("flags a drop that comes after the rename onto the same name", () => {
+    const violations = findUnretiredRemovals({
+      shippedSnapshot: snapshot({ routines: ["id"] }),
+      headSnapshot: snapshot({ routines: ["id"] }),
+      unshippedMigrations: [
+        {
+          name: "0085_misordered",
+          sql: "ALTER TABLE `routines_new` RENAME TO `routines`;\nDROP TABLE `routines`;",
+        },
+      ],
+      shippedRetired: [],
+    });
+
+    expect(violations).toEqual([{ table: "routines", foundIn: ["0085_misordered"] }]);
+  });
+
   it("does not let a retired column cover its whole table", () => {
     const violations = findUnretiredRemovals({
       shippedSnapshot: shippedWithProviderAccounts,

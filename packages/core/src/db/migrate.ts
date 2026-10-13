@@ -64,8 +64,8 @@ const SYSTEM_MIGRATIONS_TABLE = "__drizzle_migrations_system";
 /**
  * Runs the system migrations, then each app's. A database already ahead of
  * this build is logged as an error and reported in the result, never thrown:
- * the build may still boot on it, and the supported recovery is restoring the
- * pre-upgrade backup.
+ * the build may still boot on it, and the recovery is starting the newer
+ * release again or restoring a copy of the database from before the upgrade.
  */
 export async function runMigrations(
   config?: DatabaseConfig,
@@ -115,7 +115,7 @@ function countSqliteMigrationsAheadOfBuild(db: DrizzleDb, migrationsFolder: stri
       )?.count ?? 0;
     if (ahead > 0) {
       log.error(
-        "database was migrated by a newer Rome release; reads of anything it dropped will fail. Restore the pre-upgrade backup or start the newer release again",
+        "database was migrated by a newer Rome release; reads of anything it dropped will fail. Start the newer release again, or restore a copy of the database taken before the upgrade if you have one",
         { databaseAheadBy: ahead, newestKnownMigration: newest.tag },
       );
     }

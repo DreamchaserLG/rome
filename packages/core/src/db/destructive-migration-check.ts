@@ -54,7 +54,7 @@ export function parseRetiredManifest(json: string | null): RetiredEntry[] {
  * nothing, because the release a rollback lands on still reads the object.
  *
  * Removals come from two sources. The snapshot diff covers drops, renames and
- * drizzle's `__new_<table>` recreates. The SQL scan covers hand-written drops
+ * columns a table rebuild leaves out. The SQL scan covers hand-written drops
  * and renames in migrations the last release did not ship. Index drops are
  * ignored, since no reader fails when an index is gone. Only objects the last
  * release declares count, so an object created and dropped before a release
@@ -122,11 +122,14 @@ const RENAME_TABLE = new RegExp(
   String.raw`\bALTER\s+TABLE\s+${IDENT}\s+RENAME\s+TO\s+${IDENT}`,
   "gi",
 );
+const CREATE_TABLE = new RegExp(
+  String.raw`\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?${IDENT}`,
+  "gi",
+);
 const RENAME_COLUMN = new RegExp(
   String.raw`\bALTER\s+TABLE\s+${IDENT}\s+RENAME\s+(?:COLUMN\s+)?(?!TO\b)${IDENT}\s+TO\s+${IDENT}`,
   "gi",
 );
-const RECREATE_PREFIX = "__new_";
 
 function scanSqlForRemovals(sql: string): { table: string; column?: string }[] {
   const code = sql
@@ -135,20 +138,30 @@ function scanSqlForRemovals(sql: string): { table: string; column?: string }[] {
     .map((line) => line.replace(/--.*$/, ""))
     .join("\n");
 
-  // drizzle-kit recreates a table to change it: it copies the rows into
-  // `__new_<table>`, drops the original, then renames the copy back. The table
-  // survives, and any column the copy leaves out shows in the snapshot diff.
-  const recreated = new Set<string>();
-  for (const [, from, to] of code.matchAll(RENAME_TABLE)) {
-    if (from === `${RECREATE_PREFIX}${to}`) recreated.add(to);
-  }
+  // A SQLite table rebuild removes the table under its name and then gives the
+  // name back: drizzle-kit drops `t` and renames `__new_t` onto it, and a
+  // hand-written rebuild may rename `t` away and create a new `t`. The table
+  // survives either way, and any column the rebuild leaves out shows in the
+  // snapshot diff. So a removal followed in the same migration by a create or
+  // rename onto the same name is not a removal.
+  const renames = [...code.matchAll(RENAME_TABLE)].map((match) => ({
+    from: match[1],
+    to: match[2],
+    at: match.index,
+  }));
+  const restored = [
+    ...renames.map((rename) => ({ table: rename.to, at: rename.at })),
+    ...[...code.matchAll(CREATE_TABLE)].map((match) => ({ table: match[1], at: match.index })),
+  ];
+  const isRestoredAfter = (table: string, removedAt: number) =>
+    restored.some((entry) => entry.table === table && entry.at > removedAt);
 
   const removals: { table: string; column?: string }[] = [];
-  for (const [, table] of code.matchAll(DROP_TABLE)) {
-    if (!recreated.has(table)) removals.push({ table });
+  for (const match of code.matchAll(DROP_TABLE)) {
+    if (!isRestoredAfter(match[1], match.index)) removals.push({ table: match[1] });
   }
-  for (const [, from] of code.matchAll(RENAME_TABLE)) {
-    if (!from.startsWith(RECREATE_PREFIX)) removals.push({ table: from });
+  for (const rename of renames) {
+    if (!isRestoredAfter(rename.from, rename.at)) removals.push({ table: rename.from });
   }
   for (const [, table, column] of code.matchAll(DROP_COLUMN)) {
     removals.push({ table, column });
