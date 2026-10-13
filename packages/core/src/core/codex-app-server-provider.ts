@@ -203,6 +203,15 @@ function buildThreadConfig(
   };
 }
 
+// An orphaned result is delivered as the prompt of a new turn, so a large
+// action output must not flood that turn's context.
+const ORPHANED_RESULT_TEXT_LIMIT = 4_000;
+
+function truncateOrphanedText(text: string): string {
+  if (text.length <= ORPHANED_RESULT_TEXT_LIMIT) return text;
+  return `${text.slice(0, ORPHANED_RESULT_TEXT_LIMIT)}\n[truncated ${text.length - ORPHANED_RESULT_TEXT_LIMIT} characters]`;
+}
+
 const ISOLATED_FORK_INSTRUCTION = `<rome_isolated_fork>
 This is an isolated side-channel turn. Do not invoke any tool, even if provider metadata lists tools inherited from the source thread. Answer only from the inherited conversation and the user prompt.
 </rome_isolated_fork>`;
@@ -988,8 +997,52 @@ export class CodexAppServerProvider implements ModelProvider {
       const result = await turn.romeTools.callTool(call.tool, call.arguments, {
         toolUseId: call.callId,
       });
+      // Codex waits for a call before it ends the turn, except for a call that
+      // a yielded code-mode `exec` cell still awaits. That call is cancelled at
+      // turn end and its item already completed as failed, so the response
+      // below reaches nothing. Hand the result to the session instead.
+      if (turn.completed || activeTurn !== turn) {
+        reportOrphanedToolResult(call, turn, result.response);
+        return result.response;
+      }
       dynamicToolOutputs.set(call.callId, result.traceOutput);
       return result.response;
+    };
+
+    const reportOrphanedToolResult = (
+      call: DynamicToolCallParams,
+      turn: ActiveTurn,
+      response: DynamicToolCallResponse,
+    ): void => {
+      const interrupted = turn.nativeStatus === "interrupted";
+      log.info("codex dynamic tool call finished after its turn ended", {
+        tool: call.tool,
+        callId: call.callId,
+        interrupted,
+      });
+      // A borrowed exact fork runs its turn on this thread, but its result
+      // belongs to the fork, which ends with that turn.
+      if (turn.ownerSessionId !== params.sessionId || !params.onOrphanedToolResult) return;
+      try {
+        params.onOrphanedToolResult({
+          tool: call.tool,
+          callId: call.callId,
+          arguments: call.arguments,
+          success: response.success,
+          text: truncateOrphanedText(
+            response.contentItems
+              .map((item) => (item.type === "inputText" ? item.text : `[${item.type}]`))
+              .join("\n"),
+          ),
+          interrupted,
+        });
+      } catch (err) {
+        log.warn("orphaned tool result handler failed", {
+          tool: call.tool,
+          callId: call.callId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     };
 
     const binding: CodexThreadBinding = {

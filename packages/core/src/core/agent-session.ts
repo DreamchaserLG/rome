@@ -43,7 +43,7 @@ import type {
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
 import { createNullModelSession } from "./agent-runner.js";
-import { runDefer, type DeferInput } from "./defer.js";
+import { buildResumeArgs, RESUME_SESSION_ACTION, runDefer, type DeferInput } from "./defer.js";
 import type {
   ActionMcpDefinition,
   ModelSession,
@@ -53,6 +53,7 @@ import type {
   ModelTier,
   ModelToolDefinition,
   ModelToolCallContext,
+  OrphanedToolResult,
   ProviderId,
   SkillMcpDefinition,
 } from "./agent-runner.js";
@@ -832,6 +833,23 @@ interface ForkOpen {
 
 type BuildForkOpenParams = (fork: ForkTurnContext) => ForkOpen;
 
+/** The prompt of the turn that delivers a tool result which finished after its turn ended. */
+function formatOrphanedToolResult(orphan: OrphanedToolResult): string {
+  const args = orphan.arguments as { action_name?: unknown } | null | undefined;
+  const label =
+    orphan.tool === "execute_action" && typeof args?.action_name === "string"
+      ? `the action "${args.action_name}"`
+      : `the tool "${orphan.tool}"`;
+  const outcome = orphan.success ? "finished" : "failed";
+  // The model saw this call reported as cancelled, so say plainly that it ran.
+  return [
+    `A call to ${label} (call ${orphan.callId}) that you started in an earlier turn ${outcome} after that turn ended. It already ran: do not run it again. Its result:`,
+    "<tool_result>",
+    orphan.text,
+    "</tool_result>",
+  ].join("\n");
+}
+
 /** The recorded dir when it still exists, else undefined. The default project is recreated. */
 async function reachableRecordedWorkingDir(recorded: string): Promise<string | undefined> {
   if (recorded === getDefaultAgentWorkingDir()) return await ensureDefaultAgentWorkingDir();
@@ -1354,6 +1372,56 @@ async function openSession(
       );
   const executeDefer = deferEnabled ? makeExecuteDefer(sessionExecRefs) : undefined;
 
+  // A tool result that finished after its turn ended starts a new turn in this
+  // session, through the same resume_session wake-up `defer` schedules, so it
+  // is wired only where defer is. Without it, an action that outlived a
+  // yielded Codex `exec` cell would leave no trace the model could find.
+  const deliverOrphanedToolResult = (orphan: OrphanedToolResult): void => {
+    const logFields = {
+      sessionId,
+      agentName: key.agentName,
+      tool: orphan.tool,
+      callId: orphan.callId,
+    };
+    // A stopped turn stays stopped; its late result is not worth a new turn.
+    if (orphan.interrupted) {
+      log.info("dropping a tool result that finished after an interrupted turn", logFields);
+      return;
+    }
+    // The session may already be closed and reopened; either way its thread
+    // context still names the conversation this call belongs to.
+    const channelContext = impl.currentTurnThreadContextRef;
+    if (!channelContext?.channel || !channelContext.threadId) {
+      log.warn("cannot deliver a late tool result: the session has no thread", logFields);
+      return;
+    }
+    const args = buildResumeArgs(
+      { agentName: key.agentName, sessionId, channelContext },
+      formatOrphanedToolResult(orphan),
+    );
+    void deps.actionEngine
+      .run(RESUME_SESSION_ACTION, args, {
+        initiator: "system:orphaned-tool-result",
+        sessionId,
+        agentName: key.agentName,
+        channelThreadKey: key.channelThreadKey,
+        // Detached from any worker, so it may wait for a free one.
+        whenWorkersBusy: "queue",
+      })
+      .then((result) => {
+        if (result.status === "error") {
+          log.warn("late tool result delivery failed", { ...logFields, error: result.error });
+        }
+      })
+      .catch((err) => {
+        log.warn("late tool result delivery failed", {
+          ...logFields,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+  };
+  const onOrphanedToolResult = deferEnabled ? deliverOrphanedToolResult : undefined;
+
   const makeExecuteSubmitOutput =
     (refs: TurnExecRefs) =>
     async (input: unknown): Promise<unknown> =>
@@ -1523,6 +1591,7 @@ async function openSession(
     executeSubagent,
     executeSubmitOutput,
     executeDefer,
+    onOrphanedToolResult,
     routineActivation,
     supportsInteractiveSurface,
     interactiveSurfaceDetached: init.interactiveSurfaceDetached,
@@ -1695,6 +1764,9 @@ async function openSession(
         executeSubagent: makeExecuteSubagent(refs),
         executeSubmitOutput: conversationalHandback ? makeExecuteSubmitOutput(refs) : undefined,
         executeDefer: deferEnabled && !fork.continuable ? makeExecuteDefer(refs) : undefined,
+        // A fork's late result would resume the source session, which never
+        // saw the fork's call.
+        onOrphanedToolResult: undefined,
         // The spread keeps `supportsInteractiveSurface` (it shapes the
         // advertised catalog + system prompt, which must stay byte-identical
         // to the source); this flag makes the interactive *runtime* degrade

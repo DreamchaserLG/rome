@@ -333,6 +333,65 @@ describe("bundled Codex app-server", () => {
     expect(exists).toBe(written);
   }, 30_000);
 
+  // Codex cancels a Rome tool call that a yielded `exec` cell still awaits
+  // when the turn ends, so its result can only reach the model through
+  // onOrphanedToolResult. If a Codex upgrade keeps such calls alive across
+  // turns, this fails and the hand-off would deliver results twice.
+  it("hands over an action result that outlives its yielded exec cell", async () => {
+    let finishAction!: (value: unknown) => void;
+    const actionDone = new Promise((resolve) => {
+      finishAction = resolve;
+    });
+    let markActionStarted!: () => void;
+    const actionStarted = new Promise<void>((resolve) => {
+      markActionStarted = resolve;
+    });
+    const onOrphanedToolResult = rs.fn();
+    script = (body) =>
+      hasToolOutput(body)
+        ? undefined
+        : [
+            {
+              type: "custom_tool_call",
+              call_id: "call-exec",
+              name: "exec",
+              input:
+                '// @exec: {"yield_time_ms": 500}\n' +
+                'const r = await tools.execute_action({ action_name: "slow_report", json_args: {} });\n' +
+                "text(JSON.stringify(r));",
+            },
+          ];
+    const session = await provider.openSession({
+      ...sessionParams(codexModels[0]!, "codex-orphaned-result", []),
+      executeAction: async () => {
+        markActionStarted();
+        return await actionDone;
+      },
+      onOrphanedToolResult,
+    });
+    try {
+      await runTurn(session, "Start the slow report.");
+      await actionStarted;
+      expect(requests.at(-1)?.input).toContain("Script running with cell ID");
+      expect(onOrphanedToolResult).not.toHaveBeenCalled();
+      finishAction({ report: "ready" });
+      await rs.waitFor(() => expect(onOrphanedToolResult).toHaveBeenCalledTimes(1), {
+        timeout: 5_000,
+      });
+      expect(onOrphanedToolResult).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tool: "execute_action",
+          success: true,
+          text: expect.stringContaining("ready"),
+          interrupted: false,
+        }),
+      );
+    } finally {
+      script = undefined;
+      await session.close();
+    }
+  }, 30_000);
+
   // No config key removes Codex's collaboration tools from models that ship
   // them, so a spawned Codex agent has to inherit the parent's limits.
   it("gives a Codex agent spawned by an agent with no builtins no shell", async () => {
