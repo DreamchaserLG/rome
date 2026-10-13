@@ -511,6 +511,8 @@ function requireSkill(skillCatalog: SkillMcpDefinition[], skillName: string): Sk
   return skill;
 }
 
+const MAX_HINT_FILE_OWNERS = 3;
+
 function skillMissHint(skillCatalog: SkillMcpDefinition[], skillName: string): string {
   const slash = skillName.indexOf("/");
   const owner = slash > 0 ? findSkill(skillCatalog, skillName.slice(0, slash)) : undefined;
@@ -519,8 +521,12 @@ function skillMissHint(skillCatalog: SkillMcpDefinition[], skillName: string): s
     (skill) => skill.directory && skill.files?.includes(file),
   );
   if (fileOwners.length > 0) {
-    const ids = fileOwners.map((skill) => skill.name).join(", ");
-    const paths = fileOwners.map((skill) => join(skill.directory!, file)).join(" or ");
+    // A common file name such as README.md can ship with many skills, so name
+    // only the first few owners to keep the error short.
+    const shown = fileOwners.slice(0, MAX_HINT_FILE_OWNERS);
+    const more = fileOwners.length - shown.length;
+    const ids = shown.map((skill) => skill.name).join(", ") + (more > 0 ? ` and ${more} more` : "");
+    const paths = shown.map((skill) => join(skill.directory!, file)).join(" or ");
     const noun = fileOwners.length === 1 ? "skill" : "skills";
     return `"${file}" is a companion file of ${noun} ${ids}, not a skill. Read ${paths} with your file tools.`;
   }

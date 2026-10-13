@@ -620,6 +620,28 @@ describe("buildAnthropicMcpServers", () => {
     );
   });
 
+  it("read_skill names at most three owners of a shared companion file", async () => {
+    const skills: SkillMcpDefinition[] = ["a", "b", "c", "d", "e"].map((id) => ({
+      name: `${id}:doc`,
+      description: "Doc",
+      content: "# Doc",
+      directory: `/x/${id}`,
+      files: ["README.md"],
+      ownerType: "app",
+      ownerId: id,
+    }));
+    build({ skillCatalog: skills });
+    const readTool = getSkillsServerTools().find((tool) => tool.name === "read_skill")!;
+
+    const response = await readTool.handler({ skill_name: "README.md" });
+
+    expect(response.content[0].text).toBe(
+      'Unknown skill: README.md. "README.md" is a companion file of skills a:doc, b:doc, c:doc ' +
+        "and 2 more, not a skill. Read /x/a/README.md or /x/b/README.md or /x/c/README.md " +
+        "with your file tools.",
+    );
+  });
+
   it("logs model input errors at warn and Rome failures at error", async () => {
     build({
       skillCatalog: [
