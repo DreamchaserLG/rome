@@ -19,48 +19,68 @@ import type { ApiDeps } from "../deps.js";
 const log = createLogger("api:webhooks");
 const WEBHOOK_CALLBACK_TIMEOUT_MS = 5_000;
 
+/**
+ * POSTs the invocation's current response to its callback URL once, and records
+ * the attempt on the row. Does nothing when the row is missing or has no
+ * callback URL. A failed delivery is recorded on the row, not thrown.
+ */
+export async function deliverWebhookCallback(
+  webhookInvocationsRepo: WebhookInvocationsRepository,
+  executionId: string,
+): Promise<void> {
+  const invocation = await webhookInvocationsRepo.findByExecutionId(executionId);
+  if (!invocation?.callbackUrl) return;
+  const callbackPayload = toWebhookInvocationResponse(invocation);
+
+  const attemptedAt = new Date();
+  try {
+    const response = await fetch(invocation.callbackUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(callbackPayload),
+      signal: AbortSignal.timeout(WEBHOOK_CALLBACK_TIMEOUT_MS),
+    });
+    await webhookInvocationsRepo.update(executionId, {
+      callbackStatus: response.ok ? "succeeded" : "failed",
+      callbackAttemptedAt: attemptedAt,
+      callbackDeliveredAt: response.ok ? new Date() : null,
+      callbackResponseStatus: response.status,
+      callbackError: response.ok ? null : `Callback failed with status ${response.status}`,
+    });
+  } catch (err) {
+    await webhookInvocationsRepo.update(executionId, {
+      callbackStatus: "failed",
+      callbackAttemptedAt: attemptedAt,
+      callbackDeliveredAt: null,
+      callbackResponseStatus: null,
+      callbackError: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
+ * Delivers the callback of each listed invocation, one at a time. Pass the ids
+ * listUndeliveredCallbacks returns at boot, before the webhook route serves
+ * requests, so no live run delivers the same callback concurrently.
+ */
+export async function deliverWebhookCallbacks(
+  webhookInvocationsRepo: WebhookInvocationsRepository,
+  executionIds: readonly string[],
+): Promise<void> {
+  // One at a time, so a backlog of stale rows does not open a burst of requests.
+  for (const executionId of executionIds) {
+    await deliverWebhookCallback(webhookInvocationsRepo, executionId);
+  }
+}
+
 async function processWebhookInvocation(params: {
   executionId: string;
   actionName: string;
   args: Record<string, unknown>;
-  callbackUrl?: string;
   actionEngine: ActionEngine;
   webhookInvocationsRepo: WebhookInvocationsRepository;
 }): Promise<void> {
-  const { executionId, actionName, args, callbackUrl, actionEngine, webhookInvocationsRepo } =
-    params;
-
-  const deliverCallback = async () => {
-    if (!callbackUrl) return;
-    const invocation = await webhookInvocationsRepo.findByExecutionId(executionId);
-    if (!invocation) return;
-    const callbackPayload = toWebhookInvocationResponse(invocation);
-
-    const attemptedAt = new Date();
-    try {
-      const response = await fetch(callbackUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(callbackPayload),
-        signal: AbortSignal.timeout(WEBHOOK_CALLBACK_TIMEOUT_MS),
-      });
-      await webhookInvocationsRepo.update(executionId, {
-        callbackStatus: response.ok ? "succeeded" : "failed",
-        callbackAttemptedAt: attemptedAt,
-        callbackDeliveredAt: response.ok ? new Date() : null,
-        callbackResponseStatus: response.status,
-        callbackError: response.ok ? null : `Callback failed with status ${response.status}`,
-      });
-    } catch (err) {
-      await webhookInvocationsRepo.update(executionId, {
-        callbackStatus: "failed",
-        callbackAttemptedAt: attemptedAt,
-        callbackDeliveredAt: null,
-        callbackResponseStatus: null,
-        callbackError: err instanceof Error ? err.message : String(err),
-      });
-    }
-  };
+  const { executionId, actionName, args, actionEngine, webhookInvocationsRepo } = params;
 
   await webhookInvocationsRepo.update(executionId, {
     status: "running",
@@ -81,7 +101,7 @@ async function processWebhookInvocation(params: {
       error: result.status === "error" ? result.error : null,
       finishedAt: new Date(),
     });
-    await deliverCallback();
+    await deliverWebhookCallback(webhookInvocationsRepo, executionId);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const result: ActionResult = { status: "error", error: message };
@@ -91,7 +111,7 @@ async function processWebhookInvocation(params: {
       error: message,
       finishedAt: new Date(),
     });
-    await deliverCallback();
+    await deliverWebhookCallback(webhookInvocationsRepo, executionId);
   }
 }
 
@@ -176,7 +196,6 @@ export function webhookRoutes(deps: ApiDeps, webhookApiKey: string | undefined):
         executionId,
         actionName,
         args: parsedBody.args,
-        callbackUrl: parsedBody.callbackUrl,
         actionEngine,
         webhookInvocationsRepo,
       }),
