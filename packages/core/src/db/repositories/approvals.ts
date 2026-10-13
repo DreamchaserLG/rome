@@ -539,11 +539,11 @@ export class ApprovalsRepository {
 
   /**
    * Fails every approved action_execution approval a stopped process left
-   * `queued` or `running`, so the guardian can retry it, and returns how many
-   * it failed. Call only at boot, before any approval executes: nothing claims
-   * or runs one then.
+   * `queued` or `running`, so the guardian can retry it. Returns how many it
+   * failed, and the roots the `running` ones were replaying. Call only at
+   * boot, before any approval executes: nothing claims or runs one then.
    */
-  async failInterruptedExecutions(): Promise<number> {
+  async failInterruptedExecutions(): Promise<{ failed: number; replayedRoots: string[] }> {
     const fail = (state: "queued" | "running", error: string) =>
       this.db
         .update(approvals)
@@ -555,10 +555,15 @@ export class ApprovalsRepository {
             eq(approvals.executionState, state),
           ),
         )
-        .returning({ id: approvals.id });
+        .returning({ payload: approvals.payload });
     const unclaimed = await fail("queued", "Rome stopped before the approved action started");
     const started = await fail("running", "Rome stopped while the approved action was running");
-    return unclaimed.length + started.length;
+    const replayedRoots = new Set<string>();
+    for (const row of started) {
+      const rootExecutionId = (row.payload as Record<string, unknown> | null)?.rootExecutionId;
+      if (typeof rootExecutionId === "string") replayedRoots.add(rootExecutionId);
+    }
+    return { failed: unclaimed.length + started.length, replayedRoots: [...replayedRoots] };
   }
 
   async retryFailedExecution(id: string): Promise<RetryExecutionResult> {

@@ -153,6 +153,7 @@ import { PublicAccessState } from "./lib/public-access-state.js";
 import { reconcilePublicAccessAtStartup } from "./lib/public-access.js";
 import { DashboardAccessState } from "./lib/dashboard-access-state.js";
 import { ApprovalHandler } from "./actions/approval-handler.js";
+import { recoverInterruptedApprovals } from "./actions/approval-recovery.js";
 import { createBackendTurnRunner } from "./actions/backend-turn.js";
 import { emitAgentMessage } from "./actions/runtime-events.js";
 import { PolicyEngine } from "./core/policy-engine.js";
@@ -339,7 +340,10 @@ async function main() {
 
   // Nothing executes an approval yet, so a `queued` or `running` one belongs to
   // the stopped process.
-  const interruptedApprovals = await approvalsRepo.failInterruptedExecutions();
+  const interruptedApprovals = await recoverInterruptedApprovals(
+    { approvals: approvalsRepo, executions: actionExecutionsRepo },
+    new Date(),
+  );
   if (interruptedApprovals > 0) {
     log.warn("Failed approved actions a stopped Rome process left unfinished", {
       count: interruptedApprovals,

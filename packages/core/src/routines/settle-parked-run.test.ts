@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { ApprovalHandler } from "../actions/approval-handler.js";
+import { recoverInterruptedApprovals } from "../actions/approval-recovery.js";
 import { createBackendTurnRunner } from "../actions/backend-turn.js";
 import type { Action, ActionResult } from "../actions/types.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
@@ -474,7 +475,10 @@ describe("routine runs parked on approval", () => {
     });
   }
 
-  it("leaves the root to a replay still running when its run finishes parking", async () => {
+  // The run that requested the approval parks the root after its replay
+  // started, as it can from another action worker. A stop during the replay
+  // then leaves a parked root, not a running one.
+  it("ends a root its run parked over a replay a stop interrupted", async () => {
     const gateRunning = deferred();
     const gateReleased = deferred();
     registry.register(
@@ -497,14 +501,19 @@ describe("routine runs parked on approval", () => {
     await gateRunning.promise;
 
     finishAnnouncing();
-    const { runId, rootExecutionId } = await firing;
+    const { routineId, runId, rootExecutionId } = await firing;
+    expect((await executions.findById(rootExecutionId))?.status).toBe("pending_approval");
 
-    // A stop now leaves a running root, which the next start ends as an error.
-    expect((await executions.findById(rootExecutionId))?.status).toBe("running");
+    // The next start, with the replay cut off.
+    await recoverInterruptedApprovals({ approvals, executions }, new Date());
+    await settleResolvedParkedRuns({ executions, approvals, routineRuns }, new Date());
+
+    expect((await executions.findById(rootExecutionId))?.status).toBe("error");
+    expect(await runStatus(runId)).toBe("error");
+    expect((await approvals.findById(approvalId))?.executionState).toBe("failed");
+    expect(await routines.deleteIfNoActiveRuns(routineId)).toMatchObject({ status: "deleted" });
     gateReleased.resolve();
     await replaying;
-    expect(await runStatus(runId)).toBe("success");
-    expect((await executions.findById(rootExecutionId))?.status).toBe("success");
   });
 
   it("reopens a failed run when its retry is claimed, before the retry waits its turn", async () => {
@@ -618,7 +627,7 @@ describe("settleResolvedParkedRuns", () => {
 
   // The boot sequence after endInterruptedRuns.
   async function bootPass() {
-    await approvals.failInterruptedExecutions();
+    await recoverInterruptedApprovals({ approvals, executions }, boot);
     return settleResolvedParkedRuns({ executions, approvals, routineRuns }, boot);
   }
 
@@ -732,6 +741,23 @@ describe("settleResolvedParkedRuns", () => {
     expect(await approvals.retryFailedExecution(approval!.id)).toMatchObject({
       outcome: "queued",
     });
+  });
+
+  it("keeps a root parked when its interrupted replay had parked it on a new approval", async () => {
+    const reparked = await seedParkedRun("reparked", "approve");
+    const [approval] = await approvals.findByType("action_execution");
+    await approvals.claimExecution(approval!.id);
+    await approvals.create({
+      type: "action_execution",
+      requestedBy: "routine:reparked",
+      description: "Action requires guardian approval",
+      payload: { actionName: "code-review:post", rootExecutionId: reparked.rootExecutionId },
+    });
+
+    expect(await bootPass()).toBe(0);
+
+    expect((await executions.findById(reparked.rootExecutionId))?.status).toBe("pending_approval");
+    expect((await routineRuns.findById(reparked.runId))?.status).toBe("pending_approval");
   });
 
   it("makes an approval a stop left unclaimed retryable and keeps its run waiting", async () => {
