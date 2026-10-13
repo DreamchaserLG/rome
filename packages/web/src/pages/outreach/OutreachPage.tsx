@@ -61,7 +61,6 @@ import {
   useAgentActivity,
   useAgentChats,
   useChat,
-  useLeaveChat,
   useMoveBot,
   useOutreachAgent,
   useOutreachAgents,
@@ -611,9 +610,7 @@ function ChatRow({ chat, agent }: { chat: OutreachChat; agent: string }) {
 function ChatView({ agent }: { agent: OutreachAgentSummary }) {
   const { t } = useTranslation("outreach");
   const chatId = useParams<{ chatId: string }>().chatId ?? "";
-  const navigate = useNavigate();
   const query = useChat(chatId);
-  const leave = useLeaveChat();
   if (query.isPending) return <Loading />;
   if (query.error) return <LoadError message={query.error.message} />;
   const { chat, entries } = query.data;
@@ -632,21 +629,6 @@ function ChatView({ agent }: { agent: OutreachAgentSummary }) {
             {t("chat.botsHere", { bots: chat.bots.map((b) => b.name).join(", ") })}
           </p>
         </div>
-        {chat.kind === "group" && (
-          <Button
-            variant="destructive"
-            size="sm"
-            disabled={leave.isPending}
-            onClick={() =>
-              leave.mutate(
-                { chatId: chat.id, agent: agent.name },
-                { onSuccess: () => navigate(agentPath(agent.name, "/chats")) },
-              )
-            }
-          >
-            {t("chat.leave")}
-          </Button>
-        )}
       </div>
       <Card>
         <CardContent className="flex flex-col gap-4">

@@ -224,15 +224,6 @@ export function useRemoveBot() {
   );
 }
 
-export function useLeaveChat() {
-  return useOutreachWrite((vars: { chatId: string; agent: string }) =>
-    fetchJson<void>(`/api/outreach/chats/${enc(vars.chatId)}/agents/${enc(vars.agent)}`, {
-      method: "DELETE",
-      fallback: "Failed to leave the group",
-    }),
-  );
-}
-
 export function useStartRegistration() {
   return useMutation({
     mutationFn: (vars: { agent: string; botName: string; region: "feishu" | "lark" }) =>

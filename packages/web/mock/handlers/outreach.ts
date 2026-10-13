@@ -374,15 +374,6 @@ export const outreachHandlers = [
     return HttpResponse.json({ chat: toChat(c), entries: c.entries });
   }),
 
-  http.delete("/api/outreach/chats/:id/agents/:agent", ({ params }) => {
-    const c = chats.find((x) => x.id === params.id);
-    if (!c) return HttpResponse.json({ detail: "No such chat" }, { status: 404 });
-    const leaving = new Set(botsOf(String(params.agent)).map((b) => b.id));
-    c.botIds = c.botIds.filter((id) => !leaving.has(id));
-    chats = chats.filter((x) => x.botIds.length > 0);
-    return new HttpResponse(null, { status: 204 });
-  }),
-
   http.patch("/api/outreach/bots/:id", async ({ params, request }) => {
     const b = bots.find((x) => x.id === params.id);
     if (!b) return HttpResponse.json({ detail: "No such bot" }, { status: 404 });

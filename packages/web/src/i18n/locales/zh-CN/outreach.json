@@ -77,7 +77,6 @@
     "groupMeta_other": "群聊 · {{count}} 位成员 · 由 {{name}} 添加",
     "dmMeta": "私聊 · 由 {{name}} 发起",
     "botsHere": "群内机器人：{{bots}}",
-    "leave": "退出群聊",
     "shared_one": "{{bots}} 也在这个聊天中。Rome 只保存一份记录，这里的每个智能体读到的消息相同。",
     "shared_other": "{{bots}} 也在这个聊天中。Rome 只保存一份记录，这里的每个智能体读到的消息相同。",
     "settings": "聊天设置：被 @ 时回答 · 在话题中回复"

@@ -77,7 +77,6 @@
     "groupMeta_other": "Group · {{count}} members · added by {{name}}",
     "dmMeta": "DM · started by {{name}}",
     "botsHere": "Bots here: {{bots}}",
-    "leave": "Leave group",
     "shared_one": "{{bots}} is in this chat too. Rome keeps one history for it, so every agent here reads the same messages.",
     "shared_other": "{{bots}} are in this chat too. Rome keeps one history for it, so every agent here reads the same messages.",
     "settings": "Chat settings: answers when @mentioned · replies in thread"
