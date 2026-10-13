@@ -254,6 +254,46 @@ describe("file browser event streams", () => {
   });
 });
 
+describe("subscribeFileWatchEvents", () => {
+  // A watcher that fails to start is hard to provoke from real chokidar, so a
+  // hub hands back a rejected ready.
+  function failingHub() {
+    const release = rs.fn();
+    const hub: FileWatchHub = {
+      logicalRoot: "projects",
+      subscribe: () => ({ ready: Promise.reject(new Error("EMFILE")), release }),
+      watcherCount: () => 0,
+    };
+    return { hub, release };
+  }
+
+  it("releases its hub subscription and fails once when the watcher cannot start", async () => {
+    const { hub, release } = failingHub();
+    const emit = rs.fn();
+    const fail = rs.fn();
+    const unsubscribe = subscribeFileWatchEvents(hub, ["projects"], emit, fail);
+
+    await rs.waitFor(() => expect(fail).toHaveBeenCalledWith("Watch failed"));
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(emit).not.toHaveBeenCalled();
+
+    unsubscribe();
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(fail).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fail a subscription released before the watcher's start failed", async () => {
+    const { hub, release } = failingHub();
+    const fail = rs.fn();
+    const unsubscribe = subscribeFileWatchEvents(hub, ["projects"], rs.fn(), fail);
+    unsubscribe();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(fail).not.toHaveBeenCalled();
+  });
+});
+
 describe("createResolveHandler", () => {
   let rootDir = "";
   let scope: FileBrowserScope;

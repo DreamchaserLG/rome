@@ -151,6 +151,52 @@ describe("useFileBrowserWatch", () => {
     expect(MockEventSource.instances).toHaveLength(0);
   });
 
+  it("retries a watch the server ended, backing off until a ready", async () => {
+    renderWatch(socketClient());
+    const socket = FakeWebSocket.latest();
+    act(() => socket.open());
+    const subscribes = () =>
+      (socket.sent as SubscribeFrame[]).filter((frame) => frame.type === "subscribe");
+    const [first] = subscribes();
+    act(() => socket.receive({ type: "subscribed", topic: first.topic }));
+    act(() => socket.receive({ type: "error", topic: first.topic, message: "Watch failed" }));
+
+    act(() => rs.advanceTimersByTime(2_999));
+    expect(subscribes()).toHaveLength(1);
+    act(() => rs.advanceTimersByTime(1));
+    const second = subscribes()[1];
+    expect(second).toEqual({
+      type: "subscribe",
+      topic: `${first.topic}-1`,
+      params: { watch: ["projects"] },
+    });
+
+    // A second failure waits twice as long.
+    act(() => socket.receive({ type: "error", topic: second.topic, message: "Watch failed" }));
+    act(() => rs.advanceTimersByTime(5_999));
+    expect(subscribes()).toHaveLength(2);
+    act(() => rs.advanceTimersByTime(1));
+    const third = subscribes()[2];
+    expect(third.topic).toBe(`${first.topic}-2`);
+
+    // A ready resets the backoff.
+    act(() => socket.receive({ type: "subscribed", topic: third.topic }));
+    await act(async () => {
+      socket.receive({
+        type: "event",
+        topic: third.topic,
+        event: "ready",
+        data: { at: 1, logicalRoot: "projects" },
+      });
+      await Promise.resolve();
+    });
+    expect(testState.tree.loadRoot).toHaveBeenCalledTimes(1);
+    act(() => socket.receive({ type: "error", topic: third.topic, message: "Watch failed" }));
+    act(() => rs.advanceTimersByTime(3_000));
+    expect(subscribes().at(-1)?.topic).toBe(`${first.topic}-3`);
+    expect(MockEventSource.instances).toHaveLength(0);
+  });
+
   it("streams the watch route when the socket never opens", () => {
     renderWatch(socketClient());
     for (let attempt = 0; attempt < 3; attempt++) {
