@@ -32,6 +32,7 @@ import { SessionManager } from "../core/session-manager.js";
 import { ApprovalHandler } from "../actions/approval-handler.js";
 import { createBackendTurnRunner } from "../actions/backend-turn.js";
 import { RoutineEngine } from "../routines/engine.js";
+import { routineRunApprovalSettlement } from "../routines/settle-parked-run.js";
 import { systemClock } from "../lib/clock.js";
 import { EventCatalog } from "../event-catalog.js";
 import { PublicAccessState } from "../lib/public-access-state.js";
@@ -657,6 +658,12 @@ export async function buildTestDeps(
     actionEngine,
     agentRunner,
     backendTurnRunner,
+    undefined,
+    routineRunApprovalSettlement({
+      executions: actionExecutionsRepo,
+      approvals: approvalsRepo,
+      routineRuns: routineRunsRepo,
+    }),
   );
   const routineEngine = new RoutineEngine(
     routinesRepo,

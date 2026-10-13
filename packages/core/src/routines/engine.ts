@@ -132,7 +132,7 @@ export class RoutineEngine {
    *    per routine, so an older run can still be live after a newer one finished.
    *  - Does NOT touch `pending_approval` runs. They have no live process, and
    *    marking them cancelled would be cosmetic — a later approval would still
-   *    execute the action. Stopping those is the approval flow's responsibility.
+   *    execute the action. Rejecting the approval stops one and settles it.
    * Returns whether anything was stopped, and whether a live process was killed. */
   async cancelRun(routineId: string): Promise<{ stopped: boolean; killedLiveProcess: boolean }> {
     const running = await this.routineRunsRepo.findRunningByRoutineId(routineId);
@@ -220,8 +220,11 @@ export class RoutineEngine {
 
         const mergedArgs = { ...routine.args, __triggerPayload: payload };
         // A routine fire holds no action worker, so it can wait out a busy pool.
+        // The root row takes the run's executionId as its own id, so an
+        // approval replay, which resumes the row with that id, resumes it.
         const context: ActionRunContext = {
           initiator: `routine:${routine.name}`,
+          executionId: rootExecutionId,
           rootExecutionId,
           whenWorkersBusy: "queue",
         };

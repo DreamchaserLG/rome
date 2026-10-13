@@ -150,6 +150,28 @@ export class ActionExecutionsRepository {
   }
 
   /**
+   * Ends every `pending_approval` execution under a parked root as `cancelled`
+   * with `reason`, and returns how many it ended. Call only once no approval
+   * for the root can still resume it: those rows then never run.
+   */
+  async markParkedRootRejected(
+    rootExecutionId: string,
+    finishedAt: Date,
+    reason = "Rejected by guardian",
+  ): Promise<number> {
+    const result = await this.db
+      .update(actionExecutions)
+      .set({ status: "cancelled", finishedAt, error: reason, cancellationReason: reason })
+      .where(
+        and(
+          eq(actionExecutions.rootExecutionId, rootExecutionId),
+          eq(actionExecutions.status, "pending_approval"),
+        ),
+      );
+    return Number(result.changes ?? 0);
+  }
+
+  /**
    * Ends every `running` execution as `error` at `finishedAt`, with the message
    * `errorFor` returns for it, and returns how many it ended. Call only at boot,
    * before anything can start an execution: every row still `running` then was
@@ -259,6 +281,28 @@ export class ActionExecutionsRepository {
       )
       .orderBy(asc(actionExecutions.finishedAt), asc(actionExecutions.id))
       .limit(params.limit);
+  }
+
+  /** The top row of the tree rooted at `rootExecutionId`, or null when the
+   * tree has none. That is the row with the root id itself, else the newest
+   * row without a parent: a routine run fired before its root row took the
+   * run's execution id has only that one. */
+  async findTreeRoot(rootExecutionId: string) {
+    const rows = await this.db
+      .select()
+      .from(actionExecutions)
+      .where(
+        and(
+          eq(actionExecutions.rootExecutionId, rootExecutionId),
+          isNull(actionExecutions.parentId),
+        ),
+      )
+      .orderBy(
+        desc(sql`${actionExecutions.id} = ${rootExecutionId}`),
+        desc(actionExecutions.createdAt),
+      )
+      .limit(1);
+    return rows[0] ?? null;
   }
 
   async findByRootExecutionIds(rootExecutionIds: string[]) {

@@ -1,0 +1,379 @@
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { ActionEngine } from "../actions/engine.js";
+import { ActionRegistryImpl } from "../actions/registry.js";
+import { ApprovalHandler } from "../actions/approval-handler.js";
+import { createBackendTurnRunner } from "../actions/backend-turn.js";
+import type { Action, ActionResult } from "../actions/types.js";
+import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
+import { ApprovalsRepository } from "../db/repositories/approvals.js";
+import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
+import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
+import { RoutinesRepository } from "../db/repositories/routines.js";
+import { systemClock } from "../lib/clock.js";
+import { createMockAgentRunner, createTestDb, type TestDb } from "../test/helpers.js";
+import { RoutineEngine } from "./engine.js";
+import { routineRunApprovalSettlement, settleResolvedParkedRuns } from "./settle-parked-run.js";
+
+function makeAction(
+  name: string,
+  execute: Action["execute"],
+  requiresApproval = false,
+): Action & { calls: number } {
+  const action = {
+    config: {
+      name,
+      type: "system" as const,
+      description: "test action",
+      complexity: "simple" as const,
+      speed: "fast" as const,
+      reliability: "high" as const,
+      sideEffects: "read-only" as const,
+      requiresApproval,
+    },
+    calls: 0,
+    execute: async (args: Record<string, unknown>, ctx: Parameters<Action["execute"]>[1]) => {
+      action.calls++;
+      return execute(args, ctx);
+    },
+  };
+  return action;
+}
+
+const ok = async (): Promise<ActionResult> => ({ status: "ok" });
+
+describe("routine runs parked on approval", () => {
+  let testDb: TestDb;
+  let approvals: ApprovalsRepository;
+  let executions: ActionExecutionsRepository;
+  let routines: RoutinesRepository;
+  let routineRuns: RoutineRunsRepository;
+  let registry: ActionRegistryImpl;
+  let engine: ActionEngine;
+  let handler: ApprovalHandler;
+  let routineEngine: RoutineEngine;
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    approvals = new ApprovalsRepository(testDb.db);
+    executions = new ActionExecutionsRepository(testDb.db);
+    routines = new RoutinesRepository(testDb.db);
+    routineRuns = new RoutineRunsRepository(testDb.db);
+    const journal = new ExecutionJournalRepository(testDb.db);
+    registry = new ActionRegistryImpl();
+    // "worker" keeps the root in-process, so the in-memory registry is visible.
+    engine = new ActionEngine(
+      registry,
+      { executions, approvals, journal },
+      { processRole: "worker" },
+    );
+    const agentRunner = createMockAgentRunner();
+    handler = new ApprovalHandler(
+      approvals,
+      journal,
+      engine,
+      agentRunner,
+      createBackendTurnRunner({ agentRunner, channel: () => null }),
+      undefined,
+      routineRunApprovalSettlement({ executions, approvals, routineRuns }),
+    );
+    routineEngine = new RoutineEngine(routines, routineRuns, engine, 0, systemClock);
+  });
+
+  afterEach(() => {
+    testDb.close();
+  });
+
+  async function fire(actionName: string) {
+    const routineId = await routines.create({
+      name: "nightly",
+      trigger: { type: "manual" },
+      actionName,
+      args: {},
+    });
+    const outcome = await routineEngine.runNow(routineId);
+    const run = (await routineRuns.findById(outcome.runId))!;
+    return { routineId, runId: outcome.runId, rootExecutionId: run.executionId, outcome };
+  }
+
+  async function pendingApprovalFor(actionName: string): Promise<string> {
+    const pending = await approvals.findPending();
+    const match = pending.find(
+      (row) => (row.payload as { actionName?: string } | null)?.actionName === actionName,
+    );
+    if (!match) throw new Error(`no pending approval for ${actionName}`);
+    return match.id;
+  }
+
+  async function approve(approvalId: string) {
+    await approvals.resolvePending(approvalId, "approve", "guardian");
+    await handler.onApproved(approvalId);
+  }
+
+  async function reject(approvalId: string) {
+    await approvals.resolvePending(approvalId, "reject", "guardian");
+    await handler.onRejected(approvalId);
+  }
+
+  async function runStatus(runId: string) {
+    return (await routineRuns.findById(runId))?.status;
+  }
+
+  it("takes the approved replay's outcome and stops blocking the routine's delete", async () => {
+    const send = makeAction("send_report", ok, true);
+    registry.register(send);
+    const { routineId, runId, rootExecutionId, outcome } = await fire("send_report");
+    expect(outcome.status).toBe("pending_approval");
+    expect(await routines.deleteIfNoActiveRuns(routineId)).toEqual({
+      status: "active-runs",
+      activeRuns: 1,
+    });
+
+    await approve(await pendingApprovalFor("send_report"));
+
+    expect(send.calls).toBe(1);
+    expect(await runStatus(runId)).toBe("success");
+    // The replay resumed the parked root row rather than adding a second root.
+    expect(
+      (await executions.findByRootExecutionIds([rootExecutionId])).map((row) => [
+        row.id,
+        row.status,
+      ]),
+    ).toEqual([[rootExecutionId, "success"]]);
+    expect((await routineRuns.findLatestByRoutineIds([routineId])).get(routineId)?.status).toBe(
+      "success",
+    );
+    expect(await routines.deleteIfNoActiveRuns(routineId)).toEqual({
+      status: "deleted",
+      name: "nightly",
+    });
+  });
+
+  it("ends cancelled with its root when the guardian rejects, with no session to resume", async () => {
+    const send = makeAction("send_report", ok, true);
+    registry.register(send);
+    const { routineId, runId, rootExecutionId } = await fire("send_report");
+    const approvalId = await pendingApprovalFor("send_report");
+    expect((await approvals.findById(approvalId))?.payload).not.toHaveProperty("sessionId");
+
+    await reject(approvalId);
+
+    expect(send.calls).toBe(0);
+    expect(await runStatus(runId)).toBe("cancelled");
+    const root = await executions.findById(rootExecutionId);
+    expect(root?.status).toBe("cancelled");
+    expect(root?.finishedAt).toBeInstanceOf(Date);
+    expect(await routines.deleteIfNoActiveRuns(routineId)).toEqual({
+      status: "deleted",
+      name: "nightly",
+    });
+  });
+
+  // Approving the second call of such a chain does not run it yet: the replay
+  // journal records the first call twice, so the replay diverges. The run
+  // contract here holds either way, so this test stops at a rejection.
+  it("stays parked while an approved replay parks on the next gated call", async () => {
+    const gateA = makeAction("gate_a", ok, true);
+    const gateB = makeAction("gate_b", ok, true);
+    registry.register(gateA);
+    registry.register(gateB);
+    registry.register(
+      makeAction("sync", async () => {
+        const a = await engine.run("gate_a", {});
+        if (a.status === "pending_approval") return a;
+        return engine.run("gate_b", {});
+      }),
+    );
+    const { routineId, runId, rootExecutionId } = await fire("sync");
+
+    await approve(await pendingApprovalFor("gate_a"));
+
+    expect(gateA.calls).toBe(1);
+    expect(await runStatus(runId)).toBe("pending_approval");
+    expect((await executions.findById(rootExecutionId))?.status).toBe("pending_approval");
+    expect(await routines.deleteIfNoActiveRuns(routineId)).toMatchObject({
+      status: "active-runs",
+    });
+
+    await reject(await pendingApprovalFor("gate_b"));
+
+    expect(gateB.calls).toBe(0);
+    expect(await runStatus(runId)).toBe("cancelled");
+    expect((await executions.findById(rootExecutionId))?.status).toBe("cancelled");
+  });
+
+  it("stays parked when one of two approvals on its root is rejected", async () => {
+    registry.register(makeAction("gate_a", ok, true));
+    registry.register(makeAction("gate_b", ok, true));
+    registry.register(
+      makeAction("sync", async () => {
+        await engine.run("gate_a", {});
+        return engine.run("gate_b", {});
+      }),
+    );
+    const { routineId, runId, rootExecutionId } = await fire("sync");
+    const approvalB = await pendingApprovalFor("gate_b");
+
+    await reject(await pendingApprovalFor("gate_a"));
+
+    expect(await runStatus(runId)).toBe("pending_approval");
+    expect((await executions.findById(rootExecutionId))?.status).toBe("pending_approval");
+    expect(await routines.deleteIfNoActiveRuns(routineId)).toMatchObject({
+      status: "active-runs",
+    });
+
+    await reject(approvalB);
+
+    expect(await runStatus(runId)).toBe("cancelled");
+    expect((await executions.findById(rootExecutionId))?.status).toBe("cancelled");
+  });
+
+  it("records a thrown replay as an error and a successful retry as success", async () => {
+    let attempts = 0;
+    registry.register(
+      makeAction(
+        "export",
+        async () => {
+          attempts++;
+          if (attempts === 1) throw new Error("export target unavailable");
+          return { status: "ok" };
+        },
+        true,
+      ),
+    );
+    const { routineId, runId } = await fire("export");
+    const approvalId = await pendingApprovalFor("export");
+
+    await approve(approvalId);
+
+    const failed = await routineRuns.findById(runId);
+    expect(failed?.status).toBe("error");
+    expect(failed?.error).toContain("export target unavailable");
+    expect((await approvals.findById(approvalId))?.executionState).toBe("failed");
+
+    expect((await approvals.retryFailedExecution(approvalId)).outcome).toBe("queued");
+    await handler.onApproved(approvalId);
+
+    const retried = await routineRuns.findById(runId);
+    expect(retried?.status).toBe("success");
+    expect(retried?.error).toBeUndefined();
+    expect(await routines.deleteIfNoActiveRuns(routineId)).toMatchObject({ status: "deleted" });
+  });
+});
+
+describe("settleResolvedParkedRuns", () => {
+  let testDb: TestDb;
+  let approvals: ApprovalsRepository;
+  let executions: ActionExecutionsRepository;
+  let routines: RoutinesRepository;
+  let routineRuns: RoutineRunsRepository;
+  const boot = new Date("2026-10-08T12:00:00Z");
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    approvals = new ApprovalsRepository(testDb.db);
+    executions = new ActionExecutionsRepository(testDb.db);
+    routines = new RoutinesRepository(testDb.db);
+    routineRuns = new RoutineRunsRepository(testDb.db);
+  });
+
+  afterEach(() => {
+    testDb.close();
+  });
+
+  // A run parked before Rome settled parked runs on resolution, as on an
+  // instance upgraded with one already stuck.
+  async function seedParkedRun(name: string, decision: "approve" | "reject" | null) {
+    const routineId = await routines.create({
+      name,
+      trigger: { type: "manual" },
+      actionName: "code-review:sync",
+      args: {},
+    });
+    const rootExecutionId = `root-${name}`;
+    const runId = await routineRuns.create({
+      routineId,
+      executionId: rootExecutionId,
+      status: "pending_approval",
+    });
+    await executions.create({
+      id: rootExecutionId,
+      actionName: "code-review:sync",
+      status: "pending_approval",
+    });
+    const approvalId = await approvals.create({
+      type: "action_execution",
+      requestedBy: `routine:${name}`,
+      description: "Action requires guardian approval",
+      payload: { actionName: "code-review:sync", rootExecutionId },
+    });
+    if (decision) await approvals.resolvePending(approvalId, decision, "guardian");
+    return { routineId, runId, rootExecutionId };
+  }
+
+  it("cancels a run whose root was rejected and keeps one still awaiting the guardian", async () => {
+    const rejected = await seedParkedRun("rejected", "reject");
+    const waiting = await seedParkedRun("waiting", null);
+    // Approved but not yet executed: the replay can still run.
+    const queued = await seedParkedRun("queued", "approve");
+
+    expect(await settleResolvedParkedRuns({ executions, approvals, routineRuns }, boot)).toBe(1);
+
+    expect((await routineRuns.findById(rejected.runId))?.status).toBe("cancelled");
+    const root = await executions.findById(rejected.rootExecutionId);
+    expect(root?.status).toBe("cancelled");
+    expect(root?.finishedAt).toEqual(boot);
+    expect(await routines.deleteIfNoActiveRuns(rejected.routineId)).toMatchObject({
+      status: "deleted",
+    });
+
+    for (const run of [waiting, queued]) {
+      expect((await routineRuns.findById(run.runId))?.status).toBe("pending_approval");
+      expect((await executions.findById(run.rootExecutionId))?.status).toBe("pending_approval");
+    }
+  });
+
+  it("finds the root of a run fired before its root row took the run's execution id", async () => {
+    const routineId = await routines.create({
+      name: "legacy",
+      trigger: { type: "manual" },
+      actionName: "code-review:sync",
+      args: {},
+    });
+    const runId = await routineRuns.create({
+      routineId,
+      executionId: "tree-legacy",
+      status: "pending_approval",
+    });
+    await executions.create({
+      id: "row-legacy",
+      rootExecutionId: "tree-legacy",
+      actionName: "code-review:sync",
+      status: "pending_approval",
+    });
+    const approvalId = await approvals.create({
+      type: "action_execution",
+      requestedBy: "routine:legacy",
+      description: "Action requires guardian approval",
+      payload: { actionName: "code-review:sync", rootExecutionId: "tree-legacy" },
+    });
+    await approvals.resolvePending(approvalId, "reject", "guardian");
+
+    expect(await settleResolvedParkedRuns({ executions, approvals, routineRuns }, boot)).toBe(1);
+
+    expect((await routineRuns.findById(runId))?.status).toBe("cancelled");
+    expect((await executions.findById("row-legacy"))?.status).toBe("cancelled");
+  });
+
+  it("copies the outcome of a root whose approved replay finished", async () => {
+    const done = await seedParkedRun("done", "approve");
+    const [approval] = await approvals.findByType("action_execution");
+    await approvals.markExecuted(approval!.id);
+    await executions.update(done.rootExecutionId, { status: "error", error: "upstream 500" });
+
+    expect(await settleResolvedParkedRuns({ executions, approvals, routineRuns }, boot)).toBe(1);
+
+    const run = await routineRuns.findById(done.runId);
+    expect(run?.status).toBe("error");
+    expect(run?.error).toBe("upstream 500");
+  });
+});

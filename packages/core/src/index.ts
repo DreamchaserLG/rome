@@ -137,6 +137,10 @@ import type { Trigger } from "./routines/types.js";
 import { resolveGuardianTimezone } from "./routines/guardian-timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
+import {
+  routineRunApprovalSettlement,
+  settleResolvedParkedRuns,
+} from "./routines/settle-parked-run.js";
 import { mapGuardianToChannel } from "./channels/guardian-mapping.js";
 import type { EmailInboundResult } from "./channels/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
@@ -330,6 +334,15 @@ async function main() {
   );
   if (interrupted.executions > 0 || interrupted.routineRuns > 0) {
     log.warn("Ended runs a stopped Rome process left running", interrupted);
+  }
+
+  // After the sweep above, which settles roots an approved replay left running.
+  const settledParkedRuns = await settleResolvedParkedRuns(
+    { executions: actionExecutionsRepo, approvals: approvalsRepo, routineRuns: routineRunsRepo },
+    new Date(),
+  );
+  if (settledParkedRuns > 0) {
+    log.info("Settled routine runs whose approvals had resolved", { count: settledParkedRuns });
   }
 
   await ensureSentinelPersons(personMappingRepo);
@@ -844,6 +857,11 @@ async function main() {
     agentRunner,
     backendTurnRunner,
     resolveContinuationWorkingDir,
+    routineRunApprovalSettlement({
+      executions: actionExecutionsRepo,
+      approvals: approvalsRepo,
+      routineRuns: routineRunsRepo,
+    }),
   );
 
   // Real push sender in the main process (holds the durable instance token);

@@ -81,6 +81,38 @@ export class RoutineRunsRepository {
     return Number(result.changes ?? 0);
   }
 
+  /**
+   * Copies a settled root execution's outcome onto the run rooted at
+   * `executionId`, and returns whether a run changed. Only a run still
+   * `pending_approval`, or `error` from an approved replay that threw, takes
+   * the outcome, so a retried approval can still settle it. A run that ended
+   * any other way keeps its status.
+   */
+  async syncFromRoot(
+    executionId: string,
+    outcome: { status: "success" | "error" | "cancelled"; error?: string },
+  ): Promise<boolean> {
+    const result = await this.db
+      .update(routineRuns)
+      .set({ status: outcome.status, error: outcome.error ?? null })
+      .where(
+        and(
+          eq(routineRuns.executionId, executionId),
+          inArray(routineRuns.status, ["pending_approval", "error"]),
+        ),
+      );
+    return Number(result.changes ?? 0) > 0;
+  }
+
+  /** The root execution id of every `pending_approval` run. */
+  async findParkedExecutionIds(): Promise<string[]> {
+    const rows = await this.db
+      .select({ executionId: routineRuns.executionId })
+      .from(routineRuns)
+      .where(eq(routineRuns.status, "pending_approval"));
+    return rows.map((row) => row.executionId);
+  }
+
   /** A single run by id — the trace endpoint uses this to resolve a run's
    * `executionId` (the root of its action-execution tree). */
   async findById(id: string): Promise<RoutineRun | null> {
@@ -125,7 +157,8 @@ export class RoutineRunsRepository {
    * runs aren't serialized per routine, so more than one can be live at once and
    * an older run can still be running after a newer one finished — looking only
    * at the newest row would miss it. Excludes `pending_approval` deliberately:
-   * those have no live process to kill and are the approval flow's to resolve. */
+   * those have no live process to kill, and resolving their approval settles
+   * them. */
   async findRunningByRoutineId(routineId: string): Promise<RoutineRun[]> {
     const rows = await this.db
       .select()

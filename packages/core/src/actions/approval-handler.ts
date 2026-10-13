@@ -1,4 +1,5 @@
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
+import type { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import type { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
 import type { ActionEngine, ActionRunContext } from "./engine.js";
 import type { ActionResult } from "./types.js";
@@ -44,6 +45,17 @@ function formatResultForAgent(result: ActionResult): string {
   return `The action you requested has been approved and executed successfully.\n\nResult: ${dataStr}`;
 }
 
+/** How an approval's outcome reaches the records of the root it parked. */
+export interface ApprovalSettlement {
+  executions: Pick<ActionExecutionsRepository, "markParkedRootRejected">;
+  /** Called once a resolution has settled the root's execution row: after an
+   * approved replay returns or throws, and after a rejection that leaves no
+   * live approval for the root. `approvalId` names the approval just resolved,
+   * whose own state may still read as live. A failure is logged, never
+   * rethrown. */
+  onRootResolved?: (rootExecutionId: string, approvalId: string) => Promise<void>;
+}
+
 export class ApprovalHandler {
   constructor(
     private approvalsRepo: ApprovalsRepository,
@@ -61,6 +73,8 @@ export class ApprovalHandler {
      * default project and the per-cwd transcript resume fails with "No
      * conversation found". Undefined ⇒ keep the default-dir fallback. */
     private resolveWorkingDir?: (channel: string, threadId: string) => Promise<string | undefined>,
+    /** Undefined ⇒ a resolution leaves the parked root's records as they are. */
+    private settlement?: ApprovalSettlement,
   ) {}
 
   async onApproved(approvalId: string): Promise<void> {
@@ -158,6 +172,7 @@ export class ApprovalHandler {
     // the chat. The `approval:` prefix keeps the id distinguishable from
     // SDK-issued `toolu_*` ids and makes it queryable back to the approval row.
     const traceId = `approval:${approvalId}`;
+    let rootReturned = false;
 
     try {
       emit?.({
@@ -185,6 +200,10 @@ export class ApprovalHandler {
         payload.rootArgs,
         runContext,
       );
+      rootReturned = true;
+      // Settle before the continuation below: the root's outcome is final
+      // now, and the agent turn can run for minutes or throw.
+      await this.notifyRootResolved(payload.rootExecutionId, approvalId);
 
       emit?.({
         type: "tool_result",
@@ -238,6 +257,9 @@ export class ApprovalHandler {
       } catch {
         // Best-effort — failure already logged above
       }
+      // A thrown replay has already recorded the root as errored. A retry of
+      // this approval replays it again and settles the root a second time.
+      if (!rootReturned) await this.notifyRootResolved(payload.rootExecutionId, approvalId);
     }
   }
 
@@ -246,6 +268,26 @@ export class ApprovalHandler {
     if (!approval) return;
 
     const payload = approval.payload as ApprovalPayload | null;
+
+    // Another approval for the same root can still resume it, so the root
+    // stays parked until the last one resolves.
+    const rootExecutionId = payload?.rootExecutionId;
+    if (
+      this.settlement &&
+      typeof rootExecutionId === "string" &&
+      !this.approvalsRepo.hasActiveApprovalForRoot(rootExecutionId, approvalId)
+    ) {
+      try {
+        await this.settlement.executions.markParkedRootRejected(rootExecutionId, new Date());
+        await this.notifyRootResolved(rootExecutionId, approvalId);
+      } catch (err) {
+        log.error("failed to settle rejected root", {
+          approvalId,
+          rootExecutionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
 
     if (payload?.sessionId) {
       try {
@@ -280,5 +322,19 @@ export class ApprovalHandler {
       approvalId,
       rootExecutionId: payload?.rootExecutionId,
     });
+  }
+
+  private async notifyRootResolved(rootExecutionId: unknown, approvalId: string): Promise<void> {
+    const onRootResolved = this.settlement?.onRootResolved;
+    if (!onRootResolved || typeof rootExecutionId !== "string") return;
+    try {
+      await onRootResolved(rootExecutionId, approvalId);
+    } catch (err) {
+      log.error("failed to settle records of resolved root", {
+        approvalId,
+        rootExecutionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 }

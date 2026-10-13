@@ -30,6 +30,8 @@ import { PoliciesRepository } from "../../db/repositories/policies.js";
 import { ActionRegistryImpl } from "../../actions/registry.js";
 import { ActionEngine, type ApprovalCreatedEvent } from "../../actions/engine.js";
 import { ApprovalHandler } from "../../actions/approval-handler.js";
+import { routineRunApprovalSettlement } from "../../routines/settle-parked-run.js";
+import { RoutineRunsRepository } from "../../db/repositories/routine-runs.js";
 import { createBackendTurnRunner } from "../../actions/backend-turn.js";
 import type { Action } from "../../actions/types.js";
 import { AgentLoader } from "../../core/agent-loader.js";
@@ -316,6 +318,12 @@ async function buildHarness(
     actionEngine,
     agentRunner,
     backendTurnRunner,
+    undefined,
+    routineRunApprovalSettlement({
+      executions: repos.actionExecutions,
+      approvals: repos.approvals,
+      routineRuns: new RoutineRunsRepository(db),
+    }),
   );
 
   let cleaned = false;

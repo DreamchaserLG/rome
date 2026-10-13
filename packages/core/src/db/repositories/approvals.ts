@@ -1,7 +1,7 @@
 import { PersonMappingRepository } from "./person-mapping.js";
 import { STRANGER_PERSON_ID } from "../../constants.js";
 import { loadPairingKey, pairingCode, matchesPairingCode } from "../../channels/pairing-code.js";
-import { and, eq, or, desc, sql, ne, count, gte } from "drizzle-orm";
+import { and, eq, or, desc, sql, ne, count, gte, inArray } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { approvals, channelMappings, connections, connectionGrants } from "../schema.js";
 import type { DrizzleDb, SqliteExec } from "../index.js";
@@ -16,6 +16,20 @@ import {
 
 type ApprovalRow = typeof approvals.$inferSelect;
 type ResolveAction = "approve" | "reject";
+
+/** An action_execution approval that can still run or change its root: one
+ * pending, or approved and not executed yet. A failed execution stays
+ * retryable, so it counts. */
+const activeActionApproval = and(
+  eq(approvals.type, "action_execution"),
+  or(
+    eq(approvals.status, "pending"),
+    and(
+      eq(approvals.status, "approved"),
+      inArray(approvals.executionState, ["idle", "queued", "running", "failed"]),
+    ),
+  ),
+);
 
 export type ResolvePendingResult =
   | { outcome: "resolved"; approval: ApprovalRow }
@@ -473,23 +487,7 @@ export class ApprovalsRepository {
     const rows = await this.db
       .select({ payload: approvals.payload })
       .from(approvals)
-      .where(
-        and(
-          eq(approvals.type, "action_execution"),
-          or(
-            eq(approvals.status, "pending"),
-            and(
-              eq(approvals.status, "approved"),
-              or(
-                eq(approvals.executionState, "idle"),
-                eq(approvals.executionState, "queued"),
-                eq(approvals.executionState, "running"),
-                eq(approvals.executionState, "failed"),
-              ),
-            ),
-          ),
-        ),
-      );
+      .where(activeActionApproval);
     const ids: string[] = [];
     for (const row of rows) {
       const payload = row.payload as Record<string, unknown> | null;
@@ -498,6 +496,43 @@ export class ApprovalsRepository {
       }
     }
     return ids;
+  }
+
+  /** Whether an action_execution approval for the root can still run or change
+   * it: one pending, or approved and not executed yet, a failed execution
+   * included. `excludeId` leaves out the approval the caller is resolving,
+   * whose executionState still reads `running` while it settles. */
+  hasActiveApprovalForRoot(rootExecutionId: string, excludeId?: string): boolean {
+    const row = this.db
+      .select({ id: approvals.id })
+      .from(approvals)
+      .where(
+        and(
+          activeActionApproval,
+          sql`json_extract(${approvals.payload}, '$.rootExecutionId') = ${rootExecutionId}`,
+          excludeId ? ne(approvals.id, excludeId) : undefined,
+        ),
+      )
+      .limit(1)
+      .get();
+    return row !== undefined;
+  }
+
+  /** Whether the guardian rejected any action_execution approval for the root. */
+  hasRejectedApprovalForRoot(rootExecutionId: string): boolean {
+    const row = this.db
+      .select({ id: approvals.id })
+      .from(approvals)
+      .where(
+        and(
+          eq(approvals.type, "action_execution"),
+          eq(approvals.status, "rejected"),
+          sql`json_extract(${approvals.payload}, '$.rootExecutionId') = ${rootExecutionId}`,
+        ),
+      )
+      .limit(1)
+      .get();
+    return row !== undefined;
   }
 
   async retryFailedExecution(id: string): Promise<RetryExecutionResult> {
