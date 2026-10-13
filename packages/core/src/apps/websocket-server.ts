@@ -13,6 +13,7 @@ import type { ActionEngine } from "../actions/engine.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import { decodeAppApiPath, decodeAppIdPathSegment } from "../api/helpers.js";
+import { isAllowedInternalHost, MISDIRECTED_REQUEST } from "../lib/host-guard.js";
 import { isSameOriginMutationRequest } from "../lib/mutation-origin.js";
 import { stripInternalHeaders } from "../relay/protocol.js";
 import { COOKIE_NAME, VISITOR_COOKIE_NAME, verifyVisitorSession } from "../lib/auth.js";
@@ -359,6 +360,15 @@ export function attachAppWebSocket(server: Server, deps: AppWebSocketDeps): { cl
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     const matched = matchAppPath(url.pathname);
     if (!matched) return; // not an app path — leave it for other upgrade listeners
+
+    if (!isAllowedInternalHost(req.headers.host)) {
+      log.warn("rejected app ws upgrade addressed to a non-loopback name", {
+        appId: matched.appId,
+        host: req.headers.host ?? null,
+      });
+      rejectUpgrade(socket, MISDIRECTED_REQUEST, "Misdirected Request");
+      return;
+    }
 
     // App WS paths are cookie-gated by Caddy's forward_auth, and browsers attach
     // cookies to cross-origin WS handshakes (CORS doesn't apply), so without a
