@@ -8,6 +8,7 @@ import {
   useNavigate,
   useParams,
 } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Folder, MessagesSquare, Search, Users } from "lucide-react";
 import {
@@ -56,6 +57,7 @@ import {
   type OutreachAgentSummary,
   type OutreachBot,
   type OutreachChat,
+  outreachKeys,
   useAgentActivity,
   useAgentChats,
   useChat,
@@ -266,14 +268,20 @@ function NewFeishuBot() {
   const hasBot = (agentQuery.data?.bots.length ?? 0) > 0;
   const [botName, setBotName] = useState(name.charAt(0).toUpperCase() + name.slice(1));
   const [region, setRegion] = useState<"feishu" | "lark">("feishu");
+  const queryClient = useQueryClient();
   const start = useStartRegistration();
   const reg = useRegistration(start.data?.id ?? null);
   const status = reg.data?.status ?? start.data?.status;
   useDocumentTitle([t("newBot.title", { agent: name }), t("index.title")]);
 
+  // The scan creates a bot, which moves this agent into Outreach and changes
+  // its counts, so every Outreach read is stale once it lands.
   useEffect(() => {
-    if (status === "connected") navigate(agentPath(name), { replace: true });
-  }, [status, name, navigate]);
+    if (status !== "connected") return;
+    void queryClient
+      .invalidateQueries({ queryKey: outreachKeys.all })
+      .then(() => navigate(agentPath(name), { replace: true }));
+  }, [status, name, navigate, queryClient]);
 
   return (
     <Page>
