@@ -84,10 +84,8 @@ export class RoutineRunsRepository {
   /**
    * Copies a settled root execution's outcome onto the run rooted at
    * `executionId`, and returns whether a run changed. Only a run still
-   * `pending_approval`, or `error` from an approved replay that threw, takes
-   * the outcome, so a retried approval can still settle it. A run that ended
-   * any other way keeps its status. `durationMs` keeps the time the run took
-   * to park.
+   * `pending_approval` takes the outcome. A run that ended any other way keeps
+   * its status. `durationMs` keeps the time the run took to park.
    */
   async syncFromRoot(
     executionId: string,
@@ -97,11 +95,21 @@ export class RoutineRunsRepository {
       .update(routineRuns)
       .set({ status: outcome.status, error: outcome.error ?? null })
       .where(
-        and(
-          eq(routineRuns.executionId, executionId),
-          inArray(routineRuns.status, ["pending_approval", "error"]),
-        ),
+        and(eq(routineRuns.executionId, executionId), eq(routineRuns.status, "pending_approval")),
       );
+    return Number(result.changes ?? 0) > 0;
+  }
+
+  /**
+   * Returns the `error` run rooted at `executionId` to `pending_approval`, for
+   * a retried approval that replays its root again: the run stays active until
+   * that replay settles it. Returns whether a run changed.
+   */
+  async reopenForReplay(executionId: string): Promise<boolean> {
+    const result = await this.db
+      .update(routineRuns)
+      .set({ status: "pending_approval", error: null })
+      .where(and(eq(routineRuns.executionId, executionId), eq(routineRuns.status, "error")));
     return Number(result.changes ?? 0) > 0;
   }
 

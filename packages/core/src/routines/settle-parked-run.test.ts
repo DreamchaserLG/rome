@@ -12,7 +12,7 @@ import { RoutinesRepository } from "../db/repositories/routines.js";
 import { systemClock } from "../lib/clock.js";
 import { createMockAgentRunner, createTestDb, type TestDb } from "../test/helpers.js";
 import { RoutineEngine } from "./engine.js";
-import { routineRunApprovalSettlement, settleResolvedParkedRuns } from "./settle-parked-run.js";
+import { routineRunApprovalHooks, settleResolvedParkedRuns } from "./settle-parked-run.js";
 
 function makeAction(
   name: string,
@@ -74,7 +74,7 @@ describe("routine runs parked on approval", () => {
       agentRunner,
       createBackendTurnRunner({ agentRunner, channel: () => null }),
       undefined,
-      routineRunApprovalSettlement({ executions, approvals, routineRuns }),
+      { executions, ...routineRunApprovalHooks({ executions, approvals, routineRuns }) },
     );
     routineEngine = new RoutineEngine(routines, routineRuns, engine, 0, systemClock);
   });
@@ -257,6 +257,132 @@ describe("routine runs parked on approval", () => {
     expect(retried?.status).toBe("success");
     expect(retried?.error).toBeUndefined();
     expect(await routines.deleteIfNoActiveRuns(routineId)).toMatchObject({ status: "deleted" });
+  });
+
+  it("waits again when a retried replay parks on the next gated call", async () => {
+    let attempts = 0;
+    registry.register(makeAction("gate_a", ok, true));
+    const gateB = makeAction("gate_b", ok, true);
+    registry.register(gateB);
+    registry.register(
+      makeAction("sync", async () => {
+        const a = await engine.run("gate_a", {});
+        if (a.status === "pending_approval") return a;
+        attempts++;
+        if (attempts === 1) throw new Error("export target unavailable");
+        return engine.run("gate_b", {});
+      }),
+    );
+    const { routineId, runId, rootExecutionId } = await fire("sync");
+    const approvalA = await pendingApprovalFor("gate_a");
+    await approve(approvalA);
+    expect(await runStatus(runId)).toBe("error");
+
+    expect((await approvals.retryFailedExecution(approvalA)).outcome).toBe("queued");
+    await handler.onApproved(approvalA);
+
+    expect(await runStatus(runId)).toBe("pending_approval");
+    expect((await executions.findById(rootExecutionId))?.status).toBe("pending_approval");
+    expect(await routines.deleteIfNoActiveRuns(routineId)).toMatchObject({
+      status: "active-runs",
+    });
+
+    await reject(await pendingApprovalFor("gate_b"));
+
+    expect(gateB.calls).toBe(0);
+    expect(await runStatus(runId)).toBe("cancelled");
+  });
+
+  it("ends cancelled when the root ignored the pending result of a rejected call", async () => {
+    const gate = makeAction("gate", ok, true);
+    registry.register(gate);
+    registry.register(
+      makeAction("sync", async () => {
+        await engine.run("gate", {});
+        return { status: "ok" };
+      }),
+    );
+    const { runId, rootExecutionId, outcome } = await fire("sync");
+    expect(outcome.status).toBe("pending_approval");
+    expect((await executions.findById(rootExecutionId))?.status).toBe("pending_approval");
+
+    await reject(await pendingApprovalFor("gate"));
+
+    expect(gate.calls).toBe(0);
+    expect(await runStatus(runId)).toBe("cancelled");
+    expect((await executions.findById(rootExecutionId))?.status).toBe("cancelled");
+  });
+
+  // A stop during the continuation then leaves nothing that a retry would run
+  // a second time.
+  it("records the approved action as executed before the agent continues", async () => {
+    registry.register(makeAction("send_report", ok, true));
+    await fire("send_report");
+    const fired = (await approvals.findById(await pendingApprovalFor("send_report")))!;
+    const withSession = await approvals.create({
+      type: "action_execution",
+      requestedBy: fired.requestedBy,
+      description: fired.description,
+      payload: { ...(fired.payload as Record<string, unknown>), sessionId: "session-1" },
+    });
+    await approvals.resolvePending(withSession, "approve", "guardian");
+    const statesDuringContinuation: unknown[] = [];
+    const base = createMockAgentRunner();
+    const agentRunner = {
+      ...base,
+      async *run(params: Parameters<typeof base.run>[0]) {
+        statesDuringContinuation.push((await approvals.findById(withSession))?.executionState);
+        yield* base.run(params);
+      },
+    };
+    const continuing = new ApprovalHandler(
+      approvals,
+      new ExecutionJournalRepository(testDb.db),
+      engine,
+      agentRunner,
+      createBackendTurnRunner({ agentRunner, channel: () => null }),
+    );
+
+    await continuing.onApproved(withSession);
+
+    expect(statesDuringContinuation).toEqual(["succeeded"]);
+  });
+
+  it("settles once two approvals replayed together have both executed", async () => {
+    let started = 0;
+    let release!: () => void;
+    const bothStarted = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    registry.register(
+      makeAction(
+        "send_report",
+        async () => {
+          started++;
+          if (started === 2) release();
+          await bothStarted;
+          return { status: "ok" };
+        },
+        true,
+      ),
+    );
+    const { runId } = await fire("send_report");
+    const first = (await approvals.findById(await pendingApprovalFor("send_report")))!;
+    // A second approval that replays the same root, as when two gated calls
+    // in one tree are approved together.
+    const second = await approvals.create({
+      type: "action_execution",
+      requestedBy: first.requestedBy,
+      description: first.description,
+      payload: first.payload as Record<string, unknown>,
+    });
+    await approvals.resolvePending(first.id, "approve", "guardian");
+    await approvals.resolvePending(second, "approve", "guardian");
+
+    await Promise.all([handler.onApproved(first.id), handler.onApproved(second)]);
+
+    expect(started).toBe(2);
+    expect(await runStatus(runId)).toBe("success");
   });
 });
 

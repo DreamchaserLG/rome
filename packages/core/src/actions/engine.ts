@@ -696,6 +696,23 @@ export class ActionEngine {
     // result so every caller of the root sees the same signal regardless of
     // where in the tree the approval originated.
     if (replayStore.pendingApproval) {
+      // A root body that ignored the pending result has already recorded its
+      // own outcome. The root row must read parked too, since settling a
+      // rejection, or a routine run, reads it.
+      if (result.status !== "pending_approval") {
+        await this.upsertExecutionRecord({
+          executionId,
+          rootExecutionId,
+          actionName: action.config.name,
+          actionType: action.config.type,
+          status: "pending_approval",
+          args,
+          initiator,
+          actor,
+          parentId,
+          error: undefined,
+        });
+      }
       return { status: "pending_approval", approval: replayStore.pendingApproval };
     }
 

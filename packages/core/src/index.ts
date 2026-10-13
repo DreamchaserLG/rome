@@ -137,10 +137,7 @@ import type { Trigger } from "./routines/types.js";
 import { resolveGuardianTimezone } from "./routines/guardian-timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
-import {
-  routineRunApprovalSettlement,
-  settleResolvedParkedRuns,
-} from "./routines/settle-parked-run.js";
+import { routineRunApprovalHooks, settleResolvedParkedRuns } from "./routines/settle-parked-run.js";
 import { mapGuardianToChannel } from "./channels/guardian-mapping.js";
 import type { EmailInboundResult } from "./channels/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
@@ -857,11 +854,14 @@ async function main() {
     agentRunner,
     backendTurnRunner,
     resolveContinuationWorkingDir,
-    routineRunApprovalSettlement({
+    {
       executions: actionExecutionsRepo,
-      approvals: approvalsRepo,
-      routineRuns: routineRunsRepo,
-    }),
+      ...routineRunApprovalHooks({
+        executions: actionExecutionsRepo,
+        approvals: approvalsRepo,
+        routineRuns: routineRunsRepo,
+      }),
+    },
   );
 
   // Real push sender in the main process (holds the durable instance token);

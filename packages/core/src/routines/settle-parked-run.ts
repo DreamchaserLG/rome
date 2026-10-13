@@ -1,6 +1,6 @@
 // Settles routine runs parked on guardian approval once the approval resolves.
 // Contract: docs/concepts/data.md#routines.
-import type { ApprovalSettlement } from "../actions/approval-handler.js";
+import type { RootSettlementHooks } from "../actions/approval-handler.js";
 import type { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
@@ -41,15 +41,16 @@ async function settleRoutineRunFromRoot(
   }
 }
 
-/** The ApprovalHandler settlement that keeps each routine run in step with
- * the root execution it parked on. */
-export function routineRunApprovalSettlement(
-  repos: ParkedRunRepos & {
-    executions: Pick<ActionExecutionsRepository, "findTreeRoot" | "markParkedRootRejected">;
-  },
-): ApprovalSettlement {
+/** The ApprovalHandler hooks that keep each routine run in step with the root
+ * execution it parked on. A replay that starts makes an errored run active
+ * again: a retry can still park or finish it. */
+export function routineRunApprovalHooks(
+  repos: ParkedRunRepos & { routineRuns: Pick<RoutineRunsRepository, "reopenForReplay"> },
+): RootSettlementHooks {
   return {
-    executions: repos.executions,
+    onRootResuming: async (rootExecutionId) => {
+      await repos.routineRuns.reopenForReplay(rootExecutionId);
+    },
     onRootResolved: async (rootExecutionId, approvalId) => {
       await settleRoutineRunFromRoot(repos, rootExecutionId, [approvalId]);
     },
