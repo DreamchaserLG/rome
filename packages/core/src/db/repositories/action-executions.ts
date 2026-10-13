@@ -173,6 +173,30 @@ export class ActionExecutionsRepository {
   }
 
   /**
+   * Ends the top row of a parked root as `error` with `error`, and returns how
+   * many rows it ended. For an approved replay that threw before it reached
+   * the root, as when the root's action is gone. Call only once no approval
+   * for the root can still resume it.
+   */
+  async markParkedRootErrored(
+    rootExecutionId: string,
+    finishedAt: Date,
+    error: string,
+  ): Promise<number> {
+    const result = await this.db
+      .update(actionExecutions)
+      .set({ status: "error", finishedAt, error })
+      .where(
+        and(
+          eq(actionExecutions.rootExecutionId, rootExecutionId),
+          isNull(actionExecutions.parentId),
+          eq(actionExecutions.status, "pending_approval"),
+        ),
+      );
+    return Number(result.changes ?? 0);
+  }
+
+  /**
    * Ends every `pending_approval` execution under a parked root as `cancelled`
    * with `reason`, and returns how many it ended. Call only once no approval
    * for the root can still resume it: those rows then never run.

@@ -45,6 +45,14 @@ function makeAction(
 
 const ok = async (): Promise<ActionResult> => ({ status: "ok" });
 
+function deferred<T = void>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
 describe("routine runs parked on approval", () => {
   let testDb: TestDb;
   let approvals: ApprovalsRepository;
@@ -274,6 +282,20 @@ describe("routine runs parked on approval", () => {
     expect(await routines.deleteIfNoActiveRuns(routineId)).toMatchObject({ status: "deleted" });
   });
 
+  it("records an error when the approved action is gone before its replay", async () => {
+    registry.register(makeAction("send_report", ok, true));
+    const { routineId, runId, rootExecutionId } = await fire("send_report");
+    const approvalId = await pendingApprovalFor("send_report");
+    registry.unregister("send_report");
+
+    await approve(approvalId);
+
+    expect(await runStatus(runId)).toBe("error");
+    expect((await executions.findById(rootExecutionId))?.status).toBe("error");
+    expect((await approvals.findById(approvalId))?.executionState).toBe("failed");
+    expect(await routines.deleteIfNoActiveRuns(routineId)).toMatchObject({ status: "deleted" });
+  });
+
   it("waits again when a retried replay parks on the next gated call", async () => {
     let attempts = 0;
     registry.register(makeAction("gate_a", ok, true));
@@ -401,19 +423,18 @@ describe("routine runs parked on approval", () => {
   // The guardian resolves the approval while the run that requested it is
   // still announcing it. The resolution runs outside the announcing call, as
   // a request from the dashboard would.
-  async function resolveWhileAnnouncing(actionName: string, decision: "approve" | "reject") {
-    let announced!: (approvalId: string) => void;
-    const approvalAnnounced = new Promise<string>((resolve) => {
-      announced = resolve;
-    });
-    let finishAnnouncing!: () => void;
-    const announcing = new Promise<void>((resolve) => {
-      finishAnnouncing = resolve;
-    });
+  function holdAnnouncement() {
+    const approvalAnnounced = deferred<string>();
+    const announcing = deferred();
     whileAnnouncingApproval = async (approvalId) => {
-      announced(approvalId);
-      await announcing;
+      approvalAnnounced.resolve(approvalId);
+      await announcing.promise;
     };
+    return { approvalAnnounced: approvalAnnounced.promise, finishAnnouncing: announcing.resolve };
+  }
+
+  async function resolveWhileAnnouncing(actionName: string, decision: "approve" | "reject") {
+    const { approvalAnnounced, finishAnnouncing } = holdAnnouncement();
     const firing = fire(actionName);
     const approvalId = await approvalAnnounced;
     if (decision === "approve") await approve(approvalId);
@@ -452,6 +473,90 @@ describe("routine runs parked on approval", () => {
       expect((await executions.findById(rootExecutionId))?.status).toBe("cancelled");
     });
   }
+
+  it("leaves the root to a replay still running when its run finishes parking", async () => {
+    const gateRunning = deferred();
+    const gateReleased = deferred();
+    registry.register(
+      makeAction(
+        "gate",
+        async () => {
+          gateRunning.resolve();
+          await gateReleased.promise;
+          return { status: "ok" };
+        },
+        true,
+      ),
+    );
+    registry.register(makeAction("sync", async () => engine.run("gate", {})));
+    const { approvalAnnounced, finishAnnouncing } = holdAnnouncement();
+    const firing = fire("sync");
+    const approvalId = await approvalAnnounced;
+    await approvals.resolvePending(approvalId, "approve", "guardian");
+    const replaying = handler.onApproved(approvalId);
+    await gateRunning.promise;
+
+    finishAnnouncing();
+    const { runId, rootExecutionId } = await firing;
+
+    // A stop now leaves a running root, which the next start ends as an error.
+    expect((await executions.findById(rootExecutionId))?.status).toBe("running");
+    gateReleased.resolve();
+    await replaying;
+    expect(await runStatus(runId)).toBe("success");
+    expect((await executions.findById(rootExecutionId))?.status).toBe("success");
+  });
+
+  it("reopens a failed run when its retry is claimed, before the retry waits its turn", async () => {
+    let attempts = 0;
+    registry.register(
+      makeAction(
+        "export",
+        async () => {
+          attempts++;
+          if (attempts === 1) throw new Error("export target unavailable");
+          return { status: "ok" };
+        },
+        true,
+      ),
+    );
+    const { routineId, runId } = await fire("export");
+    const approvalId = await pendingApprovalFor("export");
+    await approve(approvalId);
+    expect(await runStatus(runId)).toBe("error");
+    const sessionQueued = deferred();
+    const sessionFree = deferred();
+    const agentRunner = createMockAgentRunner();
+    const base = createBackendTurnRunner({ agentRunner, channel: () => null });
+    const busySession = new ApprovalHandler(
+      approvals,
+      new ExecutionJournalRepository(testDb.db),
+      engine,
+      agentRunner,
+      {
+        ...base,
+        runBackendSessionTask: async (channel, threadId, task) => {
+          sessionQueued.resolve();
+          await sessionFree.promise;
+          return base.runBackendSessionTask(channel, threadId, task);
+        },
+      },
+      undefined,
+      { executions, ...routineRunApprovalHooks({ executions, approvals, routineRuns }) },
+    );
+    await approvals.retryFailedExecution(approvalId);
+
+    const retrying = busySession.onApproved(approvalId);
+    await sessionQueued.promise;
+
+    expect(await runStatus(runId)).toBe("pending_approval");
+    expect(await routines.deleteIfNoActiveRuns(routineId)).toMatchObject({
+      status: "active-runs",
+    });
+    sessionFree.resolve();
+    await retrying;
+    expect(await runStatus(runId)).toBe("success");
+  });
 
   it("settles once two approvals replayed together have both executed", async () => {
     let started = 0;

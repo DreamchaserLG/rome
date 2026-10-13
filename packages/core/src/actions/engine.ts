@@ -328,6 +328,11 @@ export class ActionEngine {
   private approvalsRepo: ApprovalsRepository;
   private journalRepo: ExecutionJournalRepository;
   private activeRootProcesses = new Map<string, ActiveRootProcess>();
+  /** The invocation driving each execution row it started. An approval is
+   * visible before the run that requested it finishes, so the approval's
+   * replay can take over the root row while that run still holds it. Only the
+   * current driver records the row's outcome. */
+  private rowDrivers = new Map<string, symbol>();
   private processRole: "main" | "worker";
   private workerRpcServer: WorkerRpcServer | null = null;
   private agentSessionBridge: AgentSessionChildBridge | null = null;
@@ -624,18 +629,20 @@ export class ActionEngine {
       if (newApprovalEntries.length > 0) {
         await this.persistNewEntries(replayStore.rootExecutionId, newApprovalEntries);
       }
-      await this.upsertExecutionRecord({
-        executionId,
-        rootExecutionId,
-        actionName: action.config.name,
-        actionType: action.config.type,
-        status: "pending_approval",
-        args,
-        initiator,
-        actor,
-        parentId,
-        error: undefined,
-      });
+      // A replay of the approval just announced may already drive the row.
+      if (!this.rowDrivers.has(executionId))
+        await this.upsertExecutionRecord({
+          executionId,
+          rootExecutionId,
+          actionName: action.config.name,
+          actionType: action.config.type,
+          status: "pending_approval",
+          args,
+          initiator,
+          actor,
+          parentId,
+          error: undefined,
+        });
       onRootAccepted?.();
       return { status: "pending_approval", approval: pending };
     }
@@ -859,6 +866,30 @@ export class ActionEngine {
     actionEventObserver?: ActionInvocationObserver,
     onRootAccepted?: () => void,
   ): Promise<ActionResult> {
+    const { executionId } = invocation;
+    const driver = Symbol(executionId);
+    this.rowDrivers.set(executionId, driver);
+    const drivesRow = () => this.rowDrivers.get(executionId) === driver;
+    try {
+      return await this.runInvocation(
+        invocation,
+        drivesRow,
+        observer,
+        actionEventObserver,
+        onRootAccepted,
+      );
+    } finally {
+      if (drivesRow()) this.rowDrivers.delete(executionId);
+    }
+  }
+
+  private async runInvocation(
+    invocation: ExecutionInvocation,
+    drivesRow: () => boolean,
+    observer?: ActionRunObserver,
+    actionEventObserver?: ActionInvocationObserver,
+    onRootAccepted?: () => void,
+  ): Promise<ActionResult> {
     const { action, name, args, executionId, rootExecutionId, parentId, initiator, actor, isRoot } =
       invocation;
     const mode = this.resolveExecutionMode(action, isRoot);
@@ -900,7 +931,9 @@ export class ActionEngine {
           : result.status === "error"
             ? "error"
             : "success";
-      if (status === "pending_approval") {
+      if (!drivesRow()) {
+        // A replay took the row over and records its outcome.
+      } else if (status === "pending_approval") {
         await this.upsertExecutionRecord({
           executionId,
           rootExecutionId,
@@ -956,7 +989,7 @@ export class ActionEngine {
           await this.executionsRepo.update(executionId, {
             durationMs: this.clock.now().getTime() - startedAt.getTime(),
           });
-        } else {
+        } else if (drivesRow()) {
           await this.recordExecutionCompletion({
             executionId,
             rootExecutionId,

@@ -48,7 +48,8 @@ function formatResultForAgent(result: ActionResult): string {
 /** Hooks that keep records projected from a parked root, such as a routine
  * run, in step with it. A failure is logged, never rethrown. */
 export interface RootSettlementHooks {
-  /** Called when an approved replay of the root starts, a retry included. */
+  /** Called when an approved replay of the root is claimed, a retry included,
+   * before it waits for its session. */
   onRootResuming?: (rootExecutionId: string, approvalId: string) => Promise<void>;
   /** Called after a resolution that can settle the root's execution row:
    * after an approved replay returns or throws, and after every rejection.
@@ -59,7 +60,7 @@ export interface RootSettlementHooks {
 
 /** How an approval's outcome reaches the records of the root it parked. */
 export interface ApprovalSettlement extends RootSettlementHooks {
-  executions: Pick<ActionExecutionsRepository, "markParkedRootRejected">;
+  executions: Pick<ActionExecutionsRepository, "markParkedRootRejected" | "markParkedRootErrored">;
 }
 
 export class ApprovalHandler {
@@ -148,6 +149,10 @@ export class ApprovalHandler {
       return;
     }
 
+    // Before the session task below, which can wait behind another turn: the
+    // root's records read active again from the moment the replay is claimed.
+    await this.notifySettlement("onRootResuming", payload.rootExecutionId, approvalId);
+
     log.info("processing approved action", {
       approvalId,
       actionName: payload.actionName,
@@ -178,8 +183,6 @@ export class ApprovalHandler {
     // the chat. The `approval:` prefix keeps the id distinguishable from
     // SDK-issued `toolu_*` ids and makes it queryable back to the approval row.
     const traceId = `approval:${approvalId}`;
-
-    await this.notifySettlement("onRootResuming", payload.rootExecutionId, approvalId);
     let executed = false;
 
     try {
@@ -275,8 +278,28 @@ export class ApprovalHandler {
       } catch {
         // Best-effort — failure already logged above
       }
-      // A thrown replay has already recorded the root as errored, and a retry
-      // of this approval replays it again.
+      // A replay that reached the root has already recorded it as errored. One
+      // that threw before, as when the root's action is gone, left it parked,
+      // and no other approval may resume it. A retry replays it again.
+      const rootExecutionId: unknown = payload.rootExecutionId;
+      if (this.settlement && typeof rootExecutionId === "string") {
+        try {
+          if (
+            !this.approvalsRepo.hasActiveApprovalForRoot(rootExecutionId, { countFailed: false })
+          ) {
+            await this.settlement.executions.markParkedRootErrored(
+              rootExecutionId,
+              new Date(),
+              errorMsg,
+            );
+          }
+        } catch (settleErr) {
+          log.error("failed to record errored root", {
+            approvalId,
+            error: settleErr instanceof Error ? settleErr.message : String(settleErr),
+          });
+        }
+      }
       await this.notifySettlement("onRootResolved", payload.rootExecutionId, approvalId);
     }
   }
