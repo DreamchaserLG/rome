@@ -840,10 +840,12 @@ function formatOrphanedToolResult(orphan: OrphanedToolResult): string {
     orphan.tool === "execute_action" && typeof args?.action_name === "string"
       ? `the action "${args.action_name}"`
       : `the tool "${orphan.tool}"`;
-  const outcome = orphan.success ? "finished" : "failed";
   // The model saw this call reported as cancelled, so say plainly that it ran.
+  const outcome = orphan.success
+    ? "finished after that turn ended. It already ran: do not run it again."
+    : "failed after that turn ended. It is no longer running: decide from its result whether to retry.";
   return [
-    `A call to ${label} (call ${orphan.callId}) that you started in an earlier turn ${outcome} after that turn ended. It already ran: do not run it again. Its result:`,
+    `A call to ${label} (call ${orphan.callId}) that you started in an earlier turn ${outcome} Its result:`,
     "<tool_result>",
     orphan.text,
     "</tool_result>",
@@ -1212,6 +1214,7 @@ async function openSession(
         // scopes `actions: [foo]` must not reach anything else in the registry.
         const action = findPermittedAction(name);
         if (!action) throw new Error(`Unknown action: ${name}`);
+        const turnId = refs.getTurnId();
         const result = await deps.actionEngine.run(
           action.config.name,
           input as Record<string, unknown>,
@@ -1222,9 +1225,12 @@ async function openSession(
             sessionId: refs.sessionId,
             agentName: key.agentName,
             channelThreadKey: key.channelThreadKey,
-            turnId: refs.getTurnId(),
+            turnId,
           },
         );
+        // A UI result mounts from the tool_result its turn streams. A call
+        // that outlived its turn streams none, so it takes the fallback too.
+        const canShowUi = refs.supportsInteractiveSurface && refs.getTurnId() === turnId;
         if (result.status === "pending_approval") {
           return {
             pendingApproval: true,
@@ -1242,7 +1248,7 @@ async function openSession(
           // turn: nothing can mount the component. Fall back to relaying the
           // human-readable prompt as prose; the guardian's reply arrives as
           // the next turn, exactly like an ordinary clarifying question.
-          if (!refs.supportsInteractiveSurface) {
+          if (!canShowUi) {
             return {
               message:
                 "This surface cannot render an interactive UI. Ask the guardian the " +
@@ -1270,7 +1276,7 @@ async function openSession(
           // Off-webchat (messaging channel), inside a subagent, or on a forked
           // turn: nothing can run a handoff. Fall back to relaying the prompt
           // as prose, same as above.
-          if (!refs.supportsInteractiveSurface) {
+          if (!canShowUi) {
             return {
               message:
                 "This surface cannot render an interactive UI. Ask the guardian the " +
@@ -1303,7 +1309,7 @@ async function openSession(
           // tool_result) and the agent keeps going this turn. Off-webchat / inside
           // a subagent there is no workspace to place it on, so say so plainly
           // rather than implying the guardian can now see something they cannot.
-          if (!refs.supportsInteractiveSurface) {
+          if (!canShowUi) {
             return {
               message:
                 `The "${appId}" widget could not be shown — this surface has no workspace to ` +

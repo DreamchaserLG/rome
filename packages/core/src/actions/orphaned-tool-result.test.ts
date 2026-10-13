@@ -52,7 +52,9 @@ describe("tool results that finish after their turn", () => {
     rome = undefined;
   });
 
-  async function startReportInChat(): Promise<string> {
+  async function startReportInChat(
+    extraActions: RecordingAction["action"][] = [],
+  ): Promise<string> {
     slowReport = recordingAction("slow_report");
     let backendTurnRunner: MainBackendTurnRunner | undefined;
     const resumeSession = createResumeSessionAction(resumeSessionConfig, {
@@ -63,7 +65,7 @@ describe("tool results that finish after their turn", () => {
     } as never);
     rome = await createTestRome({
       keepAliveAcrossTurns: true,
-      actions: [slowReport.action, resumeSession],
+      actions: [slowReport.action, resumeSession, ...extraActions],
     });
     const testRome = rome;
     backendTurnRunner = createBackendTurnRunner({
@@ -107,6 +109,87 @@ describe("tool results that finish after their turn", () => {
     expect(prompt).toContain('"codingSessionId":"cs-1"');
     expect(testRome.model.sessions.at(-1)?.sessionId).toBe(sessionId);
     expect(slowReport.calls).toHaveLength(1);
+  });
+
+  it("says a failed result may be retried", async () => {
+    await startReportInChat();
+    const testRome = rome!;
+
+    testRome.model.sessions.at(-1)!.onOrphanedToolResult!(
+      orphan({ success: false, text: "upstream timed out" }),
+    );
+
+    await rs.waitFor(() => expect(testRome.model.calls).toHaveLength(2));
+    const prompt = testRome.model.lastPrompt() ?? "";
+    expect(prompt).toContain("decide from its result whether to retry");
+    expect(prompt).not.toContain("do not run it again");
+  });
+
+  // No tool_result streams for a call that outlived its turn, so a component
+  // it returns is never mounted and the guardian has to be asked in words.
+  it("relays a component that a late result returns as a plain question", async () => {
+    let slotGate = Promise.resolve();
+    let lateCall: Promise<unknown> | undefined;
+    const pickSlot = recordingAction("pick_slot", {
+      execute: async () => {
+        await slotGate;
+        return {
+          status: "pending_interaction",
+          interaction: {
+            appId: "calendar",
+            promptText: "Pick a time slot",
+            render: { kind: "inline", componentId: "slot-picker" },
+          },
+        };
+      },
+    });
+    // Starts pick_slot inside a turn without waiting for it, as a yielded
+    // Codex cell does.
+    const startPick = recordingAction("start_pick", {
+      execute: async () => {
+        lateCall = rome!.model.sessions.at(-1)!.executeAction("pick_slot", {});
+        return { status: "ok", data: { started: true } };
+      },
+    });
+    await startReportInChat([pickSlot.action, startPick.action]);
+    const testRome = rome!;
+    const runInChat = async (prompt: string) =>
+      await testRome.runAgent({
+        prompt,
+        channelThreadKey: `webchat:${channelContext.threadId}`,
+        threadContext: channelContext,
+      });
+
+    testRome.model
+      .whenPromptIncludes("Book a slot")
+      .replyOnce(invokeAction("pick_slot"), result("Pick one above."));
+    const inTurn = await runInChat("Book a slot");
+    expect(JSON.stringify(inTurn.find((m) => m.type === "tool_result"))).toContain(
+      "pendingInteraction",
+    );
+
+    let releaseSlot!: () => void;
+    slotGate = new Promise((resolve) => {
+      releaseSlot = resolve;
+    });
+    testRome.model
+      .whenPromptIncludes("Book later")
+      .replyOnce(invokeAction("start_pick"), result("Started."));
+    await runInChat("Book later");
+    releaseSlot();
+    const late = await lateCall;
+    expect(late).not.toHaveProperty("pendingInteraction");
+    testRome.model.sessions.at(-1)!.onOrphanedToolResult!(
+      orphan({
+        arguments: { action_name: "pick_slot", json_args: {} },
+        text: JSON.stringify(late),
+      }),
+    );
+
+    await rs.waitFor(() => expect(testRome.model.calls).toHaveLength(4));
+    const prompt = testRome.model.lastPrompt() ?? "";
+    expect(prompt).toContain("Pick a time slot");
+    expect(prompt).not.toContain("has been shown to the guardian");
   });
 
   it("starts no turn for a result that outlived an interrupted turn", async () => {

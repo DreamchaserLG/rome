@@ -2902,6 +2902,8 @@ describe("CodexAppServerProvider tool calls that outlive their turn", () => {
       settle?: "in_turn" | "after_turn" | "after_close";
       status?: string;
       result?: unknown;
+      /** Stop the turn while the call runs; Codex still reports `status`. */
+      stop?: boolean;
     } = {},
   ) {
     const settle = opts.settle ?? "after_turn";
@@ -2912,6 +2914,7 @@ describe("CodexAppServerProvider tool calls that outlive their turn", () => {
     const executeAction = rs.fn(async () => await actionDone);
     const onOrphanedToolResult = rs.fn();
     let toolResponse: Promise<unknown> | undefined;
+    let session!: Awaited<ReturnType<CodexAppServerProvider["openSession"]>>;
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") return { thread: { id: "thr-1" } };
       if (method !== "turn/start") return {};
@@ -2934,6 +2937,7 @@ describe("CodexAppServerProvider tool calls that outlive their turn", () => {
         finishAction(opts.result ?? { report: "ready" });
         await toolResponse;
       }
+      if (opts.stop) await session.interrupt("user stop");
       n("item/completed", {
         threadId: "thr-1",
         turnId: "turn-1",
@@ -2951,7 +2955,7 @@ describe("CodexAppServerProvider tool calls that outlive their turn", () => {
       });
       return { turn: { id: "turn-1" } };
     });
-    const session = await new CodexAppServerProvider().openSession(
+    session = await new CodexAppServerProvider().openSession(
       buildParams({ executeAction, onOrphanedToolResult }),
     );
     const collected = collectUntilTerminal(session);
@@ -2996,6 +3000,16 @@ describe("CodexAppServerProvider tool calls that outlive their turn", () => {
       status: "interrupted",
     });
 
+    expect(onOrphanedToolResult).toHaveBeenCalledWith(
+      expect.objectContaining({ callId: "call-slow", interrupted: true }),
+    );
+    await session.close();
+  });
+
+  it("marks a result as interrupted when the turn finished before a Stop landed", async () => {
+    const { session, onOrphanedToolResult } = await runTurnWithSlowAction({ stop: true });
+
+    expect(requestMock).toHaveBeenCalledWith("turn/interrupt", expect.anything());
     expect(onOrphanedToolResult).toHaveBeenCalledWith(
       expect.objectContaining({ callId: "call-slow", interrupted: true }),
     );

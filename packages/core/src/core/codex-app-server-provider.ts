@@ -411,6 +411,9 @@ interface ActiveTurn {
   errorReason?: TurnErrorEvent["reason"];
   /** `turn.status` from `turn/completed`, mapped to the terminal's `stop`. */
   nativeStatus: string | null;
+  /** Set when Rome asked Codex to interrupt this turn. Codex may still report
+   *  it completed if it finished before the interrupt landed. */
+  interruptRequested: boolean;
   /** Last reasoning part each in-flight reasoning item streamed, by item id.
    *  Lives and dies with the turn, so an unfinished item leaves nothing behind. */
   reasoningDeltaParts: Map<string, string>;
@@ -1016,7 +1019,8 @@ export class CodexAppServerProvider implements ModelProvider {
       turn: ActiveTurn,
       response: DynamicToolCallResponse,
     ): void => {
-      const interrupted = turn.nativeStatus === "interrupted";
+      // A Stop counts even when the turn finished before Codex saw it.
+      const interrupted = turn.nativeStatus === "interrupted" || turn.interruptRequested;
       log.info("codex dynamic tool call finished after its turn ended", {
         tool: call.tool,
         callId: call.callId,
@@ -1166,6 +1170,7 @@ export class CodexAppServerProvider implements ModelProvider {
         errorMessage: null,
         errorCode: null,
         nativeStatus: null,
+        interruptRequested: false,
         reasoningDeltaParts: new Map(),
       };
       activeTurn = turn;
@@ -1363,6 +1368,7 @@ export class CodexAppServerProvider implements ModelProvider {
     const interruptOwnerTurn = async (ownerSessionId: string, reason?: string): Promise<void> => {
       if (closed || !threadId || !activeTurn?.turnId) return;
       if (activeTurn.ownerSessionId !== ownerSessionId) return;
+      activeTurn.interruptRequested = true;
       log.info("codex app-server interrupt", { reason, ownerSessionId });
       try {
         await this.appServerManager.requestForThread(threadId, Method.turnInterrupt, {
