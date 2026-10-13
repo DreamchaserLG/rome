@@ -179,7 +179,7 @@ export class AgentLoader {
             }
             // Every catalog event reloads agents, so a lasting gap is reported
             // when it first appears rather than once per reload.
-            const key = `${config.name}|${subagent}|${missing.reason}`;
+            const key = `${config.name}|${subagent}|${missing.reason}|${missing.code ?? ""}`;
             missingSubagents.add(key);
             if (!this.reportedMissingSubagents.has(key)) {
               log.warn("core agent loaded without unknown subagent", fields);

@@ -402,6 +402,19 @@ describe("AgentLoader", () => {
       ]);
     });
 
+    it("warns again when a broken app's error code changes", async () => {
+      const brokenWith = (code: string) =>
+        catalogWith({ state: "broken", enabled: true, lastError: { code, message: "failed" } });
+
+      await loader.loadFromCatalog(brokenWith("RESOLVE_FAILED"));
+      await loader.loadFromCatalog(brokenWith("MANIFEST_INVALID"));
+
+      expect(missingSubagentCalls(log.warn).map(([, fields]) => fields.code)).toEqual([
+        "RESOLVE_FAILED",
+        "MANIFEST_INVALID",
+      ]);
+    });
+
     it("warns again for a gap that a later load did not report", async () => {
       const disabled = catalogWith({ state: "installed", enabled: false });
 
