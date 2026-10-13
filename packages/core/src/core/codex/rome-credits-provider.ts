@@ -47,11 +47,12 @@ export function codexAppServerConfigArgs(
     // The gateway authenticates the instance token, not an OpenAI login.
     "requires_openai_auth=false",
     "supports_websockets=false",
-    // The gateway answers 429 with `retry-after: 60`; one retry keeps a turn
-    // from stalling for minutes. A replayed stream would reserve credits twice
-    // while the first attempt's hold is still unresolved, so never replay it.
     "request_max_retries=1",
-    "stream_max_retries=0",
+    // Codex retries a 429 only here, never as a request retry, whether the
+    // gateway returns it or Azure fails the stream with `rate_limit_exceeded`.
+    // It waits out the gateway's `retry-after`. The gateway holds no credits
+    // in advance, so a replay cannot reserve them twice. 5 is Codex's default.
+    "stream_max_retries=5",
   ].join(",");
   args.push("-c", `model_providers.${ROME_CREDITS_MODEL_PROVIDER_ID}={${provider}}`);
   return args;

@@ -20,7 +20,7 @@ describe("codexAppServerConfigArgs", () => {
     expect(override).toContain('base_url="https://romeos.cc/v1"');
     expect(override).toContain('env_key="ROME_CREDITS_TOKEN"');
     expect(override).toContain("requires_openai_auth=false");
-    expect(override).toContain("stream_max_retries=0");
+    expect(override).toContain("stream_max_retries=5");
     expect(override).not.toContain("romeinst_");
   });
 
