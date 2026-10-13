@@ -514,7 +514,9 @@ function requireSkill(skillCatalog: SkillMcpDefinition[], skillName: string): Sk
 const MAX_HINT_FILE_OWNERS = 3;
 
 function skillMissHint(skillCatalog: SkillMcpDefinition[], skillName: string): string {
-  const slash = skillName.indexOf("/");
+  // A store app id such as @handle/slug has its own slash, so the file path
+  // starts at the first slash after the id's colon.
+  const slash = skillName.indexOf("/", skillName.indexOf(":") + 1);
   const owner = slash > 0 ? findSkill(skillCatalog, skillName.slice(0, slash)) : undefined;
   const file = owner ? skillName.slice(slash + 1) : skillName;
   const fileOwners = (owner ? [owner] : skillCatalog).filter(

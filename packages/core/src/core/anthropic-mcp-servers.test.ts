@@ -620,6 +620,27 @@ describe("buildAnthropicMcpServers", () => {
     );
   });
 
+  it("read_skill points a companion file path of a store app skill at its directory", async () => {
+    const skill: SkillMcpDefinition = {
+      name: "@handle/bar:foo",
+      description: "Foo",
+      content: "# Foo",
+      directory: "/x/foo",
+      files: ["references/x.md"],
+      ownerType: "app",
+      ownerId: "@handle/bar",
+    };
+    build({ skillCatalog: [skill] });
+    const readTool = getSkillsServerTools().find((tool) => tool.name === "read_skill")!;
+
+    const response = await readTool.handler({ skill_name: "@handle/bar:foo/references/x.md" });
+
+    expect(response.content[0].text).toBe(
+      'Unknown skill: @handle/bar:foo/references/x.md. "references/x.md" is a companion file ' +
+        "of skill @handle/bar:foo, not a skill. Read /x/foo/references/x.md with your file tools.",
+    );
+  });
+
   it("read_skill names at most three owners of a shared companion file", async () => {
     const skills: SkillMcpDefinition[] = ["a", "b", "c", "d", "e"].map((id) => ({
       name: `${id}:doc`,
