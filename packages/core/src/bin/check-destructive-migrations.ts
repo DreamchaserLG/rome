@@ -1,6 +1,6 @@
 // Fails when an unreleased system migration drops or renames a table or column
-// that the last release still declares, unless that release retired the table.
-// The rule is in DEVELOPMENT.md under "Established patterns".
+// that the last release still declares. The rule is in DEVELOPMENT.md under
+// "Established patterns".
 //
 // Usage: pnpm db:check:destructive [--since <rev>]
 //
@@ -8,17 +8,15 @@
 // names another revision. HEAD is read from the working tree, so a migration
 // generated but not yet committed is checked too.
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  findUnretiredRemovals,
-  parseRetiredManifest,
+  findDeclaredRemovals,
   type MigrationSql,
   type SchemaSnapshot,
 } from "../db/destructive-migration-check.js";
 
 const MIGRATIONS_DIR = "packages/core/drizzle/system";
-const RETIRED_MANIFEST = `${MIGRATIONS_DIR}/retired.json`;
 const UPSTREAM_REPOSITORY = "rome-os/rome";
 
 interface Journal {
@@ -109,12 +107,6 @@ function main(): number {
     readFileSync(join(repoRoot, MIGRATIONS_DIR, "meta", "_journal.json"), "utf8"),
   ) as Journal;
   const shippedTags = new Set(shippedJournal.entries.map((entry) => entry.tag));
-  // Parsed even when nothing is removed, so a malformed entry fails the PR that adds it.
-  const headRetired = parseRetiredManifest(
-    existsSync(join(repoRoot, RETIRED_MANIFEST))
-      ? readFileSync(join(repoRoot, RETIRED_MANIFEST), "utf8")
-      : null,
-  );
 
   const unshippedMigrations: MigrationSql[] = headJournal.entries
     .filter((entry) => !shippedTags.has(entry.tag))
@@ -123,21 +115,14 @@ function main(): number {
       sql: readFileSync(join(repoRoot, MIGRATIONS_DIR, `${entry.tag}.sql`), "utf8"),
     }));
 
-  const violations = findUnretiredRemovals({
+  const violations = findDeclaredRemovals({
     shippedSnapshot: JSON.parse(
       readRequiredAtRevision(
         release,
         newestSnapshotPath(listAtRevision(release, `${MIGRATIONS_DIR}/meta`)),
       ),
     ) as SchemaSnapshot,
-    headSnapshot: JSON.parse(
-      readFileSync(
-        join(repoRoot, newestSnapshotPath(readdirSync(join(repoRoot, MIGRATIONS_DIR, "meta")))),
-        "utf8",
-      ),
-    ) as SchemaSnapshot,
     unshippedMigrations,
-    shippedRetired: parseRetiredManifest(readAtRevision(release, RETIRED_MANIFEST)),
   });
 
   if (violations.length === 0) {
@@ -148,24 +133,16 @@ function main(): number {
   }
 
   console.error(
-    `check-destructive-migrations: ERROR: these objects are removed, but ${release} still declares them\n` +
-      `and did not retire their table. Rolling back to ${release} after this migration fails on any read of them.\n`,
+    `check-destructive-migrations: ERROR: these objects are removed, but ${release} still declares them.\n` +
+      `Rolling back to ${release} after this migration fails on any read of them.\n`,
   );
   for (const violation of violations) {
     const name = violation.column ? `${violation.table}.${violation.column}` : violation.table;
-    const retiredAtHead = headRetired.some(
-      (entry) => entry.table.toLowerCase() === violation.table.toLowerCase(),
-    );
-    console.error(
-      `  ${name} (found in ${violation.foundIn.join(", ")})` +
-        (retiredAtHead ? ": retired at HEAD, but no release includes the entry yet" : ""),
-    );
+    console.error(`  ${name} (removed by ${violation.migrations.join(", ")})`);
   }
   console.error(
-    `\nFor a table, remove the last reader and add the table to ${RETIRED_MANIFEST} while the\n` +
-      "schema still declares it. Generate the drop only after a release that contains the entry is tagged.\n" +
-      "For a column, stop declaring it in a release whose migration keeps it, and drop it in a later one.\n" +
-      "See DEVELOPMENT.md, Established patterns.",
+    "\nFirst ship a release that no longer declares the object and whose migration keeps it\n" +
+      "in the database. Drop it in a later release. See DEVELOPMENT.md, Established patterns.",
   );
   return 1;
 }

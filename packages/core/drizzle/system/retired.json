@@ -1,4 +1,0 @@
-{
-  "$comment": "Tables whose last reader is gone. A migration may drop or rename one only after a release tag includes its entry. Columns are not listed here, because drizzle reads every declared column. Checked by pnpm db:check:destructive. The sequence is in DEVELOPMENT.md under Established patterns.",
-  "retired": []
-}
