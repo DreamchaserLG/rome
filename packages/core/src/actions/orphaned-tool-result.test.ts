@@ -111,84 +111,67 @@ describe("tool results that finish after their turn", () => {
     expect(slowReport.calls).toHaveLength(1);
   });
 
-  it("says a failed result may be retried", async () => {
-    await startReportInChat();
+  /** The JSON the facade hands Codex for `action` called in a chat turn. */
+  async function facadeTextFor(action: RecordingAction, prompt: string): Promise<string> {
     const testRome = rome!;
+    testRome.model.whenPromptIncludes(prompt).replyOnce(invokeAction(action.action.config.name));
+    const messages = await testRome.runAgent({
+      prompt,
+      channelThreadKey: `webchat:${channelContext.threadId}`,
+      threadContext: channelContext,
+    });
+    const toolResult = messages.find((message) => message.type === "tool_result");
+    if (toolResult?.type !== "tool_result") throw new Error("the turn ran no tool");
+    return JSON.stringify(toolResult.output);
+  }
+
+  // An action failure is a normal facade return, so Codex reports it as a
+  // successful call.
+  it("lets the agent retry an action that failed late", async () => {
+    const flaky = recordingAction("flaky_report", {
+      execute: async () => ({ status: "error", error: "upstream timed out" }),
+    });
+    await startReportInChat([flaky.action]);
+    const testRome = rome!;
+    const text = await facadeTextFor(flaky, "Run the flaky report");
 
     testRome.model.sessions.at(-1)!.onOrphanedToolResult!(
-      orphan({ success: false, text: "upstream timed out" }),
+      orphan({ arguments: { action_name: "flaky_report", json_args: {} }, success: true, text }),
     );
 
-    await rs.waitFor(() => expect(testRome.model.calls).toHaveLength(2));
+    await rs.waitFor(() => expect(testRome.model.calls).toHaveLength(3));
     const prompt = testRome.model.lastPrompt() ?? "";
+    expect(prompt).toContain("upstream timed out");
     expect(prompt).toContain("decide from its result whether to retry");
     expect(prompt).not.toContain("do not run it again");
   });
 
-  // No tool_result streams for a call that outlived its turn, so a component
-  // it returns is never mounted and the guardian has to be asked in words.
-  it("relays a component that a late result returns as a plain question", async () => {
-    let slotGate = Promise.resolve();
-    let lateCall: Promise<unknown> | undefined;
+  // A card mounts from the tool_result its turn streams, and a late result
+  // streams none, even when it settled before the chat turn finished.
+  it("does not tell the agent a late component was shown", async () => {
     const pickSlot = recordingAction("pick_slot", {
-      execute: async () => {
-        await slotGate;
-        return {
-          status: "pending_interaction",
-          interaction: {
-            appId: "calendar",
-            promptText: "Pick a time slot",
-            render: { kind: "inline", componentId: "slot-picker" },
-          },
-        };
-      },
-    });
-    // Starts pick_slot inside a turn without waiting for it, as a yielded
-    // Codex cell does.
-    const startPick = recordingAction("start_pick", {
-      execute: async () => {
-        lateCall = rome!.model.sessions.at(-1)!.executeAction("pick_slot", {});
-        return { status: "ok", data: { started: true } };
-      },
-    });
-    await startReportInChat([pickSlot.action, startPick.action]);
-    const testRome = rome!;
-    const runInChat = async (prompt: string) =>
-      await testRome.runAgent({
-        prompt,
-        channelThreadKey: `webchat:${channelContext.threadId}`,
-        threadContext: channelContext,
-      });
-
-    testRome.model
-      .whenPromptIncludes("Book a slot")
-      .replyOnce(invokeAction("pick_slot"), result("Pick one above."));
-    const inTurn = await runInChat("Book a slot");
-    expect(JSON.stringify(inTurn.find((m) => m.type === "tool_result"))).toContain(
-      "pendingInteraction",
-    );
-
-    let releaseSlot!: () => void;
-    slotGate = new Promise((resolve) => {
-      releaseSlot = resolve;
-    });
-    testRome.model
-      .whenPromptIncludes("Book later")
-      .replyOnce(invokeAction("start_pick"), result("Started."));
-    await runInChat("Book later");
-    releaseSlot();
-    const late = await lateCall;
-    expect(late).not.toHaveProperty("pendingInteraction");
-    testRome.model.sessions.at(-1)!.onOrphanedToolResult!(
-      orphan({
-        arguments: { action_name: "pick_slot", json_args: {} },
-        text: JSON.stringify(late),
+      execute: async () => ({
+        status: "pending_interaction",
+        interaction: {
+          appId: "calendar",
+          promptText: "Pick a time slot",
+          render: { kind: "inline", componentId: "slot-picker" },
+        },
       }),
+    });
+    await startReportInChat([pickSlot.action]);
+    const testRome = rome!;
+    const text = await facadeTextFor(pickSlot, "Book a slot");
+    expect(text).toContain('"pendingInteraction":true');
+
+    testRome.model.sessions.at(-1)!.onOrphanedToolResult!(
+      orphan({ arguments: { action_name: "pick_slot", json_args: {} }, text }),
     );
 
-    await rs.waitFor(() => expect(testRome.model.calls).toHaveLength(4));
+    await rs.waitFor(() => expect(testRome.model.calls).toHaveLength(3));
     const prompt = testRome.model.lastPrompt() ?? "";
-    expect(prompt).toContain("Pick a time slot");
+    expect(prompt).toContain('"calendar" app');
+    expect(prompt).toContain("nothing was shown");
     expect(prompt).not.toContain("has been shown to the guardian");
   });
 
