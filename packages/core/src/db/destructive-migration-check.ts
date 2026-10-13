@@ -93,9 +93,11 @@ type SqlEffect =
   | { kind: "removal"; table: string; column?: string }
   | { kind: "rebuild"; table: string; keptColumns: Set<string> };
 
-const NAME = String.raw`[\`"\[]?([A-Za-z_][\w$]*)[\`"\]]?`;
+// SQLite reads a single-quoted name as an identifier where one is expected, so
+// all four quote styles count.
+const NAME = String.raw`[\`"'\[]?([A-Za-z_][\w$]*)[\`"'\]]?`;
 // SQLite accepts a schema qualifier such as `main.` before a table name.
-const TABLE = String.raw`(?:[\`"\[]?[A-Za-z_][\w$]*[\`"\]]?\s*\.\s*)?${NAME}`;
+const TABLE = String.raw`(?:[\`"'\[]?[A-Za-z_][\w$]*[\`"'\]]?\s*\.\s*)?${NAME}`;
 const DROP_TABLE = new RegExp(String.raw`\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?${TABLE}`, "gi");
 const CREATE_TABLE = new RegExp(
   String.raw`\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?${TABLE}`,
@@ -120,7 +122,7 @@ const COPY_ROWS = new RegExp(
 );
 
 function scanSqlForRemovals(sql: string): SqlEffect[] {
-  const code = stripCommentsAndStrings(sql);
+  const code = stripComments(sql);
   const lower = (name: string) => name.toLowerCase();
 
   const drops = [...code.matchAll(DROP_TABLE)].map((m) => ({ table: lower(m[1]), at: m.index }));
@@ -141,7 +143,7 @@ function scanSqlForRemovals(sql: string): SqlEffect[] {
     columns: new Set(
       m[2]
         .split(",")
-        .map((column) => lower(column.trim().replace(/^[`"[]|[`"\]]$/g, "")))
+        .map((column) => lower(column.trim().replace(/^[`"'[]|[`"'\]]$/g, "")))
         .filter(Boolean),
     ),
     from: lower(m[3]),
@@ -206,11 +208,11 @@ function scanSqlForRemovals(sql: string): SqlEffect[] {
 }
 
 /**
- * Blanks comments and the contents of string literals, keeping every other
- * character, so a `--`, `/*` or keyword inside a string is not read as SQL.
- * Quoted identifiers are kept as written.
+ * Blanks comments and keeps everything else as written. A `--` or `/*` inside
+ * a quoted string or identifier is not a comment. A keyword inside a string
+ * still matches, which can only make the check stricter.
  */
-function stripCommentsAndStrings(sql: string): string {
+function stripComments(sql: string): string {
   let out = "";
   let i = 0;
   while (i < sql.length) {
@@ -238,7 +240,7 @@ function stripCommentsAndStrings(sql: string): string {
         }
         j++;
       }
-      out += ch === "'" ? "''" : sql.slice(i, j + 1);
+      out += sql.slice(i, j + 1);
       i = j + 1;
     } else {
       out += ch;

@@ -121,11 +121,22 @@ describe("findDeclaredRemovals", () => {
         "UPDATE `routines` SET `name` = '/*';",
         "ALTER TABLE `routines` DROP COLUMN `name`;",
         "SELECT 1; -- */",
-        "UPDATE `routines` SET `name` = 'DROP TABLE routines';",
       ),
     );
 
     expect(removals).toEqual([{ table: "routines", column: "name", migrations: ["0090_custom"] }]);
+  });
+
+  it("reads single-quoted names, which SQLite accepts as identifiers", () => {
+    const removals = check(
+      { routines: ["id", "name"], outbox: ["id", "body"] },
+      migration("0091_custom", "DROP TABLE 'routines';", "ALTER TABLE outbox DROP COLUMN 'body';"),
+    );
+
+    expect(removals).toEqual([
+      { table: "routines", migrations: ["0091_custom"] },
+      { table: "outbox", column: "body", migrations: ["0091_custom"] },
+    ]);
   });
 
   it("ignores dropped indexes, which no older reader depends on", () => {
