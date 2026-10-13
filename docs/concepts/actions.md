@@ -86,9 +86,9 @@ Placement decides which process runs an action: the main process, or an action w
 - A root action that main dispatches runs in an action worker, except for the actions on core's main-process allowlist: `system:create_routine`, `system:send_user_message`, and `system:send_feedback`.
 - An allowlisted action runs in main only while it is not `cancellable`. Main matches it by the app that owns it, so another app's action with the same local name runs in a worker.
 - An allowlisted root takes no worker slot, so it succeeds while every worker is busy. An agent can therefore schedule its own wake-up, start a webchat turn, or file feedback under full load.
-- An allowlisted root cannot be cancelled. A cancel request for it reports that no execution is running.
+- An allowlisted root cannot be cancelled. The execution cancel endpoint reports that no execution is running. A routine Stop marks the run cancelled until the action's real outcome is recorded.
 - An error that escapes an allowlisted handler reaches the main process instead of ending a worker.
-- A nested call under an allowlisted root runs in an action worker, never in main, and fails at once when no worker is free.
+- A nested call under an allowlisted root runs in an action worker, never in main, and fails at once when no worker is free. It is still recorded as a child of that root, even when it starts after the root has finished.
 - A nested call that a worker makes runs in that worker unless it is `cancellable`, which gives it a worker of its own.
 
 **Not to be confused with:**

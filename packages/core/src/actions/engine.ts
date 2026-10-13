@@ -1660,9 +1660,11 @@ export class ActionEngine {
       return this.runsRootInMain(action) ? "in_process" : "subprocess";
     }
     // A root running in main leaves its replay context on everything its
-    // handler starts, including timers and event-bus subscribers. A nested
-    // call reached through that context may be third-party code, so it takes
-    // a worker rather than running in main.
+    // handler starts, including its timers and the subscribers to events it
+    // publishes. A nested call reached through that context may be third-party
+    // code, so it takes a worker rather than running in main. This decides
+    // placement only: the call is still journaled under that root, even after
+    // the root has settled.
     if (this.processRole === "main" && replayStore?.rootRunsInMain) return "subprocess";
     return action.config.cancellable ? "subprocess" : "in_process";
   }

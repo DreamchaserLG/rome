@@ -71,7 +71,7 @@ The 2026-10-07 amendment keeps agent tool calls fail-fast. That left an agent at
 
 Main now runs a root from a core-owned allowlist of canonical action ids in its own process, so the root takes no worker slot. Core holds the allowlist and matches each action by the app that owns it, because a manifest field would let any app claim main. A `cancellable` action never qualifies, and when the check is absent or throws, the root takes a worker.
 
-Main never runs a nested call under such a root in-process. The root's handler leaves its replay context on everything it starts, including timers and event-bus subscribers, so a nested call reached that way may be third-party code. Every nested call under an allowlisted root takes a worker and fails fast at the cap.
+Main never runs a nested call under such a root in-process. The root's handler leaves its replay context on everything it starts, including its timers and the subscribers to events it publishes, so a nested call reached that way may be third-party code. Every nested call under an allowlisted root takes a worker and fails fast at the cap. This guard only decides where the call runs. The call is still recorded as a child of the allowlisted root, even after that root has finished, so an allowlisted handler must not leave its context on work that outlives it.
 
 Alternatives rejected for this amendment:
 
