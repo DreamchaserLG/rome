@@ -108,7 +108,7 @@ import {
   endInterruptedRuns,
   endInterruptedWebhookInvocations,
 } from "./actions/restart-recovery.js";
-import { deliverWebhookCallbacks } from "./api/routes/webhooks.js";
+import { deliverWebhookCallbacks } from "./api/webhook-callbacks.js";
 import { WorkerRpcServer } from "./actions/worker-rpc.js";
 import { setWorkerRpcInProcessDispatcher } from "./actions/worker-rpc-client.js";
 import { AgentRunner } from "./core/agent-runner.js";

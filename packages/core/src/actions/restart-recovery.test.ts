@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { deliverWebhookCallbacks } from "../api/routes/webhooks.js";
+import { deliverWebhookCallbacks } from "../api/webhook-callbacks.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
