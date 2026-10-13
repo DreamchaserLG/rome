@@ -1,7 +1,7 @@
 import { PersonMappingRepository } from "./person-mapping.js";
 import { STRANGER_PERSON_ID } from "../../constants.js";
 import { loadPairingKey, pairingCode, matchesPairingCode } from "../../channels/pairing-code.js";
-import { and, eq, or, desc, sql, ne, count, gte, inArray, notInArray } from "drizzle-orm";
+import { and, eq, or, desc, sql, ne, count, gte, inArray } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { approvals, channelMappings, connections, connectionGrants } from "../schema.js";
 import type { DrizzleDb, SqliteExec } from "../index.js";
@@ -499,12 +499,12 @@ export class ApprovalsRepository {
   }
 
   /** Whether an action_execution approval for the root can still run or change
-   * it: one pending, or approved and not executed yet, a failed execution
-   * included. `excludeIds` leaves out approvals the caller knows have settled
-   * the root although their own state still reads as live: the one it is
-   * resolving, whose executionState reads `running` while it settles, or ones
-   * failInterruptedExecutions just failed. */
-  hasActiveApprovalForRoot(rootExecutionId: string, excludeIds: readonly string[] = []): boolean {
+   * it: one pending, or approved and not executed yet. A failed execution
+   * stays retryable, so it counts unless `countFailed` is false. */
+  hasActiveApprovalForRoot(
+    rootExecutionId: string,
+    { countFailed = true }: { countFailed?: boolean } = {},
+  ): boolean {
     const row = this.db
       .select({ id: approvals.id })
       .from(approvals)
@@ -512,7 +512,7 @@ export class ApprovalsRepository {
         and(
           activeActionApproval,
           sql`json_extract(${approvals.payload}, '$.rootExecutionId') = ${rootExecutionId}`,
-          excludeIds.length > 0 ? notInArray(approvals.id, [...excludeIds]) : undefined,
+          countFailed ? undefined : ne(approvals.executionState, "failed"),
         ),
       )
       .limit(1)
@@ -539,13 +539,12 @@ export class ApprovalsRepository {
 
   /**
    * Fails every approved action_execution approval a stopped process left
-   * `queued` or `running`, so the guardian can retry it, and returns the ids of
-   * the `running` ones: their execution started, and its root has an outcome.
-   * Call only at boot, before any approval executes: nothing claims or runs
-   * one then.
+   * `queued` or `running`, so the guardian can retry it, and returns how many
+   * it failed. Call only at boot, before any approval executes: nothing claims
+   * or runs one then.
    */
-  async failInterruptedExecutions(): Promise<string[]> {
-    const interrupted = (state: "queued" | "running", error: string) =>
+  async failInterruptedExecutions(): Promise<number> {
+    const fail = (state: "queued" | "running", error: string) =>
       this.db
         .update(approvals)
         .set({ executionState: "failed", executionError: error })
@@ -557,12 +556,9 @@ export class ApprovalsRepository {
           ),
         )
         .returning({ id: approvals.id });
-    await interrupted("queued", "Rome stopped before the approved action started");
-    const started = await interrupted(
-      "running",
-      "Rome stopped while the approved action was running",
-    );
-    return started.map((row) => row.id);
+    const unclaimed = await fail("queued", "Rome stopped before the approved action started");
+    const started = await fail("running", "Rome stopped while the approved action was running");
+    return unclaimed.length + started.length;
   }
 
   async retryFailedExecution(id: string): Promise<RetryExecutionResult> {

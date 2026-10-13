@@ -30,6 +30,10 @@ export class RoutineEngine {
     private retryDelayMs: number,
     /** Time source for run durations, lastFiredAt, and the retry timer. */
     private clock: Clock,
+    /** Called after a run parks on approval. The approval is visible before
+     * the run finishes parking, so the guardian may already have resolved it.
+     * Undefined leaves the run parked until its approval's next resolution. */
+    private onRunParked?: (rootExecutionId: string) => Promise<void>,
   ) {}
 
   registerProvider(type: string, provider: TriggerProvider): void {
@@ -254,6 +258,14 @@ export class RoutineEngine {
             durationMs,
             ...(error !== undefined ? { error } : {}),
           });
+          if (status === "pending_approval" && this.onRunParked) {
+            await this.onRunParked(rootExecutionId).catch((err: unknown) => {
+              log.error("failed to settle parked routine run", {
+                routineId: routine.id,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            });
+          }
 
           if (status === "error") {
             log.warn("routine action returned an error", {

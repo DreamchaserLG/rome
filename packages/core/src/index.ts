@@ -137,7 +137,11 @@ import type { Trigger } from "./routines/types.js";
 import { resolveGuardianTimezone } from "./routines/guardian-timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
-import { routineRunApprovalHooks, settleResolvedParkedRuns } from "./routines/settle-parked-run.js";
+import {
+  routineRunApprovalHooks,
+  settleParkedRun,
+  settleResolvedParkedRuns,
+} from "./routines/settle-parked-run.js";
 import { mapGuardianToChannel } from "./channels/guardian-mapping.js";
 import type { EmailInboundResult } from "./channels/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
@@ -333,7 +337,17 @@ async function main() {
     log.warn("Ended runs a stopped Rome process left running", interrupted);
   }
 
-  // After the sweep above, which settles roots an approved replay left running.
+  // Nothing executes an approval yet, so a `queued` or `running` one belongs to
+  // the stopped process.
+  const interruptedApprovals = await approvalsRepo.failInterruptedExecutions();
+  if (interruptedApprovals > 0) {
+    log.warn("Failed approved actions a stopped Rome process left unfinished", {
+      count: interruptedApprovals,
+    });
+  }
+
+  // After the sweeps above, which settle roots an approved replay left running
+  // and fail the approvals behind them.
   const settledParkedRuns = await settleResolvedParkedRuns(
     { executions: actionExecutionsRepo, approvals: approvalsRepo, routineRuns: routineRunsRepo },
     new Date(),
@@ -650,6 +664,17 @@ async function main() {
     actionEngine,
     30_000,
     systemClock,
+    async (rootExecutionId) => {
+      await settleParkedRun(
+        {
+          executions: actionExecutionsRepo,
+          approvals: approvalsRepo,
+          routineRuns: routineRunsRepo,
+        },
+        rootExecutionId,
+        new Date(),
+      );
+    },
   );
   const scheduleTriggerProvider = new ScheduleTriggerProvider(routinesRepo, () =>
     resolveGuardianTimezone(settingsRepo),

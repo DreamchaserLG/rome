@@ -13,32 +13,28 @@ interface ParkedRunRepos {
 
 /**
  * Copies the outcome of the root execution onto the routine run rooted at it,
- * once no approval for the root is live, and returns whether a run changed.
- * `resolvedApprovalIds` name approvals known to have settled the root: they
- * count as resolved even while their own state still reads as live. A root
+ * once the root has one and no approval can still resume it, and returns
+ * whether a run changed. A failed approval stays retryable, but its replay
+ * already gave the root this outcome, and a retry reopens the run. A root
  * still running or parked leaves the run as it is, so the call is safe to
  * repeat.
  */
 async function settleRoutineRunFromRoot(
   repos: ParkedRunRepos,
   rootExecutionId: string,
-  resolvedApprovalIds: readonly string[] = [],
 ): Promise<boolean> {
-  if (repos.approvals.hasActiveApprovalForRoot(rootExecutionId, resolvedApprovalIds)) return false;
   const root = await repos.executions.findTreeRoot(rootExecutionId);
   if (!root) return false;
-  switch (root.status) {
-    case "success":
-      return repos.routineRuns.syncFromRoot(rootExecutionId, { status: "success" });
-    case "error":
-    case "cancelled":
-      return repos.routineRuns.syncFromRoot(rootExecutionId, {
-        status: root.status,
-        ...(root.error ? { error: root.error } : {}),
-      });
-    default:
-      return false;
+  if (root.status !== "success" && root.status !== "error" && root.status !== "cancelled") {
+    return false;
   }
+  if (repos.approvals.hasActiveApprovalForRoot(rootExecutionId, { countFailed: false })) {
+    return false;
+  }
+  return repos.routineRuns.syncFromRoot(rootExecutionId, {
+    status: root.status,
+    ...(root.status !== "success" && root.error ? { error: root.error } : {}),
+  });
 }
 
 /** The ApprovalHandler hooks that keep each routine run in step with the root
@@ -51,44 +47,54 @@ export function routineRunApprovalHooks(
     onRootResuming: async (rootExecutionId) => {
       await repos.routineRuns.reopenForReplay(rootExecutionId);
     },
-    onRootResolved: async (rootExecutionId, approvalId) => {
-      await settleRoutineRunFromRoot(repos, rootExecutionId, [approvalId]);
+    onRootResolved: async (rootExecutionId) => {
+      await settleRoutineRunFromRoot(repos, rootExecutionId);
     },
   };
 }
 
+type SettleParkedRunRepos = {
+  executions: Pick<ActionExecutionsRepository, "findTreeRoot" | "markParkedRootRejected">;
+  approvals: Pick<ApprovalsRepository, "hasActiveApprovalForRoot" | "hasRejectedApprovalForRoot">;
+  routineRuns: Pick<RoutineRunsRepository, "syncFromRoot">;
+};
+
 /**
- * Settles every `pending_approval` routine run whose approvals have all
- * resolved, and returns how many runs it settled. This covers resolutions that
- * reached the approval but not the run: one made before Rome settled parked
- * runs, or one interrupted by a stop.
- *  - A root still parked behind a rejected approval is first recorded as
- *    rejected.
- *  - An approved action a stop interrupted is failed first, so the guardian
- *    can retry it. If it had started, its run then takes the root's outcome,
- *    as after an action that threw: endInterruptedRuns has already ended that
- *    root as an error. If it had not, its run keeps waiting for the retry.
- * Call at boot, after endInterruptedRuns and before any approval executes.
+ * Settles the `pending_approval` routine run rooted at `rootExecutionId` if
+ * its approvals already resolved, and returns whether it changed. A root
+ * still parked behind a rejected approval, with no approval left to resume
+ * it, is first recorded as rejected. This covers resolutions that reached the
+ * approval but not the run: one made before the run finished parking, before
+ * Rome settled parked runs, or one a stop interrupted.
+ */
+export async function settleParkedRun(
+  repos: SettleParkedRunRepos,
+  rootExecutionId: string,
+  now: Date,
+): Promise<boolean> {
+  if (
+    !repos.approvals.hasActiveApprovalForRoot(rootExecutionId) &&
+    repos.approvals.hasRejectedApprovalForRoot(rootExecutionId)
+  ) {
+    await repos.executions.markParkedRootRejected(rootExecutionId, now);
+  }
+  return settleRoutineRunFromRoot(repos, rootExecutionId);
+}
+
+/**
+ * Runs settleParkedRun on every `pending_approval` routine run, and returns
+ * how many it settled. Call at boot, after endInterruptedRuns and
+ * ApprovalsRepository.failInterruptedExecutions.
  */
 export async function settleResolvedParkedRuns(
-  repos: {
-    executions: Pick<ActionExecutionsRepository, "findTreeRoot" | "markParkedRootRejected">;
-    approvals: Pick<
-      ApprovalsRepository,
-      "hasActiveApprovalForRoot" | "hasRejectedApprovalForRoot" | "failInterruptedExecutions"
-    >;
-    routineRuns: Pick<RoutineRunsRepository, "findParkedExecutionIds" | "syncFromRoot">;
+  repos: SettleParkedRunRepos & {
+    routineRuns: Pick<RoutineRunsRepository, "findParkedExecutionIds">;
   },
   now: Date,
 ): Promise<number> {
-  const interrupted = await repos.approvals.failInterruptedExecutions();
   let settled = 0;
   for (const rootExecutionId of await repos.routineRuns.findParkedExecutionIds()) {
-    if (repos.approvals.hasActiveApprovalForRoot(rootExecutionId, interrupted)) continue;
-    if (repos.approvals.hasRejectedApprovalForRoot(rootExecutionId)) {
-      await repos.executions.markParkedRootRejected(rootExecutionId, now);
-    }
-    if (await settleRoutineRunFromRoot(repos, rootExecutionId, interrupted)) settled++;
+    if (await settleParkedRun(repos, rootExecutionId, now)) settled++;
   }
   return settled;
 }

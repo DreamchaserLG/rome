@@ -150,6 +150,29 @@ export class ActionExecutionsRepository {
   }
 
   /**
+   * Records the execution as `pending_approval` while it is still `running`
+   * or parked, and returns whether it changed. A finished execution keeps
+   * its outcome. `actor`, when given, becomes the row's actor.
+   */
+  async markParked(id: string, actor?: SessionActor): Promise<boolean> {
+    const result = await this.db
+      .update(actionExecutions)
+      .set({
+        status: "pending_approval",
+        error: null,
+        finishedAt: null,
+        ...(actor ? { actor } : {}),
+      })
+      .where(
+        and(
+          eq(actionExecutions.id, id),
+          inArray(actionExecutions.status, ["running", "pending_approval"]),
+        ),
+      );
+    return Number(result.changes ?? 0) > 0;
+  }
+
+  /**
    * Ends every `pending_approval` execution under a parked root as `cancelled`
    * with `reason`, and returns how many it ended. Call only once no approval
    * for the root can still resume it: those rows then never run.

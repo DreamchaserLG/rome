@@ -32,7 +32,7 @@ import { SessionManager } from "../core/session-manager.js";
 import { ApprovalHandler } from "../actions/approval-handler.js";
 import { createBackendTurnRunner } from "../actions/backend-turn.js";
 import { RoutineEngine } from "../routines/engine.js";
-import { routineRunApprovalHooks } from "../routines/settle-parked-run.js";
+import { routineRunApprovalHooks, settleParkedRun } from "../routines/settle-parked-run.js";
 import { systemClock } from "../lib/clock.js";
 import { EventCatalog } from "../event-catalog.js";
 import { PublicAccessState } from "../lib/public-access-state.js";
@@ -674,6 +674,17 @@ export async function buildTestDeps(
     actionEngine,
     30_000,
     systemClock,
+    async (rootExecutionId) => {
+      await settleParkedRun(
+        {
+          executions: actionExecutionsRepo,
+          approvals: approvalsRepo,
+          routineRuns: routineRunsRepo,
+        },
+        rootExecutionId,
+        new Date(),
+      );
+    },
   );
   // Same provider set the daemon registers before the API comes up, so
   // routine trigger validation behaves identically here.
