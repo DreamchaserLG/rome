@@ -567,28 +567,38 @@ describe("routine runs parked on approval", () => {
     expect(await runStatus(runId)).toBe("success");
   });
 
-  it("settles once two approvals replayed together have both executed", async () => {
-    let started = 0;
-    let release!: () => void;
-    const bothStarted = new Promise<void>((resolve) => {
-      release = resolve;
-    });
+  // Two approvals that replay one root, as when two gated calls in one tree
+  // are approved together. The second replay parks on a new gated call after
+  // the first finished.
+  it("replays one root in turn, so a finished replay cannot hide one that parks again", async () => {
+    let bodies = 0;
+    let running = 0;
+    let overlapped = false;
+    const firstFinished = deferred();
+    registry.register(makeAction("gate_b", ok, true));
     registry.register(
       makeAction(
         "send_report",
         async () => {
-          started++;
-          if (started === 2) release();
-          await bothStarted;
-          return { status: "ok" };
+          bodies++;
+          running++;
+          if (running > 1) overlapped = true;
+          try {
+            if (bodies === 1) return { status: "ok" };
+            await firstFinished.promise;
+            // Long enough for the first replay to record its outcome.
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            return await engine.run("gate_b", {});
+          } finally {
+            running--;
+            if (bodies === 1) firstFinished.resolve();
+          }
         },
         true,
       ),
     );
-    const { runId } = await fire("send_report");
+    const { runId, rootExecutionId } = await fire("send_report");
     const first = (await approvals.findById(await pendingApprovalFor("send_report")))!;
-    // A second approval that replays the same root, as when two gated calls
-    // in one tree are approved together.
     const second = await approvals.create({
       type: "action_execution",
       requestedBy: first.requestedBy,
@@ -600,8 +610,13 @@ describe("routine runs parked on approval", () => {
 
     await Promise.all([handler.onApproved(first.id), handler.onApproved(second)]);
 
-    expect(started).toBe(2);
-    expect(await runStatus(runId)).toBe("success");
+    expect(overlapped).toBe(false);
+    expect((await executions.findById(rootExecutionId))?.status).toBe("pending_approval");
+    expect(await runStatus(runId)).toBe("pending_approval");
+
+    await reject(await pendingApprovalFor("gate_b"));
+
+    expect(await runStatus(runId)).toBe("cancelled");
   });
 });
 

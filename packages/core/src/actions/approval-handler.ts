@@ -64,6 +64,9 @@ export interface ApprovalSettlement extends RootSettlementHooks {
 }
 
 export class ApprovalHandler {
+  /** The latest replay of each root, settled or not. See inRootTurn. */
+  private rootReplays = new Map<string, Promise<void>>();
+
   constructor(
     private approvalsRepo: ApprovalsRepository,
     private journalRepo: ExecutionJournalRepository,
@@ -206,19 +209,21 @@ export class ApprovalHandler {
         agentName: payload.agentName,
         channelThreadKey: payload.channelThreadKey,
       };
-      const result = await this.actionEngine.run(
-        payload.rootActionName,
-        payload.rootArgs,
-        runContext,
-      );
-      // The action has run, so record that before the continuation below,
-      // which can run for minutes. A stop during it then leaves nothing to
-      // retry. Settling after the record lets the last of several approvals
-      // replayed together see the others as executed.
-      await this.approvalsRepo.markExecuted(approvalId);
-      executed = true;
-      log.info("approval executed successfully", { approvalId });
-      await this.notifySettlement("onRootResolved", payload.rootExecutionId, approvalId);
+      const result = await this.inRootTurn(payload.rootExecutionId, async () => {
+        const replayed = await this.actionEngine.run(
+          payload.rootActionName,
+          payload.rootArgs,
+          runContext,
+        );
+        // The action has run, so record that before the continuation below,
+        // which can run for minutes. A stop during it then leaves nothing to
+        // retry.
+        await this.approvalsRepo.markExecuted(approvalId);
+        executed = true;
+        log.info("approval executed successfully", { approvalId });
+        await this.notifySettlement("onRootResolved", payload.rootExecutionId, approvalId);
+        return replayed;
+      });
 
       emit?.({
         type: "tool_result",
@@ -361,6 +366,26 @@ export class ApprovalHandler {
       approvalId,
       rootExecutionId: payload?.rootExecutionId,
     });
+  }
+
+  /** Runs `replay` once every earlier replay of the same root has finished.
+   * Each replay runs the whole root again on the same execution row, so two
+   * at once would record the row over each other: one that finished could
+   * hide one that parked again. */
+  private async inRootTurn<T>(rootExecutionId: unknown, replay: () => Promise<T>): Promise<T> {
+    if (typeof rootExecutionId !== "string") return replay();
+    const previous = this.rootReplays.get(rootExecutionId) ?? Promise.resolve();
+    const turn = previous.then(replay);
+    const done = turn.then(
+      () => {},
+      () => {},
+    );
+    this.rootReplays.set(rootExecutionId, done);
+    try {
+      return await turn;
+    } finally {
+      if (this.rootReplays.get(rootExecutionId) === done) this.rootReplays.delete(rootExecutionId);
+    }
   }
 
   /** Runs one settlement hook for the root, and logs a failure instead of
