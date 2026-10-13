@@ -2,6 +2,7 @@
 // two-release sequence that satisfies it, are in DEVELOPMENT.md under
 // "Established patterns". The CLI that feeds it from git lives in
 // src/bin/check-destructive-migrations.ts.
+import Database from "better-sqlite3";
 
 /** The part of a drizzle-kit snapshot (`meta/NNNN_snapshot.json`) the check reads. */
 export interface SchemaSnapshot {
@@ -12,240 +13,121 @@ export interface MigrationSql {
   /** The migration's journal tag, e.g. `0072_drop_provider_accounts`. */
   name: string;
   sql: string;
+  /** True when the last release's journal lists the migration. */
+  shipped: boolean;
 }
 
-/** A table, or a column when `column` is set, that the last release declares and a migration removes. */
+/** A table, or a column when `column` is set, that the last release declares and a later migration removes. */
 export interface DeclaredRemoval {
   table: string;
   column?: string;
-  /** The migrations that drop or rename it. */
-  migrations: string[];
+  /** The unshipped migration that removed it. */
+  migration: string;
 }
 
 /**
  * Lists every table and column that the last release's schema declares and
- * that a migration the last release did not ship drops or renames.
+ * that the migrations it did not ship remove.
  *
- * drizzle names every declared column in each select and insert, so the last
- * release reads every table it queries and every column of it. An object is
- * safe to remove only once a release has stopped declaring it, and the
- * snapshot from that release no longer lists it.
+ * The migrations run on an in-memory SQLite database the way drizzle's
+ * migrator runs them: the shipped ones first, then each unshipped one. The
+ * schema SQLite reports after each step is compared with the snapshot, so a
+ * drop, a rename, or a rebuild that leaves a column out all count, however the
+ * SQL is written. An object removed and created again by a later migration
+ * counts as kept. A declared object the shipped migrations never created is
+ * ignored, since it never existed for a reader to need.
  *
- * The SQL scan reads table and column drops and renames, with schema
- * qualifiers and case-insensitive names. A table rebuild removes every shipped
- * column its copy statement leaves out, and removes the table when no copy
- * statement matches. Index drops are ignored, since no reader fails when an
- * index is gone.
+ * Throws when a migration fails to run, naming it.
  */
 export function findDeclaredRemovals(input: {
   shippedSnapshot: SchemaSnapshot;
-  unshippedMigrations: readonly MigrationSql[];
+  migrations: readonly MigrationSql[];
 }): DeclaredRemoval[] {
-  const shippedTables = new Map(
-    Object.entries(input.shippedSnapshot.tables).map(([name, table]) => [
-      name.toLowerCase(),
-      {
-        name,
-        columns: new Map(
-          Object.keys(table.columns).map((column) => [column.toLowerCase(), column]),
-        ),
-      },
-    ]),
-  );
+  const db = new Database(":memory:");
+  try {
+    for (const migration of input.migrations) {
+      if (migration.shipped) applyMigration(db, migration);
+    }
+    let present = readSchema(db);
+    const declared = declaredObjects(input.shippedSnapshot).filter((object) =>
+      exists(present, object),
+    );
 
-  const removals = new Map<string, DeclaredRemoval>();
-  const record = (tableKey: string, columnKey: string | undefined, migration: string) => {
-    const shippedTable = shippedTables.get(tableKey);
-    if (!shippedTable) return;
-    const table = shippedTable.name;
-    const column = columnKey === undefined ? undefined : shippedTable.columns.get(columnKey);
-    if (columnKey !== undefined && column === undefined) return;
-    const key = column === undefined ? table : `${table}.${column}`;
-    const existing = removals.get(key);
-    if (!existing) {
-      removals.set(
-        key,
-        column === undefined
-          ? { table, migrations: [migration] }
-          : { table, column, migrations: [migration] },
+    const removedBy = new Map<DeclaredObject, string>();
+    for (const migration of input.migrations) {
+      if (migration.shipped) continue;
+      applyMigration(db, migration);
+      const after = readSchema(db);
+      for (const object of declared) {
+        if (exists(present, object) && !exists(after, object))
+          removedBy.set(object, migration.name);
+      }
+      present = after;
+    }
+
+    const removals: DeclaredRemoval[] = [];
+    for (const object of declared) {
+      const migration = removedBy.get(object);
+      if (migration === undefined || exists(present, object)) continue;
+      // A removed table reports once, not once per column.
+      if (object.column !== undefined && !present.has(object.table.toLowerCase())) continue;
+      removals.push(
+        object.column === undefined
+          ? { table: object.table, migration }
+          : { table: object.table, column: object.column, migration },
       );
-    } else if (!existing.migrations.includes(migration)) {
-      existing.migrations.push(migration);
     }
-  };
-
-  for (const migration of input.unshippedMigrations) {
-    for (const effect of scanSqlForRemovals(migration.sql)) {
-      if (effect.kind === "removal") {
-        record(effect.table, effect.column, migration.name);
-        continue;
-      }
-      for (const columnKey of shippedTables.get(effect.table)?.columns.keys() ?? []) {
-        if (!effect.keptColumns.has(columnKey)) record(effect.table, columnKey, migration.name);
-      }
-    }
+    return removals;
+  } finally {
+    db.close();
   }
-  return [...removals.values()];
 }
 
-/** Names are lower-cased, since SQLite matches identifiers case-insensitively. */
-type SqlEffect =
-  | { kind: "removal"; table: string; column?: string }
-  | { kind: "rebuild"; table: string; keptColumns: Set<string> };
-
-// SQLite reads a single-quoted name as an identifier where one is expected, so
-// all four quote styles count.
-const NAME = String.raw`[\`"'\[]?([A-Za-z_][\w$]*)[\`"'\]]?`;
-// SQLite accepts a schema qualifier such as `main.` before a table name.
-const TABLE = String.raw`(?:[\`"'\[]?[A-Za-z_][\w$]*[\`"'\]]?\s*\.\s*)?${NAME}`;
-const DROP_TABLE = new RegExp(String.raw`\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?${TABLE}`, "gi");
-const CREATE_TABLE = new RegExp(
-  String.raw`\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?${TABLE}`,
-  "gi",
-);
-const RENAME_TABLE = new RegExp(
-  String.raw`\bALTER\s+TABLE\s+${TABLE}\s+RENAME\s+TO\s+${TABLE}`,
-  "gi",
-);
-const DROP_COLUMN = new RegExp(
-  String.raw`\bALTER\s+TABLE\s+${TABLE}\s+DROP\s+(?:COLUMN\s+)?${NAME}`,
-  "gi",
-);
-const RENAME_COLUMN = new RegExp(
-  String.raw`\bALTER\s+TABLE\s+${TABLE}\s+RENAME\s+(?:COLUMN\s+)?(?!TO\b)${NAME}\s+TO\s+${NAME}`,
-  "gi",
-);
-// `INSERT INTO copy (columns) SELECT ... FROM source`, within one statement.
-const COPY_ROWS = new RegExp(
-  String.raw`\bINSERT\s+INTO\s+${TABLE}\s*\(([^)]*)\)\s*SELECT\b[^;]*?\bFROM\s+${TABLE}`,
-  "gi",
-);
-
-function scanSqlForRemovals(sql: string): SqlEffect[] {
-  const code = stripComments(sql);
-  const lower = (name: string) => name.toLowerCase();
-
-  const drops = [...code.matchAll(DROP_TABLE)].map((m) => ({ table: lower(m[1]), at: m.index }));
-  const creates = [...code.matchAll(CREATE_TABLE)].map((m) => ({
-    table: lower(m[1]),
-    at: m.index,
-  }));
-  const renames = [...code.matchAll(RENAME_TABLE)].map((m) => ({
-    from: lower(m[1]),
-    to: lower(m[2]),
-    at: m.index,
-  }));
-  const columnRemovals = [...code.matchAll(DROP_COLUMN), ...code.matchAll(RENAME_COLUMN)].map(
-    (m) => ({ table: lower(m[1]), column: lower(m[2]), at: m.index }),
-  );
-  const copies = [...code.matchAll(COPY_ROWS)].map((m) => ({
-    into: lower(m[1]),
-    columns: new Set(
-      m[2]
-        .split(",")
-        .map((column) => lower(column.trim().replace(/^[`"'[]|[`"'\]]$/g, "")))
-        .filter(Boolean),
-    ),
-    from: lower(m[3]),
-    at: m.index,
-  }));
-  const nearestAfter = <T extends { at: number }>(items: T[], at: number) =>
-    items.filter((item) => item.at > at).sort((a, b) => a.at - b.at)[0];
-  const nearestBefore = <T extends { at: number }>(items: T[], at: number) =>
-    items.filter((item) => item.at < at).sort((a, b) => b.at - a.at)[0];
-
-  // A SQLite table rebuild removes a table under its name, then gives the name
-  // back to a copy of its rows. drizzle-kit fills `__new_t` from `t`, drops `t`
-  // and renames the copy onto it. A hand-written rebuild may instead rename `t`
-  // away, create `t` again and fill it from the old one. The rebuilt table keeps
-  // the columns its copy statement names, less any the copy loses before it
-  // takes the name. Changes after that are made to `t` and scanned as such.
-  const effects: SqlEffect[] = [];
-  for (const drop of drops) {
-    const restore = nearestAfter(
-      renames.filter((rename) => rename.to === drop.table),
-      drop.at,
-    );
-    const copy =
-      restore &&
-      nearestBefore(
-        copies.filter((c) => c.into === restore.from && c.from === drop.table),
-        drop.at,
-      );
-    if (!restore || !copy) {
-      effects.push({ kind: "removal", table: drop.table });
-      continue;
-    }
-    const lost = columnRemovals.filter(
-      (removal) =>
-        removal.table === restore.from && removal.at > copy.at && removal.at < restore.at,
-    );
-    const keptColumns = new Set(copy.columns);
-    for (const removal of lost) keptColumns.delete(removal.column);
-    effects.push({ kind: "rebuild", table: drop.table, keptColumns });
-  }
-  for (const rename of renames) {
-    const recreate = nearestAfter(
-      creates.filter((create) => create.table === rename.from),
-      rename.at,
-    );
-    const copy =
-      recreate &&
-      nearestAfter(
-        copies.filter((c) => c.into === rename.from && c.from === rename.to),
-        recreate.at,
-      );
-    effects.push(
-      copy
-        ? { kind: "rebuild", table: rename.from, keptColumns: copy.columns }
-        : { kind: "removal", table: rename.from },
-    );
-  }
-  for (const removal of columnRemovals) {
-    effects.push({ kind: "removal", table: removal.table, column: removal.column });
-  }
-  return effects;
+interface DeclaredObject {
+  table: string;
+  column?: string;
 }
 
-/**
- * Blanks comments and keeps everything else as written. A `--` or `/*` inside
- * a quoted string or identifier is not a comment. A keyword inside a string
- * still matches, which can only make the check stricter.
- */
-function stripComments(sql: string): string {
-  let out = "";
-  let i = 0;
-  while (i < sql.length) {
-    const ch = sql[i];
-    const next = sql[i + 1];
-    if (ch === "-" && next === "-") {
-      const end = sql.indexOf("\n", i);
-      i = end === -1 ? sql.length : end;
-      out += " ";
-    } else if (ch === "/" && next === "*") {
-      const end = sql.indexOf("*/", i + 2);
-      i = end === -1 ? sql.length : end + 2;
-      out += " ";
-    } else if (ch === "'" || ch === '"' || ch === "`" || ch === "[") {
-      const close = ch === "[" ? "]" : ch;
-      let j = i + 1;
-      while (j < sql.length) {
-        if (sql[j] === close) {
-          // A doubled quote escapes itself. Brackets have no escape.
-          if (close !== "]" && sql[j + 1] === close) {
-            j += 2;
-            continue;
-          }
-          break;
-        }
-        j++;
-      }
-      out += sql.slice(i, j + 1);
-      i = j + 1;
-    } else {
-      out += ch;
-      i++;
+function declaredObjects(snapshot: SchemaSnapshot): DeclaredObject[] {
+  return Object.entries(snapshot.tables).flatMap(([table, { columns }]) => [
+    { table },
+    ...Object.keys(columns).map((column) => ({ table, column })),
+  ]);
+}
+
+/** Table name to its column names, all lower-cased, since SQLite matches names case-insensitively. */
+type PhysicalSchema = Map<string, Set<string>>;
+
+function exists(schema: PhysicalSchema, object: DeclaredObject): boolean {
+  const columns = schema.get(object.table.toLowerCase());
+  if (!columns) return false;
+  return object.column === undefined || columns.has(object.column.toLowerCase());
+}
+
+function readSchema(db: Database.Database): PhysicalSchema {
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as {
+    name: string;
+  }[];
+  return new Map(
+    tables.map(({ name }) => {
+      const columns = db.pragma(`table_info("${name.replaceAll('"', '""')}")`) as {
+        name: string;
+      }[];
+      return [name.toLowerCase(), new Set(columns.map((column) => column.name.toLowerCase()))];
+    }),
+  );
+}
+
+// Mirrors drizzle's SQLite migrator, which splits a migration on its
+// breakpoints and runs each piece as one statement.
+function applyMigration(db: Database.Database, migration: MigrationSql): void {
+  for (const statement of migration.sql.split("--> statement-breakpoint")) {
+    try {
+      db.prepare(statement).run();
+    } catch (err) {
+      throw new Error(
+        `migration ${migration.name} failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
-  return out;
 }

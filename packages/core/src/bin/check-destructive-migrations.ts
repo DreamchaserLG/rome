@@ -108,12 +108,14 @@ function main(): number {
   ) as Journal;
   const shippedTags = new Set(shippedJournal.entries.map((entry) => entry.tag));
 
-  const unshippedMigrations: MigrationSql[] = headJournal.entries
-    .filter((entry) => !shippedTags.has(entry.tag))
-    .map((entry) => ({
-      name: entry.tag,
-      sql: readFileSync(join(repoRoot, MIGRATIONS_DIR, `${entry.tag}.sql`), "utf8"),
-    }));
+  // Every migration is read from HEAD. A shipped migration is never edited, so
+  // HEAD's copy is the one the release ran.
+  const migrations: MigrationSql[] = headJournal.entries.map((entry) => ({
+    name: entry.tag,
+    sql: readFileSync(join(repoRoot, MIGRATIONS_DIR, `${entry.tag}.sql`), "utf8"),
+    shipped: shippedTags.has(entry.tag),
+  }));
+  const unshippedCount = migrations.filter((migration) => !migration.shipped).length;
 
   const violations = findDeclaredRemovals({
     shippedSnapshot: JSON.parse(
@@ -122,12 +124,12 @@ function main(): number {
         newestSnapshotPath(listAtRevision(release, `${MIGRATIONS_DIR}/meta`)),
       ),
     ) as SchemaSnapshot,
-    unshippedMigrations,
+    migrations,
   });
 
   if (violations.length === 0) {
     console.log(
-      `check-destructive-migrations: ${unshippedMigrations.length} migration(s) since ${release} keep every object ${release} reads.`,
+      `check-destructive-migrations: ${unshippedCount} migration(s) since ${release} keep every object ${release} reads.`,
     );
     return 0;
   }
@@ -138,7 +140,7 @@ function main(): number {
   );
   for (const violation of violations) {
     const name = violation.column ? `${violation.table}.${violation.column}` : violation.table;
-    console.error(`  ${name} (removed by ${violation.migrations.join(", ")})`);
+    console.error(`  ${name} (removed by ${violation.migration})`);
   }
   console.error(
     "\nFirst ship a release that no longer declares the object and whose migration keeps it\n" +
