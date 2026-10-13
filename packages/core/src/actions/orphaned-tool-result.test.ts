@@ -148,7 +148,7 @@ describe("tool results that finish after their turn", () => {
 
   // A card mounts from the tool_result its turn streams, and a late result
   // streams none, even when it settled before the chat turn finished.
-  it("does not tell the agent a late component was shown", async () => {
+  it("asks in words what a late component would have asked", async () => {
     const pickSlot = recordingAction("pick_slot", {
       execute: async () => ({
         status: "pending_interaction",
@@ -172,7 +172,9 @@ describe("tool results that finish after their turn", () => {
     const prompt = testRome.model.lastPrompt() ?? "";
     expect(prompt).toContain('"calendar" app');
     expect(prompt).toContain("nothing was shown");
+    expect(prompt).toContain("Pick a time slot");
     expect(prompt).not.toContain("has been shown to the guardian");
+    expect(pickSlot.calls).toHaveLength(1);
   });
 
   it("starts no turn for a result that outlived an interrupted turn", async () => {

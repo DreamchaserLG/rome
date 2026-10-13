@@ -833,6 +833,14 @@ interface ForkOpen {
 
 type BuildForkOpenParams = (fork: ForkTurnContext) => ForkOpen;
 
+/** Tells the agent to ask in a plain message what a card it cannot show would have asked. */
+function askInWords(promptText: string): string {
+  return (
+    "Ask the guardian the following as a plain message, then wait for their reply before " +
+    `doing anything else:\n\n${promptText}`
+  );
+}
+
 /** The prompt of the turn that delivers a tool result which finished after its turn ended. */
 function formatOrphanedToolResult(orphan: OrphanedToolResult): string {
   const args = orphan.arguments as { action_name?: unknown } | null | undefined;
@@ -858,10 +866,10 @@ function formatOrphanedToolResult(orphan: OrphanedToolResult): string {
       payload.placeWidget === true)
   ) {
     const app = typeof payload.appId === "string" ? ` from the "${payload.appId}" app` : "";
-    return (
-      `${lead} returned after that turn ended. It asked to show the guardian something${app}, ` +
-      "but nothing was shown and nothing is waiting on it. If it is still needed, run the call again to show it."
-    );
+    const notShown = `${lead} returned after that turn ended. It asked to show the guardian something${app}, but nothing was shown.`;
+    return typeof payload.promptText === "string"
+      ? `${notShown} Do not run it again. ${askInWords(payload.promptText)}`
+      : `${notShown} Continue without it.`;
   }
   // The model saw this call reported as cancelled, so say plainly that it
   // returned. The result itself says what happened, such as a pending approval.
@@ -1268,10 +1276,7 @@ async function openSession(
           // the next turn, exactly like an ordinary clarifying question.
           if (!refs.supportsInteractiveSurface) {
             return {
-              message:
-                "This surface cannot render an interactive UI. Ask the guardian the " +
-                "following as a plain message, then wait for their reply before doing " +
-                `anything else:\n\n${promptText}`,
+              message: `This surface cannot render an interactive UI. ${askInWords(promptText)}`,
             };
           }
           // Webchat: the chat client mounts the component off this tool_result
@@ -1282,6 +1287,8 @@ async function openSession(
             pendingInteraction: true,
             appId,
             render,
+            // For a late result, whose card is never shown.
+            promptText,
             message:
               `The "${render.componentId}" component has been shown to the guardian. It asks them to: ${promptText} ` +
               `Their response will arrive as the next turn's prompt — do not call any further tools ` +
@@ -1296,10 +1303,7 @@ async function openSession(
           // as prose, same as above.
           if (!refs.supportsInteractiveSurface) {
             return {
-              message:
-                "This surface cannot render an interactive UI. Ask the guardian the " +
-                "following as a plain message, then wait for their reply before doing " +
-                `anything else:\n\n${promptText}`,
+              message: `This surface cannot render an interactive UI. ${askInWords(promptText)}`,
             };
           }
           // Webchat: the drain loop persists a handoff card keyed by toolUseId and
@@ -1314,6 +1318,8 @@ async function openSession(
             payload,
             handback,
             handbackHint,
+            // For a late result, whose card is never shown.
+            promptText,
             message:
               `Control has been handed off to the "${appId}" surface. ` +
               `The guardian will work there and the outcome (the handed-back artifact, or a dismissal) will arrive as a new turn. ` +
