@@ -26,6 +26,7 @@ const PeopleIndexRedirect = lazy(() =>
   import("./pages/PeoplePage").then((m) => ({ default: m.PeopleIndexRedirect })),
 );
 const PersonDetailPage = lazy(() => import("./pages/PersonDetailPage"));
+const OutreachPage = lazy(() => import("./pages/outreach/OutreachPage"));
 const MemoryPage = lazy(() => import("./pages/MemoryPage"));
 const ProjectsPage = lazy(() => import("./pages/ProjectsPage"));
 const RoutinesPage = lazy(() => import("./pages/RoutinesPage"));
@@ -154,6 +155,7 @@ export default function App() {
             <Route path="/people/latest" element={<PeoplePage view="latest" />} />
             <Route path="/people/directory" element={<PeoplePage view="directory" />} />
             <Route path="/people/person/:personId" element={<PersonDetailPage />} />
+            <Route path="/outreach/*" element={<OutreachPage />} />
             <Route path="/memory/*" element={<MemoryPage />} />
             <Route path="/projects/*" element={<ProjectsPage />} />
             <Route path="/sessions/*" element={<SessionsPage />} />

@@ -1,0 +1,112 @@
+{
+  "loading": "Loading…",
+  "chatCount_one": "{{count}} chat",
+  "chatCount_other": "{{count}} chats",
+  "access": {
+    "read": "Read only",
+    "write": "Read and write"
+  },
+  "tabs": {
+    "overview": "Overview",
+    "chats": "Chats",
+    "activity": "Activity",
+    "settings": "Settings"
+  },
+  "index": {
+    "title": "Outreach",
+    "description": "Agents people can reach from a chat app, through a bot that answers as each one.",
+    "add": "Add an agent",
+    "emptyTitle": "No outreach agents",
+    "emptyBody": "An agent appears here once it has a bot. Add an agent to give it a Feishu bot."
+  },
+  "add": {
+    "title": "Add an agent",
+    "description": "Pick the agent people should reach. Next, you give it a Feishu bot.",
+    "search": "Search agents",
+    "noMatch": "No agent matches.",
+    "footnote_one": "{{count}} agent has no bot. Agents are created and edited in Apps.",
+    "footnote_other": "{{count}} agents have no bot. Agents are created and edited in Apps."
+  },
+  "newBot": {
+    "title": "Give {{agent}} a Feishu bot",
+    "description": "The bot answers as {{agent}}. You can point it at another agent later.",
+    "name": "Bot name in Feishu",
+    "nameHint": "People see this name in groups and @mention it.",
+    "region": "Region",
+    "regionFeishu": "Feishu (China)",
+    "regionLark": "Lark (international)",
+    "showQr": "Show QR code",
+    "qrPlaceholder": "The QR code appears here.",
+    "qrAlt": "QR code for the Feishu app",
+    "scanTitle": "Scan with the Feishu app",
+    "scanBody": "Feishu creates the {{bot}} bot in your workspace and hands it to Rome.",
+    "waiting": "Waiting for the scan"
+  },
+  "agent": {
+    "missing": "No such agent"
+  },
+  "overview": {
+    "bots": "Bots",
+    "botsBody": "These bots answer as {{agent}}. Each one also shows in Connections.",
+    "noBots": "{{agent}} has no bot yet. Give it a Feishu bot, then invite the bot to any group or DM.",
+    "botStats": "{{groups}} groups, {{dms}} DMs",
+    "since": "since",
+    "connected": "Connected",
+    "inviteTitle": "Invite {{bot}} in Feishu.",
+    "inviteBody": "Open a group, then Settings, Group bots, Add bot, and pick {{bot}}. To start a DM, search for {{bot}} in Feishu. Chats appear here on their own.",
+    "seeChats": "See chats",
+    "addBot": "Add a bot",
+    "addToFeishu": "Add to Feishu",
+    "uses": "What it can use",
+    "model": "Model",
+    "tools": "Tools",
+    "folders": "Folders",
+    "wholeWorkspace": "Whole workspace"
+  },
+  "chats": {
+    "groups": "Groups",
+    "dms": "DMs",
+    "members_one": "{{count}} member",
+    "members_other": "{{count}} members",
+    "alsoHere": "Also {{bot}}",
+    "addedBy": "added by {{name}}",
+    "emptyTitle": "No chats yet"
+  },
+  "chat": {
+    "groupMeta_one": "Group · {{count}} member · added by {{name}}",
+    "groupMeta_other": "Group · {{count}} members · added by {{name}}",
+    "dmMeta": "DM · started by {{name}}",
+    "botsHere": "Bots here: {{bots}}",
+    "leave": "Leave group",
+    "shared_one": "{{bots}} is in this chat too. Rome keeps one history for it, so every agent here reads the same messages.",
+    "shared_other": "{{bots}} are in this chat too. Rome keeps one history for it, so every agent here reads the same messages.",
+    "settings": "Chat settings: answers when @mentioned · replies in thread"
+  },
+  "activity": {
+    "description": "What was said to and by {{agent}} across its chats, newest first.",
+    "view": "Activity view",
+    "byChat": "By chat",
+    "timeline": "Timeline",
+    "counts": "{{asked}} asked, {{said}} answered",
+    "lastSaid": "Last said:",
+    "inChat": "in {{chat}}",
+    "emptyTitle": "No activity yet"
+  },
+  "settings": {
+    "chats": "Chats",
+    "readOthers": "Can read its other chats",
+    "readOthersBody": "When off, {{agent}} only sees the chat it is answering in.",
+    "introduce": "Introduce itself when added to a group",
+    "introduceBody": "Posts one short hello with what it can help with.",
+    "bots": "Bots",
+    "botsBody": "Answers as sets the agent a bot speaks for. Groups cannot override it.",
+    "answersAs": "Answers as",
+    "moveConfirm_one": "Move {{bot}} to {{to}}? From now on {{to}} answers in its {{count}} chat. The chat and its history stay as they are.",
+    "moveConfirm_other": "Move {{bot}} to {{to}}? From now on {{to}} answers in its {{count}} chats. The chats and their history stay as they are.",
+    "move": "Move bot",
+    "cancel": "Cancel",
+    "removeBot": "Remove bot",
+    "foldersBody": "Limits which files the agent can read or write. Shell access is off for agents with folders.",
+    "noFolders": "No folders. This agent sees the whole workspace."
+  }
+}

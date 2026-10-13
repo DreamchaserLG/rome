@@ -46,6 +46,7 @@ import { connections } from "./connections-store";
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
 import { memoryFileHandlers } from "./memory-files";
 import { peopleHandlers } from "./people-api";
+import { outreachHandlers } from "./outreach";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
 import { settingsHandlers } from "./settings";
@@ -1283,6 +1284,7 @@ export const handlers = [
   ...appHandlers,
   ...activityHandlers,
   ...peopleHandlers,
+  ...outreachHandlers,
   ...routineHandlers,
   // The session inventory behind /sessions/all, over the same four seeded
   // chats the conversation routes serve — one inventory row per chat, its run

@@ -1,0 +1,112 @@
+{
+  "loading": "加载中…",
+  "chatCount_one": "{{count}} 个聊天",
+  "chatCount_other": "{{count}} 个聊天",
+  "access": {
+    "read": "只读",
+    "write": "可读写"
+  },
+  "tabs": {
+    "overview": "概览",
+    "chats": "聊天",
+    "activity": "动态",
+    "settings": "设置"
+  },
+  "index": {
+    "title": "外联",
+    "description": "人们可以在聊天应用中找到的智能体，每个都通过一个代表它回答的机器人。",
+    "add": "添加智能体",
+    "emptyTitle": "还没有外联智能体",
+    "emptyBody": "智能体有了机器人后会出现在这里。添加一个智能体，为它创建飞书机器人。"
+  },
+  "add": {
+    "title": "添加智能体",
+    "description": "选择人们要找的智能体，下一步为它创建飞书机器人。",
+    "search": "搜索智能体",
+    "noMatch": "没有匹配的智能体。",
+    "footnote_one": "{{count}} 个智能体没有机器人。智能体在应用中创建和编辑。",
+    "footnote_other": "{{count}} 个智能体没有机器人。智能体在应用中创建和编辑。"
+  },
+  "newBot": {
+    "title": "为 {{agent}} 创建飞书机器人",
+    "description": "机器人以 {{agent}} 的身份回答。之后可以改为其他智能体。",
+    "name": "飞书中的机器人名称",
+    "nameHint": "人们在群里看到并 @ 这个名称。",
+    "region": "区域",
+    "regionFeishu": "飞书（中国）",
+    "regionLark": "Lark（国际）",
+    "showQr": "显示二维码",
+    "qrPlaceholder": "二维码显示在这里。",
+    "qrAlt": "飞书应用扫码二维码",
+    "scanTitle": "用飞书应用扫码",
+    "scanBody": "飞书会在你的企业中创建 {{bot}} 机器人并交给 Rome。",
+    "waiting": "等待扫码"
+  },
+  "agent": {
+    "missing": "没有这个智能体"
+  },
+  "overview": {
+    "bots": "机器人",
+    "botsBody": "这些机器人以 {{agent}} 的身份回答，也会显示在连接中。",
+    "noBots": "{{agent}} 还没有机器人。为它创建飞书机器人，然后把机器人邀请进任意群或私聊。",
+    "botStats": "{{groups}} 个群，{{dms}} 个私聊",
+    "since": "始于",
+    "connected": "已连接",
+    "inviteTitle": "在飞书中邀请 {{bot}}。",
+    "inviteBody": "打开一个群，进入设置、群机器人、添加机器人，选择 {{bot}}。要发起私聊，在飞书中搜索 {{bot}}。聊天会自动出现在这里。",
+    "seeChats": "查看聊天",
+    "addBot": "添加机器人",
+    "addToFeishu": "添加到飞书",
+    "uses": "可使用的能力",
+    "model": "模型",
+    "tools": "工具",
+    "folders": "文件夹",
+    "wholeWorkspace": "整个工作区"
+  },
+  "chats": {
+    "groups": "群聊",
+    "dms": "私聊",
+    "members_one": "{{count}} 位成员",
+    "members_other": "{{count}} 位成员",
+    "alsoHere": "还有 {{bot}}",
+    "addedBy": "由 {{name}} 添加",
+    "emptyTitle": "还没有聊天"
+  },
+  "chat": {
+    "groupMeta_one": "群聊 · {{count}} 位成员 · 由 {{name}} 添加",
+    "groupMeta_other": "群聊 · {{count}} 位成员 · 由 {{name}} 添加",
+    "dmMeta": "私聊 · 由 {{name}} 发起",
+    "botsHere": "群内机器人：{{bots}}",
+    "leave": "退出群聊",
+    "shared_one": "{{bots}} 也在这个聊天中。Rome 只保存一份记录，这里的每个智能体读到的消息相同。",
+    "shared_other": "{{bots}} 也在这个聊天中。Rome 只保存一份记录，这里的每个智能体读到的消息相同。",
+    "settings": "聊天设置：被 @ 时回答 · 在话题中回复"
+  },
+  "activity": {
+    "description": "{{agent}} 在各个聊天中收到和发出的消息，最新的在前。",
+    "view": "动态视图",
+    "byChat": "按聊天",
+    "timeline": "时间线",
+    "counts": "{{asked}} 条提问，{{said}} 条回答",
+    "lastSaid": "最近回复：",
+    "inChat": "在 {{chat}}",
+    "emptyTitle": "还没有动态"
+  },
+  "settings": {
+    "chats": "聊天",
+    "readOthers": "可以读取它的其他聊天",
+    "readOthersBody": "关闭后，{{agent}} 只能看到它正在回答的聊天。",
+    "introduce": "被加入群聊时自我介绍",
+    "introduceBody": "发一条简短的问候，说明它能帮什么忙。",
+    "bots": "机器人",
+    "botsBody": "“回答身份”决定机器人代表哪个智能体，群聊不能更改。",
+    "answersAs": "回答身份",
+    "moveConfirm_one": "把 {{bot}} 移到 {{to}}？此后由 {{to}} 在它的 {{count}} 个聊天中回答，聊天和记录保持不变。",
+    "moveConfirm_other": "把 {{bot}} 移到 {{to}}？此后由 {{to}} 在它的 {{count}} 个聊天中回答，聊天和记录保持不变。",
+    "move": "移动机器人",
+    "cancel": "取消",
+    "removeBot": "移除机器人",
+    "foldersBody": "限制智能体可以读写的文件。有文件夹的智能体不能使用终端。",
+    "noFolders": "没有文件夹。这个智能体可以看到整个工作区。"
+  }
+}

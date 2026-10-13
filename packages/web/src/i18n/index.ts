@@ -11,6 +11,7 @@ import enRoutines from "./locales/en/routines.json";
 import enFiles from "./locales/en/files.json";
 import enInbox from "./locales/en/inbox.json";
 import enOnboard from "./locales/en/onboard.json";
+import enOutreach from "./locales/en/outreach.json";
 import enPeople from "./locales/en/people.json";
 import enSettings from "./locales/en/settings.json";
 import zhActivity from "./locales/zh-CN/activity.json";
@@ -22,6 +23,7 @@ import zhRoutines from "./locales/zh-CN/routines.json";
 import zhFiles from "./locales/zh-CN/files.json";
 import zhInbox from "./locales/zh-CN/inbox.json";
 import zhOnboard from "./locales/zh-CN/onboard.json";
+import zhOutreach from "./locales/zh-CN/outreach.json";
 import zhPeople from "./locales/zh-CN/people.json";
 import zhSettings from "./locales/zh-CN/settings.json";
 
@@ -62,6 +64,7 @@ export const resources = {
     activity: enActivity,
     routines: enRoutines,
     chat: enChat,
+    outreach: enOutreach,
     people: enPeople,
     apps: enApps,
     files: enFiles,
@@ -75,6 +78,7 @@ export const resources = {
     activity: zhActivity,
     routines: zhRoutines,
     chat: zhChat,
+    outreach: zhOutreach,
     people: zhPeople,
     apps: zhApps,
     files: zhFiles,
