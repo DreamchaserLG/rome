@@ -6,8 +6,11 @@ import { Hono } from "hono";
 import {
   createFileGetHandler,
   createFileWatchEventsHandler,
+  createFileWatchHub,
   createResolveHandler,
   type FileBrowserScope,
+  type FileWatchHub,
+  subscribeFileWatchEvents,
 } from "./file-browser-server.js";
 
 // File watch streams over real chokidar on a real temp directory (edge-only
@@ -34,6 +37,7 @@ function parseSseChunk(chunk: string): SseEvent[] {
 
 describe("file browser event streams", () => {
   let rootDir = "";
+  let hub: FileWatchHub;
   let handler: ReturnType<typeof createFileWatchEventsHandler>;
   let savedUsePolling: string | undefined;
 
@@ -48,11 +52,12 @@ describe("file browser event streams", () => {
     // tests fake — force native watching regardless of the ambient env.
     process.env.CHOKIDAR_USEPOLLING = "0";
     rootDir = mkdtempSync(join(tmpdir(), "rome-file-watch-"));
-    handler = createFileWatchEventsHandler({
+    hub = createFileWatchHub({
       assetBasePath: "/asset",
       logicalRoot: "projects",
       rootDir,
     });
+    handler = createFileWatchEventsHandler(hub);
   });
 
   afterEach(() => {
@@ -62,10 +67,12 @@ describe("file browser event streams", () => {
     rmSync(rootDir, { recursive: true, force: true });
   });
 
-  function openEventStream(signal = new AbortController().signal): {
+  function openEventStream(
+    signal = new AbortController().signal,
+    url = "http://localhost/projects/events",
+  ): {
     reader: ReadableStreamDefaultReader<Uint8Array>;
   } {
-    const url = "http://localhost/projects/events";
     const response = handler({
       req: { raw: new Request(url, { signal }), url },
     } as Parameters<typeof handler>[0]) as Response;
@@ -198,6 +205,40 @@ describe("file browser event streams", () => {
     // No heartbeat survives the abort.
     await rs.advanceTimersByTimeAsync(120_000);
     await expect(reader.read()).resolves.toMatchObject({ done: true });
+  });
+
+  it("shares one watcher between a route stream and a socket subscriber on the same paths", async () => {
+    mkdirSync(join(rootDir, "a"));
+    const { reader } = openEventStream(
+      undefined,
+      "http://localhost/projects/events?watch=projects/a",
+    );
+    await expect(readSseChunk(reader)).resolves.toContain("event: ready");
+
+    const socketEvents: Array<{ event: string; data: unknown }> = [];
+    const release = subscribeFileWatchEvents(
+      hub,
+      ["projects/a"],
+      (event, data) => socketEvents.push({ event, data }),
+      () => {},
+    );
+    await rs.waitFor(() => expect(socketEvents.map((e) => e.event)).toEqual(["ready"]));
+    expect(hub.watcherCount()).toBe(1);
+
+    writeFileSync(join(rootDir, "a", "shared.txt"), "hi\n");
+    const seen = await readUntilEvent(reader, "change");
+    expect(JSON.parse(seen.at(-1)!.data).path).toBe("projects/a/shared.txt");
+    await rs.waitFor(() =>
+      expect(socketEvents.at(-1)).toMatchObject({
+        event: "change",
+        data: { kind: "add", logicalRoot: "projects", path: "projects/a/shared.txt" },
+      }),
+    );
+
+    release();
+    expect(hub.watcherCount()).toBe(1);
+    await reader.cancel();
+    await rs.waitFor(() => expect(hub.watcherCount()).toBe(0));
   });
 
   it("ends the stream when the request aborts before the watcher is ready", async () => {

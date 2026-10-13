@@ -1,11 +1,12 @@
 import { useEffect, useRef } from "react";
 import { z } from "zod";
+import { useLiveEvents } from "@/hooks/use-live-events";
 import { useSseEvents } from "@/hooks/use-sse-events";
 import { useFileBrowserStoreApi } from "../store/context";
 import {
   createFileBrowserEventsUrl,
   getAbsentDeletedWatchPaths,
-  getFileBrowserWatchPaths,
+  getFileBrowserWatchTopic,
   shouldReloadSelectedWatchFile,
   type FileBrowserWatchEvent,
   type FileBrowserWatchPathExists,
@@ -25,14 +26,18 @@ const fileWatchReadySchema = z.object({
 });
 
 /**
- * SSE reconciler. Subscribes to `/events` with the currently expanded watch
- * paths and replays mutations into the tree + selected file. Self-originated
- * writes (writes we initiated ourselves via the file slice) are suppressed
- * for ≤3 events / 5 s so our own saves don't trigger a reload race.
+ * Watch reconciler. Watches `watchPaths` over the tab's live-events socket,
+ * or the `/events` route where the API has no topic, and replays mutations
+ * into the tree + selected file. Every `ready`, including the one after a
+ * reconnect, rebaselines. Self-originated writes (writes we initiated
+ * ourselves via the file slice) are suppressed for ≤3 events / 5 s so our own
+ * saves don't trigger a reload race.
  */
-export function useFileBrowserWatch(opts: { watchEventsUrl: string }) {
+export function useFileBrowserWatch(opts: { apiBasePath: string; watchPaths: string[] }) {
   const store = useFileBrowserStoreApi();
-  const { watchEventsUrl } = opts;
+  const { apiBasePath, watchPaths } = opts;
+  const watchEventsUrl = createFileBrowserEventsUrl(apiBasePath, watchPaths);
+  const watchTopic = getFileBrowserWatchTopic(apiBasePath, watchPaths);
   const changeHandlerRef = useRef<(event: FileBrowserWatchEvent) => void>(() => {});
   const readyHandlerRef = useRef<(event: z.infer<typeof fileWatchReadySchema>) => void>(() => {});
 
@@ -198,14 +203,20 @@ export function useFileBrowserWatch(opts: { watchEventsUrl: string }) {
     };
   }, [store, watchEventsUrl]);
 
-  useSseEvents(watchEventsUrl, {
+  const handlers = {
     change: {
       schema: fileWatchChangeSchema,
-      fn: (event) => changeHandlerRef.current(event),
+      fn: (event: FileBrowserWatchEvent) => changeHandlerRef.current(event),
     },
     ready: {
       schema: fileWatchReadySchema,
-      fn: (event) => readyHandlerRef.current(event),
+      fn: (event: z.infer<typeof fileWatchReadySchema>) => readyHandlerRef.current(event),
     },
-  });
+  };
+  useLiveEvents(
+    { topic: watchTopic?.topic ?? "", params: watchTopic?.params, sseUrl: watchEventsUrl },
+    handlers,
+    { enabled: watchTopic !== null },
+  );
+  useSseEvents(watchEventsUrl, handlers, { enabled: watchTopic === null });
 }
