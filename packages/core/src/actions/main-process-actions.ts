@@ -21,13 +21,14 @@ export const MAIN_PROCESS_ACTION_IDS: ReadonlySet<string> = new Set([
  * its registry metadata names the owner that the allowlisted canonical id
  * names, so another app's action with the same local name never matches.
  */
-export function createRunsRootInMain(
-  registry: { getMetadata(name: string): ArtifactMetadata | undefined },
-  ids: ReadonlySet<string> = MAIN_PROCESS_ACTION_IDS,
-): (actionName: string) => boolean {
+export function createRunsRootInMain(registry: {
+  getMetadata(name: string): ArtifactMetadata | undefined;
+}): (actionName: string) => boolean {
   return (actionName) => {
     const metadata = registry.getMetadata(actionName);
     if (metadata?.ownerType !== "app") return false;
-    return ids.has(formatArtifactId(metadata.ownerId, artifactLocalName(actionName)));
+    return MAIN_PROCESS_ACTION_IDS.has(
+      formatArtifactId(metadata.ownerId, artifactLocalName(actionName)),
+    );
   };
 }
