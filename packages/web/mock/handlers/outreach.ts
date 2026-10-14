@@ -41,7 +41,7 @@ const day = (d: number, hh: number, mm: number) =>
 const agents: OutreachAgent[] = [
   {
     name: "main",
-    description: "Your everyday assistant. Answers you in Chat and through the Rome bot.",
+    description: "Your everyday assistant. Answers you in Chat and through the Rome account.",
     model: "Large",
     tools: ["Read", "Write", "Bash", "WebSearch"],
     folders: [],
@@ -182,7 +182,7 @@ let chats: StoredChat[] = [
       botSay(
         day(13, 10, 7),
         "cli_writer",
-        "Draft: “Rome agents now join your Feishu groups. Give an agent its own bot, invite it like a teammate, and @mention it when you need it.”",
+        "Draft: “Rome agents now join your Feishu groups. Give an agent its own account, invite it like a teammate, and @mention it when you need it.”",
       ),
     ],
   },
@@ -386,7 +386,7 @@ export const outreachHandlers = [
     const at = new Date().toISOString();
     for (const c of chats) {
       if (c.botIds.includes(b.id)) {
-        c.entries = [...c.entries, ev(at, `${b.name} now answers as ${answersAs} (was ${from})`)];
+        c.entries = [...c.entries, ev(at, `${b.name} is now linked to ${answersAs} (was ${from})`)];
       }
     }
     return HttpResponse.json(toBot(b));

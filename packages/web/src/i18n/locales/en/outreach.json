@@ -14,23 +14,23 @@
   },
   "index": {
     "title": "Outreach",
-    "description": "Agents people can reach from a chat app, through a bot that answers as each one.",
+    "description": "Agents people can reach from a chat app, each through its own linked account.",
     "add": "Add an agent",
     "emptyTitle": "No outreach agents",
-    "emptyBody": "An agent appears here once it has a bot. Add an agent to give it a Feishu bot."
+    "emptyBody": "An agent appears here once it has a linked account. Add an agent to give it a Feishu account."
   },
   "add": {
     "title": "Add an agent",
-    "description": "Pick the agent people should reach. Next, you give it a Feishu bot.",
+    "description": "Pick the agent people should reach. Next, you give it a Feishu account.",
     "search": "Search agents",
     "noMatch": "No agent matches.",
-    "footnote_one": "{{count}} agent has no bot. Agents are created and edited in Apps.",
-    "footnote_other": "{{count}} agents have no bot. Agents are created and edited in Apps."
+    "footnote_one": "{{count}} agent has no linked account. Agents are created and edited in Apps.",
+    "footnote_other": "{{count}} agents have no linked account. Agents are created and edited in Apps."
   },
   "newBot": {
-    "title": "Give {{agent}} a Feishu bot",
-    "description": "The bot answers as {{agent}}. You can point it at another agent later.",
-    "name": "Bot name in Feishu",
+    "title": "Give {{agent}} a Feishu account",
+    "description": "The account is linked to {{agent}}. You can link it to another agent later.",
+    "name": "Account name in Feishu",
     "nameHint": "People see this name in groups and @mention it.",
     "region": "Region",
     "regionFeishu": "Feishu (China)",
@@ -39,23 +39,23 @@
     "qrPlaceholder": "The QR code appears here.",
     "qrAlt": "QR code for the Feishu app",
     "scanTitle": "Scan with the Feishu app",
-    "scanBody": "Feishu creates the {{bot}} bot in your workspace and hands it to Rome.",
+    "scanBody": "Feishu creates the {{bot}} account in your workspace and links it to Rome.",
     "waiting": "Waiting for the scan"
   },
   "agent": {
     "missing": "No such agent"
   },
   "overview": {
-    "bots": "Bots",
-    "botsBody": "These bots answer as {{agent}}. Each one also shows in Connections.",
-    "noBots": "{{agent}} has no bot yet. Give it a Feishu bot, then invite the bot to any group or DM.",
+    "bots": "Linked accounts",
+    "botsBody": "{{agent}} speaks through these accounts. Each one also shows in Connections.",
+    "noBots": "{{agent}} has no linked account yet. Give it a Feishu account, then invite it to any group or DM.",
     "botStats": "{{groups}} groups, {{dms}} DMs",
     "since": "since",
     "connected": "Connected",
     "inviteTitle": "Invite {{bot}} in Feishu.",
     "inviteBody": "Open a group, then Settings, Group bots, Add bot, and pick {{bot}}. To start a DM, search for {{bot}} in Feishu. Chats appear here on their own.",
     "seeChats": "See chats",
-    "addBot": "Add a bot",
+    "addBot": "Add an account",
     "addToFeishu": "Add to Feishu",
     "uses": "What it can use",
     "model": "Model",
@@ -76,7 +76,7 @@
     "groupMeta_one": "Group · {{count}} member · added by {{name}}",
     "groupMeta_other": "Group · {{count}} members · added by {{name}}",
     "dmMeta": "DM · started by {{name}}",
-    "botsHere": "Bots here: {{bots}}",
+    "botsHere": "Linked accounts here: {{bots}}",
     "shared_one": "{{bots}} is in this chat too. Rome keeps one history for it, so every agent here reads the same messages.",
     "shared_other": "{{bots}} are in this chat too. Rome keeps one history for it, so every agent here reads the same messages.",
     "settings": "Chat settings: answers when @mentioned · replies in thread"
@@ -97,14 +97,14 @@
     "readOthersBody": "When off, {{agent}} only sees the chat it is answering in.",
     "introduce": "Introduce itself when added to a group",
     "introduceBody": "Posts one short hello with what it can help with.",
-    "bots": "Bots",
-    "botsBody": "Answers as sets the agent a bot speaks for. Groups cannot override it.",
-    "answersAs": "Answers as",
-    "moveConfirm_one": "Move {{bot}} to {{to}}? From now on {{to}} answers in its {{count}} chat. The chat and its history stay as they are.",
-    "moveConfirm_other": "Move {{bot}} to {{to}}? From now on {{to}} answers in its {{count}} chats. The chats and their history stay as they are.",
-    "move": "Move bot",
+    "bots": "Linked accounts",
+    "botsBody": "Linked agent sets which agent speaks through an account. Chats cannot change it.",
+    "answersAs": "Linked agent",
+    "moveConfirm_one": "Link {{bot}} to {{to}}? From now on {{to}} answers in its {{count}} chat. The chat and its history stay as they are.",
+    "moveConfirm_other": "Link {{bot}} to {{to}}? From now on {{to}} answers in its {{count}} chats. The chats and their history stay as they are.",
+    "move": "Change agent",
     "cancel": "Cancel",
-    "removeBot": "Remove bot",
+    "removeBot": "Remove account",
     "foldersBody": "Limits which files the agent can read or write. Shell access is off for agents with folders.",
     "noFolders": "No folders. This agent sees the whole workspace."
   }

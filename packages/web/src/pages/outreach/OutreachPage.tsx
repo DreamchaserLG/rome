@@ -74,7 +74,7 @@ import {
 /**
  * Outreach: the agents that people can reach from a chat app.
  *
- * Rome may have many agents; only the ones a bot answers as are listed here.
+ * Rome may have many agents; only the ones with a linked account are listed here.
  * Each such agent has an Overview (its bots and what it can use), its Chats
  * (every group and DM one of its bots is in), Activity across those chats, and
  * Settings. A chat is stored once, so a group that holds two of the guardian's
