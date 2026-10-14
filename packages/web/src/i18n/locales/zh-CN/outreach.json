@@ -2,10 +2,6 @@
   "loading": "加载中…",
   "chatCount_one": "{{count}} 个聊天",
   "chatCount_other": "{{count}} 个聊天",
-  "access": {
-    "read": "只读",
-    "write": "可读写"
-  },
   "tabs": {
     "overview": "概览",
     "chats": "聊天",
@@ -55,12 +51,7 @@
     "inviteBody": "打开一个群，进入设置、群机器人、添加机器人，选择 {{bot}}。要发起私聊，在飞书中搜索 {{bot}}。聊天会自动出现在这里。",
     "seeChats": "查看聊天",
     "addBot": "添加账号",
-    "addToFeishu": "添加到飞书",
-    "uses": "可使用的能力",
-    "model": "模型",
-    "tools": "工具",
-    "folders": "文件夹",
-    "wholeWorkspace": "整个工作区"
+    "addToFeishu": "添加到飞书"
   },
   "chats": {
     "groups": "群聊",
@@ -92,8 +83,6 @@
   },
   "settings": {
     "chats": "聊天",
-    "readOthers": "可以读取它的其他聊天",
-    "readOthersBody": "关闭后，{{agent}} 只能看到它正在回答的聊天。",
     "introduce": "被加入群聊时自我介绍",
     "introduceBody": "发一条简短的问候，说明它能帮什么忙。",
     "bots": "关联账号",
@@ -102,8 +91,6 @@
     "moveConfirm_other": "把 {{bot}} 关联到 {{to}}？此后由 {{to}} 在它的 {{count}} 个聊天中回答，聊天和记录保持不变。",
     "move": "更改智能体",
     "cancel": "取消",
-    "removeBot": "移除账号",
-    "foldersBody": "限制智能体可以读写的文件。有文件夹的智能体不能使用终端。",
-    "noFolders": "没有文件夹。这个智能体可以看到整个工作区。"
+    "removeBot": "移除账号"
   }
 }

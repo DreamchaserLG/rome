@@ -10,7 +10,7 @@ import {
 } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Folder, MessagesSquare, Search, Users } from "lucide-react";
+import { ArrowLeft, MessagesSquare, Search, Users } from "lucide-react";
 import {
   Page,
   PageActions,
@@ -428,7 +428,7 @@ function AgentPage() {
 function Overview({ agent }: { agent: OutreachAgentSummary }) {
   const { t } = useTranslation("outreach");
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
+    <div className="grid gap-6">
       <Card>
         <CardHeader>
           <CardTitle>{t("overview.bots")}</CardTitle>
@@ -475,39 +475,6 @@ function Overview({ agent }: { agent: OutreachAgentSummary }) {
               </Link>
             </Button>
           </div>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("overview.uses")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-3 text-ui">
-            <dt className="text-muted-foreground">{t("overview.model")}</dt>
-            <dd>{agent.model}</dd>
-            <dt className="text-muted-foreground">{t("overview.tools")}</dt>
-            <dd className="flex flex-wrap gap-1">
-              {agent.tools.map((x) => (
-                <Badge key={x} variant="muted" shape="square">
-                  {x}
-                </Badge>
-              ))}
-            </dd>
-            <dt className="text-muted-foreground">{t("overview.folders")}</dt>
-            <dd className="flex flex-col gap-1">
-              {agent.folders.length === 0
-                ? t("overview.wholeWorkspace")
-                : agent.folders.map((f) => (
-                    <span key={f.path} className="flex items-center gap-2">
-                      <Folder className="size-4 text-muted-foreground" aria-hidden="true" />
-                      <code className="text-code">{f.path}</code>
-                      <span className="text-aux text-muted-foreground">
-                        {t(`access.${f.access}`)}
-                      </span>
-                    </span>
-                  ))}
-            </dd>
-          </dl>
         </CardContent>
       </Card>
     </div>
@@ -810,12 +777,6 @@ function Settings({ agent }: { agent: OutreachAgentSummary }) {
         </CardHeader>
         <CardContent className="divide-y divide-border-subtle">
           {toggle(
-            t("settings.readOthers"),
-            t("settings.readOthersBody", { agent: agent.name }),
-            agent.canReadOtherChats,
-            (v) => update.mutate({ canReadOtherChats: v }),
-          )}
-          {toggle(
             t("settings.introduce"),
             t("settings.introduceBody"),
             agent.introduceOnJoin,
@@ -901,22 +862,6 @@ function Settings({ agent }: { agent: OutreachAgentSummary }) {
               </div>
             );
           })}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("overview.folders")}</CardTitle>
-          <CardDescription>
-            {agent.folders.length ? t("settings.foldersBody") : t("settings.noFolders")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2 text-ui">
-          {agent.folders.map((f) => (
-            <div key={f.path} className="flex items-center gap-2">
-              <code className="flex-1 text-code">{f.path}</code>
-              <span className="text-aux text-muted-foreground">{t(`access.${f.access}`)}</span>
-            </div>
-          ))}
         </CardContent>
       </Card>
     </div>
