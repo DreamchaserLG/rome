@@ -432,11 +432,9 @@ function Overview({ agent }: { agent: OutreachAgentSummary }) {
       <Card>
         <CardHeader>
           <CardTitle>{t("overview.bots")}</CardTitle>
-          <CardDescription>
-            {agent.bots.length
-              ? t("overview.botsBody", { agent: agent.name })
-              : t("overview.noBots", { agent: agent.name })}
-          </CardDescription>
+          {agent.bots.length === 0 && (
+            <CardDescription>{t("overview.noBots", { agent: agent.name })}</CardDescription>
+          )}
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {agent.bots.length > 0 && (
@@ -828,7 +826,6 @@ function Settings({ agent }: { agent: OutreachAgentSummary }) {
       <Card>
         <CardHeader>
           <CardTitle>{t("settings.bots")}</CardTitle>
-          <CardDescription>{t("settings.botsBody")}</CardDescription>
         </CardHeader>
         <CardContent className="divide-y divide-border-subtle">
           {agent.bots.map((b) => {

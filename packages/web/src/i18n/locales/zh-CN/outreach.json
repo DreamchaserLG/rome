@@ -47,7 +47,6 @@
   },
   "overview": {
     "bots": "关联账号",
-    "botsBody": "{{agent}} 通过这些账号发言，它们也会显示在连接中。",
     "noBots": "{{agent}} 还没有关联账号。为它创建飞书账号，然后邀请进任意群或私聊。",
     "botStats": "{{groups}} 个群，{{dms}} 个私聊",
     "since": "始于",
@@ -98,7 +97,6 @@
     "introduce": "被加入群聊时自我介绍",
     "introduceBody": "发一条简短的问候，说明它能帮什么忙。",
     "bots": "关联账号",
-    "botsBody": "“关联智能体”决定通过账号发言的是哪个智能体，聊天不能更改。",
     "answersAs": "关联智能体",
     "moveConfirm_one": "把 {{bot}} 关联到 {{to}}？此后由 {{to}} 在它的 {{count}} 个聊天中回答，聊天和记录保持不变。",
     "moveConfirm_other": "把 {{bot}} 关联到 {{to}}？此后由 {{to}} 在它的 {{count}} 个聊天中回答，聊天和记录保持不变。",

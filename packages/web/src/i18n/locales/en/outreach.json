@@ -47,7 +47,6 @@
   },
   "overview": {
     "bots": "Linked accounts",
-    "botsBody": "{{agent}} speaks through these accounts. Each one also shows in Connections.",
     "noBots": "{{agent}} has no linked account yet. Give it a Feishu account, then invite it to any group or DM.",
     "botStats": "{{groups}} groups, {{dms}} DMs",
     "since": "since",
@@ -98,7 +97,6 @@
     "introduce": "Introduce itself when added to a group",
     "introduceBody": "Posts one short hello with what it can help with.",
     "bots": "Linked accounts",
-    "botsBody": "Linked agent sets which agent speaks through an account. Chats cannot change it.",
     "answersAs": "Linked agent",
     "moveConfirm_one": "Link {{bot}} to {{to}}? From now on {{to}} answers in its {{count}} chat. The chat and its history stay as they are.",
     "moveConfirm_other": "Link {{bot}} to {{to}}? From now on {{to}} answers in its {{count}} chats. The chats and their history stay as they are.",
