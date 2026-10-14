@@ -829,7 +829,7 @@ async function activateRoutineDraft(
     );
   }
   return text(
-    `Routine "${draft.name}" is on (id ${r.routineId}). The guardian can pause or delete it from the Routines page. Do NOT call any create action. Reply with one short line confirming what is now scheduled, then end your turn.`,
+    `Routine "${draft.name}" is on (id ${r.routineId}). The guardian can pause or delete it from the Routines page. Do NOT call any create action. Reply with one short line confirming what is now scheduled. If you chose a detail they didn't give, such as the time, name it and say they can change it. Then end your turn.`,
   );
 }
 
@@ -1400,7 +1400,7 @@ function buildInteractiveTools(
         activate: {
           type: "boolean",
           description:
-            "Create the routine enabled right away instead of waiting for the guardian's click. Use when the guardian clearly asked for this routine: they said what to watch for or when it runs, what should happen, and who hears about it. Details you chose to carry that out are fine, such as a check time they did not give, the prompt wording or the action that does it. Omit it when you guessed what to watch, the condition or threshold, or the recipient, or when it acts on their behalf (sending, posting, spending) beyond what they asked. Falls back to a draft card if you may not call the action yourself.",
+            "Create the routine enabled right away instead of waiting for the guardian's click. Use when the guardian clearly asked for this routine: they said what to watch for or when it runs, what should happen, and, if it tells anyone, who. Details you chose to carry that out are fine, such as a check time they did not give, the prompt wording or the action that does it. Omit it when you guessed what to watch, the condition or threshold, or the recipient, or when it acts on their behalf (sending, posting, spending) beyond what they asked. Falls back to a draft card if you may not call the action yourself.",
         },
       },
     },
