@@ -57,13 +57,19 @@ want it on a schedule or to run it by hand, ask.
    or `kind: "manual"` plus the human summary and the machine spec. A confirm
    card renders; the guardian turns it on. For `manual`, set `watchLabel` to
    something like "Run on demand" and omit all trigger fields.
-   **Add `activate: true`** when the guardian explicitly asked for this exact
-   routine — they named the trigger or cadence, what to run and its arguments
-   (e.g. "run `feedback-triage:check` every 12 hours") — so a second click adds
-   nothing. Leave it off when you inferred any of those, or when the routine
-   would send, post or spend on their behalf in a way they didn't ask for.
+   **Add `activate: true`** when the guardian clearly asked for this routine:
+   they said what to watch for or when it runs, what should happen, and who
+   hears about it (e.g. "run `feedback-triage:check` every 12 hours", "tell me
+   when this game drops below $30 on Steam"). A second click adds nothing then.
+   Details you chose to carry it out don't count against this: a check time
+   they didn't give, the prompt wording, the action that does it. Leave it off
+   when you guessed what to watch, the condition or threshold, or the
+   recipient, or when the routine would send, post or spend on their behalf
+   beyond what they asked.
 5. **Close.** After `propose_routine`, reply with one short line confirming what
    you drafted (or what is now on), then stop. Do not call any create action.
+   If you chose a detail they didn't give, such as the check time, name it and
+   say they can change it.
 
 ## Event routines from a connector (Gmail, GitHub, Slack, …)
 
@@ -225,9 +231,12 @@ propose_routine({
   eventName: "provider:event:gmail.gmail_new_gmail_message",
   filter: [{ field: "from.email", equals: "dana@example.com" }],
   actionName: "system:summon",
-  args: { agentName: "core:main", prompt: "A new email arrived from the guardian's landlord (dana@example.com). Read it and send the guardian a short summary." }
+  args: { agentName: "core:main", prompt: "A new email arrived from the guardian's landlord (dana@example.com). Read it and send the guardian a short summary." },
+  activate: true
 })
 ```
+
+Their answers settled the sender and what counts, so it goes on right away.
 
 ## Example — schedule
 
@@ -247,9 +256,18 @@ propose_routine({
   localTime: "09:00",
   rrule: "FREQ=WEEKLY;BYDAY=FR",
   actionName: "system:summon",
-  args: { agentName: "core:main", prompt: "Remind the guardian to send their weekly update, in a short friendly message." }
+  args: { agentName: "core:main", prompt: "Remind the guardian to send their weekly update, in a short friendly message." },
+  activate: true
 })
 ```
+
+They named the cadence and what to do, so it goes on right away.
+
+Guardian: "Tell me when Hades II drops below $30 on Steam."
+
+They named what to watch, the threshold and the recipient (themselves), but no
+check time. Pick a sensible one, propose it with `activate: true`, and say in
+your reply that it checks daily at 10:30 AM and they can change that.
 
 ## Example — manual
 
@@ -272,4 +290,5 @@ propose_routine({
 })
 ```
 
-Then reply with one short line confirming what you drafted, and stop.
+No `activate` here: you chose what goes into the briefing, so they confirm it on
+the card. Then reply with one short line confirming what you drafted, and stop.

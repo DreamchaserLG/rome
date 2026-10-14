@@ -1307,7 +1307,7 @@ function buildInteractiveTools(
   tools.push({
     name: "propose_routine",
     description:
-      "Propose a routine (an automation) to the user as an interactive confirm card in web chat. A routine fires one of three ways: when a matching event arrives (kind: event), on a schedule (kind: schedule), or never on its own — a saved playbook the guardian runs by hand from the Routines page's 'Run now' button (kind: manual). Use this — never create the routine silently — once you've gathered enough detail (the trigger, any narrowing, what to do). By default the card is a draft with a 'Turn it on' button that creates the routine directly; you do not call any create action afterwards. Set activate: true only when the guardian explicitly asked for this exact routine; the card then shows it already on. Gather missing detail first with the ask_question action. For event routines, discover the exact event type with search_event_catalog rather than guessing.",
+      "Propose a routine (an automation) to the user as an interactive confirm card in web chat. A routine fires one of three ways: when a matching event arrives (kind: event), on a schedule (kind: schedule), or never on its own — a saved playbook the guardian runs by hand from the Routines page's 'Run now' button (kind: manual). Use this — never create the routine silently — once you've gathered enough detail (the trigger, any narrowing, what to do). By default the card is a draft with a 'Turn it on' button that creates the routine directly; you do not call any create action afterwards. Set activate: true when the guardian clearly asked for this routine, even if you chose details such as the check time; the card then shows it already on. Gather missing detail first with the ask_question action. For event routines, discover the exact event type with search_event_catalog rather than guessing.",
     inputSchema: {
       type: "object",
       required: ["sentence", "name", "watchLabel", "thenSummary", "kind", "actionName", "args"],
@@ -1400,7 +1400,7 @@ function buildInteractiveTools(
         activate: {
           type: "boolean",
           description:
-            "Create the routine enabled right away instead of waiting for the guardian's click. Use only when the guardian explicitly stated the trigger or cadence, what to run and its arguments — nothing you inferred — and it acts on their behalf (sending, posting, spending) only as they asked. Otherwise omit it. Falls back to a draft card if you may not call the action yourself.",
+            "Create the routine enabled right away instead of waiting for the guardian's click. Use when the guardian clearly asked for this routine: they said what to watch for or when it runs, what should happen, and who hears about it. Details you chose to carry that out are fine, such as a check time they did not give, the prompt wording or the action that does it. Omit it when you guessed what to watch, the condition or threshold, or the recipient, or when it acts on their behalf (sending, posting, spending) beyond what they asked. Falls back to a draft card if you may not call the action yourself.",
         },
       },
     },
