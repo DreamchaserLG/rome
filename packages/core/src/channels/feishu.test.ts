@@ -381,6 +381,71 @@ describe("FeishuAdapter", () => {
     ]);
   });
 
+  describe("on a linked channel", () => {
+    async function startWith(
+      seesAmbient: () => boolean,
+      initial: ConversationSettingsOverrides = {},
+    ): Promise<void> {
+      const conversationSettings = makeConversationSettings(initial);
+      channel = new FakeLarkChannel();
+      adapter = new FeishuAdapter(
+        {
+          appId: "cli_test",
+          appSecret: "secret",
+          connectionId: FEISHU_CONNECTION_ID,
+          conversationSettings: conversationSettings.control,
+          seesAmbient,
+        },
+        () => channel as unknown as LarkChannel,
+      );
+      captured = [];
+      adapter.onInbound(async (msg) => {
+        captured.push(msg);
+      });
+      await adapter.start();
+    }
+
+    it("delivers an ambient group message, still marked ambient", async () => {
+      await startWith(() => true);
+
+      await channel.emit({ chatType: "group", mentionedBot: false, content: "lunch?" });
+
+      expect(captured).toHaveLength(1);
+      expect(captured[0].addressing).toBe("ambient");
+      expect(captured[0].text).toBe("lunch?");
+    });
+
+    it("drops an ambient group message while seesAmbient returns false", async () => {
+      let linked = true;
+      await startWith(() => linked);
+      linked = false;
+
+      await channel.emit({ chatType: "group", mentionedBot: false, content: "lunch?" });
+
+      expect(captured).toHaveLength(0);
+    });
+
+    it("still drops a message in a disabled group", async () => {
+      await startWith(() => true, { enabled: false });
+
+      await channel.emit({ chatType: "group", mentionedBot: false, content: "lunch?" });
+
+      expect(captured).toHaveLength(0);
+    });
+
+    it("still drops the bot's own messages", async () => {
+      await startWith(() => true);
+
+      await channel.emit({
+        chatType: "group",
+        mentionedBot: false,
+        senderId: channel.botIdentity.openId,
+      });
+
+      expect(captured).toHaveLength(0);
+    });
+  });
+
   it("carries the replied-to message and a fallback sender name", async () => {
     await channel.emit({ senderName: undefined, replyToMessageId: "om_parent" });
     expect(captured[0].senderDisplayName).toBe("Feishu User");

@@ -672,6 +672,23 @@ export function createMessageHandlerAction(
         const replyTo = parseMessageReplyReference(args.replyTo);
         const replyToPlatformMessageId = replyTo?.messageId;
 
+        if (args.recordOnly === true) {
+          const stored = await conversations.addMessage({
+            sessionId: conversation.id,
+            role: "notification",
+            content: messageContent,
+            platformMessageId,
+            senderId: channelUserId,
+            senderName: displayName,
+            replyToPlatformMessageId,
+            createdAt,
+          });
+          if (!stored.inserted) {
+            return { status: "ok", data: { action: "duplicate", messageId: platformMessageId } };
+          }
+          return { status: "ok", data: { action: "recorded" } };
+        }
+
         // The conversation's agent_name holds only the group's override, so a
         // relink takes effect on the next message. Root conversations retain
         // their persisted binding, and native thread sessions are refreshed by

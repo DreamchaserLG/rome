@@ -134,6 +134,30 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       return;
     }
 
+    // The reply rule runs after delivery: a linked channel hears every group
+    // message its account receives, and one the rule does not answer is only
+    // recorded in the conversation's transcript. A recorded message keeps its
+    // text alone: its attachments are never fetched, so a reference to one
+    // would name a provider file the agent cannot open.
+    const recordOnly =
+      snapshot.supportedFields.includes("activation.mode") &&
+      snapshot.effective.activation.mode === "mention" &&
+      message.thread?.kind !== "dm" &&
+      message.addressing === "ambient";
+    if (recordOnly) {
+      if (!message.text?.trim()) return;
+      void this.runTurn(
+        channel,
+        message,
+        connectionId,
+        [],
+        routedAgentName,
+        Promise.resolve(null),
+        true,
+      );
+      return;
+    }
+
     let attachments = message.attachments;
     // Through the channel's Connection, which is `ref`'s.
     const inboundMedia = channel.inbound?.media ?? null;
@@ -180,6 +204,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     attachments: InboundEvent["message"]["attachments"],
     routedAgentName: string | undefined,
     activity: Promise<ChannelActivitySession | null>,
+    recordOnly = false,
   ): Promise<void> {
     const service = channel.name;
     const slowTurnMs = this.options.slowTurnMs ?? SLOW_TURN_MS;
@@ -211,6 +236,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           routedAgentName,
           // Read per message: a relink changes it on the same channel.
           linkedAgentName: channel.linkedAgent ?? undefined,
+          ...(recordOnly ? { recordOnly: true } : {}),
         },
         {
           initiator: `connection:${connectionId}`,

@@ -80,12 +80,16 @@ export interface MessageHandlerInput {
    *  conversation has no override, and the conversation never stores it. An
    *  agent that is not loaded falls back to main. */
   linkedAgentName?: string;
+  /** Store the message in the transcript as a notification and start no turn.
+   *  Set when the reply rule does not answer the message. */
+  recordOnly?: boolean;
 }
 
 export interface MessageHandlerOutput {
   /** What action was taken on the message. */
   action:
     | "blocked"
+    | "recorded"
     | "sent"
     | "no_response"
     | "pending_approval"

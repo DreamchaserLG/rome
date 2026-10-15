@@ -1143,6 +1143,9 @@ async function main() {
       maxIntervalMs: config.linkedinPollMaxMinutes * 60_000,
     },
     listAgents: () => Array.from(agentLoader.getAll().keys()),
+    // A linked channel hears the group messages its platform delivers, not
+    // only the ones that mention it; the reply rule decides answering later.
+    seesAmbient: (connectionId) => Boolean(channelRecords.byConnection(connectionId)?.agent),
     // Auto-map the guardian onto their own WhatsApp account on connect.
     onWhatsAppGuardianConnected: (selfJid) => {
       mapGuardianToChannel(personMappingRepo, "whatsapp", selfJid).catch((err) => {

@@ -126,6 +126,10 @@ export interface FeishuDescriptorDeps {
   conversationSettings: ConversationSettingsService;
   personMappingRepo: PersonMappingRepository;
   listAgents: () => string[];
+  /** True while the channel the Connection backs is linked to an agent. The
+   *  adapter then delivers group messages that do not mention the bot. Absent
+   *  means false. */
+  seesAmbient?: (connectionId: string) => boolean;
   createChannel?: CreateLarkChannel;
   /** Injectable setup seams so tests drive the ceremony without the
    *  network / SDK long connection. Production uses the defaults below. */
@@ -461,6 +465,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             personMappingRepo: deps.personMappingRepo,
             listAgents: deps.listAgents,
             onFault: routeFault,
+            seesAmbient: () => deps.seesAmbient?.(kit.connectionId) ?? false,
           };
           const adapter = new FeishuAdapter(config, createChannel);
 

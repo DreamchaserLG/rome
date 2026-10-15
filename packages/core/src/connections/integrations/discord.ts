@@ -107,6 +107,10 @@ export interface DiscordDeps {
   chatStop?: ChatStopHandler;
   personMappingRepo: PersonMappingRepository;
   listAgents: () => string[];
+  /** True while the channel the Connection backs is linked to an agent. The
+   *  adapter then delivers group messages that do not mention the bot. Absent
+   *  means false. */
+  seesAmbient?: (connectionId: string) => boolean;
   /** Injectable token validator so the connect route / tests can drive the
    *  users/@me probe without hitting the network. Production pings the Discord
    *  REST API; a 401/!ok means the pasted token is not accepted. */
@@ -250,6 +254,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             conversationSettings: deps.conversationSettings,
             chatStop: deps.chatStop,
             listAgents: deps.listAgents,
+            seesAmbient: () => deps.seesAmbient?.(kit.connectionId) ?? false,
             resolveDiscordPerson: (channelUserId) =>
               deps.personMappingRepo.findByChannelUser("discord", channelUserId),
             // Live gateway faults (post-login) route through here; the descriptor

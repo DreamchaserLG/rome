@@ -51,6 +51,13 @@ export interface FeishuConfig {
    * callback, so its behavior (error logged, swallowed) is unchanged.
    */
   onFault?: (err: unknown) => void;
+  /**
+   * True while the channel is linked to an agent. A linked channel delivers
+   * every group message its bot receives, and the inbox's reply rule decides
+   * whether the agent answers. Read per message, so a relink takes effect on
+   * the next one. Absent means false.
+   */
+  seesAmbient?: () => boolean;
 }
 
 /**
@@ -125,6 +132,7 @@ export class FeishuAdapter {
   private readonly personMappingRepo?: PersonMappingRepository;
   private readonly listAgents?: () => string[];
   private readonly onFault?: (err: unknown) => void;
+  private readonly seesAmbient?: () => boolean;
   private readonly observedConversations = new Map<
     string,
     { id: string; displayName: string; kind: "group" | "channel" }
@@ -158,6 +166,7 @@ export class FeishuAdapter {
     this.personMappingRepo = config.personMappingRepo;
     this.listAgents = config.listAgents;
     this.onFault = config.onFault;
+    this.seesAmbient = config.seesAmbient;
   }
 
   async start(): Promise<void> {
@@ -279,7 +288,7 @@ export class FeishuAdapter {
         });
         return;
       }
-      if ((cfg.requireMention ?? true) && !m.mentionedBot) {
+      if ((cfg.requireMention ?? true) && !m.mentionedBot && !this.seesAmbient?.()) {
         log.debug("ignoring Feishu group message not mentioning bot", {
           from: m.senderId,
           threadId: m.chatId,

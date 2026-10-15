@@ -392,6 +392,7 @@ export class DiscordAdapter {
     channelUserId: string,
   ) => Promise<Pick<PersonRecord, "id" | "bondLevel"> | null>;
   private chatStop?: ChatStopHandler;
+  private seesAmbient?: () => boolean;
 
   /**
    * Reports terminal gateway faults so the grant-epoch lifecycle can react:
@@ -420,6 +421,13 @@ export class DiscordAdapter {
     ) => Promise<Pick<PersonRecord, "id" | "bondLevel"> | null>;
     chatStop?: ChatStopHandler;
     onGatewayFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
+    /**
+     * True while the channel is linked to an agent. A linked channel delivers
+     * every guild message its bot receives, and the inbox's reply rule decides
+     * whether the agent answers. Read per message, so a relink takes effect on
+     * the next one. Absent means false.
+     */
+    seesAmbient?: () => boolean;
     /** Where the gateway client and the broker send REST requests. Defaults to
      *  Discord's API; tests point it at a local peer. */
     rest?: Partial<RESTOptions>;
@@ -431,6 +439,7 @@ export class DiscordAdapter {
     this.resolveDiscordPerson = config.resolveDiscordPerson;
     this.chatStop = config.chatStop;
     this.onGatewayFault = config.onGatewayFault;
+    this.seesAmbient = config.seesAmbient;
     this.client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
@@ -837,8 +846,10 @@ export class DiscordAdapter {
       // Threads the bot itself started (e.g. auto-thread replies) are treated
       // as ongoing conversations and skip the mention requirement. Threads
       // created by other users still need an @mention or a reply-to-bot.
+      // A linked channel skips the check: the inbox applies the reply rule
+      // after delivery and records what it does not answer.
       const requireMention = cfg.requireMention ?? true;
-      if (requireMention && addressing === "ambient") {
+      if (requireMention && addressing === "ambient" && !this.seesAmbient?.()) {
         log.debug("ignoring guild message not directed at bot", {
           from: message.author.id,
           channelId: message.channelId,

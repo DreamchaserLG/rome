@@ -220,3 +220,87 @@ describe("DiscordAdapter.saveIncomingAttachments", () => {
     ).resolves.toBe(attachments);
   });
 });
+
+describe("DiscordAdapter gateway filters on a linked channel", () => {
+  // A stand-in client: start() wires its handlers here and login resolves at
+  // once, so a test drives `messageCreate` without a gateway.
+  function startedAdapter(seesAmbient: () => boolean) {
+    const adapter = new DiscordAdapter({ botToken: "test-token", seesAmbient });
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void> | void>();
+    Object.assign(adapter, {
+      client: {
+        user: { ...BOT, tag: "Rome#0001" },
+        on(event: string, handler: (...args: unknown[]) => Promise<void> | void) {
+          handlers.set(event, handler);
+        },
+        login: async () => "test-token",
+      },
+    });
+    const captured: ChannelMessage[] = [];
+    adapter.onInbound(async (msg) => {
+      captured.push(msg);
+    });
+    const receive = async (message: Message) => {
+      await handlers.get("messageCreate")?.(message);
+    };
+    return { adapter, captured, receive };
+  }
+
+  function guildMessage(
+    overrides: { authorBot?: boolean; mentioned?: string[]; content?: string } = {},
+  ): Message {
+    const mentioned = new Map((overrides.mentioned ?? []).map((id) => [id, { id }]));
+    return {
+      id: "msg-3",
+      channelId: "channel-1",
+      content: overrides.content ?? "anyone up for lunch?",
+      createdAt: new Date("2026-05-10T00:00:00Z"),
+      type: MessageType.Default,
+      system: false,
+      reference: null,
+      author: {
+        id: "user-1",
+        username: "alice",
+        displayName: "Alice",
+        bot: overrides.authorBot ?? false,
+      },
+      member: { displayName: "Alice Smith" },
+      mentions: { users: mentioned },
+      guild: { members: { me: { displayName: "Rome" } } },
+      channel: { type: ChannelType.GuildText, name: "general", isThread: () => false },
+      attachments: new Map(),
+    } as unknown as Message;
+  }
+
+  it("delivers an ambient guild message only while seesAmbient returns true", async () => {
+    let linked = true;
+    const { adapter, captured, receive } = startedAdapter(() => linked);
+    await adapter.start();
+
+    await receive(guildMessage());
+    linked = false;
+    await receive(guildMessage());
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0].addressing).toBe("ambient");
+  });
+
+  it("drops an ambient guild message on an unlinked channel", async () => {
+    const { adapter, captured, receive } = startedAdapter(() => false);
+    await adapter.start();
+
+    await receive(guildMessage());
+
+    expect(captured).toHaveLength(0);
+  });
+
+  it("keeps the other filters: another bot, and a message that mentions only others", async () => {
+    const { adapter, captured, receive } = startedAdapter(() => true);
+    await adapter.start();
+
+    await receive(guildMessage({ authorBot: true }));
+    await receive(guildMessage({ mentioned: ["user-2"], content: "<@user-2> lunch?" }));
+
+    expect(captured).toHaveLength(0);
+  });
+});

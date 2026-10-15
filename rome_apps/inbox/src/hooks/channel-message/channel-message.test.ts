@@ -48,7 +48,12 @@ function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
 function snapshot(
   connectionId: string,
   conversationId: ConversationId,
-  overrides: { enabled?: boolean; agentName?: string | null } = {},
+  overrides: {
+    enabled?: boolean;
+    agentName?: string | null;
+    activationMode?: "mention" | "all";
+    supportsActivation?: boolean;
+  } = {},
 ) {
   return {
     conversation: {
@@ -57,11 +62,11 @@ function snapshot(
       kind: "group" as const,
       displayName: conversationId,
     },
-    supportedFields: [],
+    supportedFields: overrides.supportsActivation ? ["activation.mode" as const] : [],
     effective: {
       enabled: overrides.enabled ?? true,
       activation: {
-        mode: "all" as const,
+        mode: overrides.activationMode ?? ("all" as const),
         botMessages: "ignore" as const,
         whenOthersMentioned: "ignore" as const,
       },
@@ -459,6 +464,64 @@ describe("ChannelMessageHook", () => {
     expect(harness.run.mock.calls[1]?.[1]).toEqual(
       expect.objectContaining({ routedAgentName: "override", linkedAgentName: undefined }),
     );
+  });
+
+  it("records an ambient group message's text on a mention-only group, without typing or media", async () => {
+    harness.get.mockImplementation(async ({ connectionId, conversationId }) =>
+      snapshot(connectionId, conversationId, {
+        activationMode: "mention",
+        supportsActivation: true,
+      }),
+    );
+    const begin = rs.fn(async () => ({ update: rs.fn(), finish: rs.fn() }));
+    const materialize = rs.fn(async () => []);
+    harness.features.set(TELEGRAM_ID, { activity: { begin }, inboundMedia: { materialize } });
+    const attachments = [{ type: "image" as const, url: "file-id" }];
+
+    await harness.emit(TELEGRAM_ID, message({ addressing: "ambient", attachments }));
+    await harness.emit(
+      TELEGRAM_ID,
+      message({ addressing: "ambient", messageId: "message-2", text: "", attachments }),
+    );
+
+    expect(harness.run).toHaveBeenCalledTimes(1);
+    expect(harness.run).toHaveBeenCalledWith(
+      "message_handler",
+      expect.objectContaining({ recordOnly: true, attachments: [] }),
+      expect.anything(),
+    );
+    expect(begin).not.toHaveBeenCalled();
+    expect(materialize).not.toHaveBeenCalled();
+  });
+
+  it("answers what the reply rule admits", async () => {
+    const mentionOnly = { activationMode: "mention" as const, supportsActivation: true };
+    const cases = [
+      { settings: mentionOnly, overrides: { addressing: "mention" as const } },
+      {
+        settings: mentionOnly,
+        overrides: { addressing: "ambient" as const, thread: { kind: "dm" as const } },
+      },
+      {
+        settings: { activationMode: "all" as const, supportsActivation: true },
+        overrides: { addressing: "ambient" as const },
+      },
+      {
+        settings: { activationMode: "mention" as const },
+        overrides: { addressing: "ambient" as const },
+      },
+    ];
+    for (const [index, { settings, overrides }] of cases.entries()) {
+      harness.get.mockImplementation(async ({ connectionId, conversationId }) =>
+        snapshot(connectionId, conversationId, settings),
+      );
+      await harness.emit(TELEGRAM_ID, message({ messageId: `m-${index}`, ...overrides }));
+    }
+
+    expect(harness.run).toHaveBeenCalledTimes(cases.length);
+    for (const call of harness.run.mock.calls) {
+      expect(call[1]).not.toHaveProperty("recordOnly");
+    }
   });
 
   it("refuses, by name, a host that passes no channels", () => {

@@ -7,7 +7,7 @@
 //      an `error` event → CredentialRejected (auth) or Disconnected (transport).
 //   4. inbound/outbound messages map through the Connection's talker.
 
-import { afterEach, describe, expect, it } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { sendThrough } from "../../channels/connection-ports.js";
 import type { ConversationId } from "@rome-os/app-runtime";
 import {
@@ -113,7 +113,7 @@ function fakePersonRepo(): PersonMappingRepository {
   } as unknown as PersonMappingRepository;
 }
 
-function makeDescriptor(channel: FakeLarkChannel) {
+function makeDescriptor(channel: FakeLarkChannel, seesAmbient?: (connectionId: string) => boolean) {
   return createFeishuDescriptor({
     conversationSettings: {
       observe: () => {},
@@ -136,6 +136,7 @@ function makeDescriptor(channel: FakeLarkChannel) {
     personMappingRepo: fakePersonRepo(),
     listAgents: () => ["main"],
     createChannel: () => channel as never,
+    seesAmbient,
   });
 }
 
@@ -300,6 +301,42 @@ describe("feishu inbound delivery", () => {
       },
     ]);
     await talker.stop();
+  });
+});
+
+describe("feishu ambient delivery", () => {
+  async function deliveredAmbient(seesAmbient?: (connectionId: string) => boolean) {
+    const channel = new FakeLarkChannel();
+    const talker = makeDescriptor(channel, seesAmbient).capabilities.talker!.build(
+      { app: validCred() },
+      {
+        connectionId: "feishu-test",
+        persist: async () => {},
+        registerIngress: () => () => {},
+      },
+    );
+    const delivered: unknown[] = [];
+    talker.start(
+      (msg) => {
+        delivered.push(msg);
+      },
+      () => {},
+    );
+    await flush();
+    await channel.emitMessage({ chatType: "group", content: "lunch?", mentionedBot: false });
+    await talker.stop();
+    return delivered;
+  }
+
+  it("asks seesAmbient about its own Connection before delivering an ambient group message", async () => {
+    const seesAmbient = rs.fn((connectionId: string) => connectionId === "feishu-test");
+
+    expect(await deliveredAmbient(seesAmbient)).toHaveLength(1);
+    expect(seesAmbient).toHaveBeenCalledWith("feishu-test");
+  });
+
+  it("drops an ambient group message without seesAmbient", async () => {
+    expect(await deliveredAmbient()).toHaveLength(0);
   });
 });
 

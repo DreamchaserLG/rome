@@ -1065,4 +1065,55 @@ describe("linked agent", () => {
       expect.objectContaining({ channel: "feishu-2", threadId: "group-1", agentName: "main" }),
     );
   });
+
+  it("records a record-only message as a notification and runs no agent", async () => {
+    const { deps, agentRunner, sentMessages, conversations } = createMessageHandlerDeps({
+      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
+      knownAgents: ["main", "sentinel", "envoy", "envoy:scout"],
+    });
+    const action = createAction(actionConfig, deps);
+
+    const result = await action.execute(
+      inbound({ linkedAgentName: "envoy:scout", recordOnly: true }),
+    );
+
+    expect(result).toEqual({ status: "ok", data: { action: "recorded" } });
+    expect(conversations.addMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "channel:feishu-2:group-1",
+        role: "notification",
+        platformMessageId: "msg-1",
+      }),
+    );
+    expect(agentRunner.calls).toEqual([]);
+    expect(sentMessages).toEqual([]);
+  });
+
+  it("reports a duplicate record-only message", async () => {
+    const { deps, agentRunner } = createMessageHandlerDeps({
+      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
+      conversations: { addMessage: rs.fn(async () => ({ inserted: false })) },
+    });
+    const action = createAction(actionConfig, deps);
+
+    const result = await action.execute(inbound({ recordOnly: true }));
+
+    expect(result).toEqual({ status: "ok", data: { action: "duplicate", messageId: "msg-1" } });
+    expect(agentRunner.calls).toEqual([]);
+  });
+
+  it("does not record a record-only message the policy blocks", async () => {
+    const { deps, conversations } = createMessageHandlerDeps({
+      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
+    });
+    (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
+      action: "block",
+    });
+    const action = createAction(actionConfig, deps);
+
+    const result = await action.execute(inbound({ recordOnly: true }));
+
+    expect(result).toEqual({ status: "ok", data: { action: "blocked" } });
+    expect(conversations.addMessage).not.toHaveBeenCalled();
+  });
 });
