@@ -9,10 +9,10 @@
     "settings": "Settings"
   },
   "index": {
-    "title": "Outreach",
+    "title": "Envoys",
     "description": "Agents people can reach from a chat app, each through its own linked account.",
     "add": "Add an agent",
-    "emptyTitle": "No outreach agents",
+    "emptyTitle": "No envoys yet",
     "emptyBody": "An agent appears here once it has a linked account. Add an agent to give it an account on a chat app."
   },
   "add": {
