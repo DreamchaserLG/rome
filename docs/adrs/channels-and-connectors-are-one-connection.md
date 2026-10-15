@@ -90,3 +90,13 @@ This narrows two earlier sentences. The decision above says "A service carries a
 ### Consequences
 
 Uniqueness rests on the registry, not the database. Within the one Rome process, the per-service mint lock holds it, and `connect` refuses a second Connection under that lock. The "future diffs must respect" rule on Connection uniqueness becomes: a Connection backs exactly one channel, and a channel's live ports are backed by one Connection.
+
+## Amendment (2026-10-15): an agent linked to a channel
+
+A channel can be linked to an agent, which answers in that channel's conversations ([Linked agents](../architecture/channels.md#linked-agents)). On one platform an agent is linked to at most one channel.
+
+Rome stores each channel's platform as a fixed value mapped from its service. Feishu and Lark are one platform, `telegram` and `telegram_user` are one, and `wechat` and `wechat_user` are one. Every other service is its own platform. The one-channel-per-platform rule counts by it. The 2026-10-08 amendment's "the platform is not a name Rome stores" is withdrawn. Its rule that nothing above the channels of one platform merges them stands.
+
+### Alternatives
+
+- **Parse the platform out of a channel name.** Rejected because channel names are minted per service and say nothing reliable about the platform. `telegram_user` and `telegram-2` would each need a parsing rule, and a fixed mapping from the service answers the question once.

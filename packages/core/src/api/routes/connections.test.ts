@@ -114,6 +114,7 @@ describe("GET /connections", () => {
       connect: null,
       setups: {},
       channel: null,
+      linkedAgent: null,
       severalAccounts: false,
     });
 
@@ -208,6 +209,7 @@ describe("GET /connections", () => {
       connect: null,
       setups: {},
       channel: null,
+      linkedAgent: null,
       severalAccounts: false,
     });
   });
