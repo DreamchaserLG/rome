@@ -28,6 +28,8 @@ function conn(overrides: Partial<ApiConnection> & Pick<ApiConnection, "service">
     },
     connect: null,
     setups: {},
+    channel: null,
+    severalAccounts: false,
     ...overrides,
   };
 }
@@ -371,5 +373,89 @@ describe("buildConnectionCards — kind and labels", () => {
     const hint = { url: "https://oauth/github", available: true, unavailableReason: null };
     const cards = buildConnectionCards([conn({ service: "github", connect: hint })]);
     expect(cards[0].connect).toEqual(hint);
+  });
+});
+
+describe("buildConnectionCards — several accounts per service", () => {
+  it("gives each Feishu connection its own card, routed by its channel name", () => {
+    const cards = buildConnectionCards([
+      conn({
+        service: "feishu",
+        id: "conn-feishu-2",
+        channel: "feishu-2",
+        grants: { app: "authorized" },
+        display: { app: display({ displayName: "Sales Bot" }) },
+        severalAccounts: true,
+      }),
+      conn({
+        service: "feishu",
+        id: "conn-feishu",
+        channel: "feishu",
+        grants: { app: "authorized" },
+        severalAccounts: true,
+      }),
+    ]);
+
+    expect(cards.map((card) => card.route)).toEqual(["feishu", "feishu-2"]);
+    const [first, second] = cards;
+    expect(first.label).toBe("Feishu");
+    expect(first.channel).toBe("feishu");
+    expect(second.label).toBe("Feishu · Sales Bot");
+    expect(second.service).toBe("feishu");
+    expect(second.slots[0].connectionId).toBe("conn-feishu-2");
+    expect(second.severalAccounts).toBe(true);
+  });
+
+  it("labels a later account by its channel name until it has an identity", () => {
+    const cards = buildConnectionCards([
+      conn({ service: "feishu", channel: "feishu", grants: { app: "authorized" } }),
+      conn({
+        service: "feishu",
+        id: "conn-new",
+        channel: "feishu-2",
+        grants: { app: "unauthorized" },
+      }),
+    ]);
+    expect(cards.find((card) => card.route === "feishu-2")?.label).toBe("Feishu · feishu-2");
+  });
+
+  it("orders accounts numerically within their service", () => {
+    const cards = buildConnectionCards([
+      conn({ service: "feishu", id: "c10", channel: "feishu-10" }),
+      conn({ service: "telegram", id: "t1", channel: "telegram" }),
+      conn({ service: "feishu", id: "c2", channel: "feishu-2" }),
+      conn({ service: "feishu", id: "c1", channel: "feishu" }),
+    ]);
+    expect(cards.map((card) => card.route)).toEqual([
+      "telegram",
+      "feishu",
+      "feishu-2",
+      "feishu-10",
+    ]);
+  });
+
+  it("folds the personal account onto the first account only", () => {
+    const cards = buildConnectionCards([
+      conn({ service: "telegram", id: "t1", channel: "telegram", grants: { bot: "authorized" } }),
+      conn({ service: "telegram", id: "t2", channel: "telegram-2", grants: { bot: "authorized" } }),
+      conn({
+        service: "telegram_user",
+        id: "tu",
+        channel: "telegram_user",
+        grants: { session: "unauthorized" },
+      }),
+    ]);
+    const first = cards.find((card) => card.route === "telegram");
+    const second = cards.find((card) => card.route === "telegram-2");
+    expect(first?.slots.map((slot) => slot.key)).toEqual(["bot", "session"]);
+    expect(second?.slots.map((slot) => slot.key)).toEqual(["bot"]);
+  });
+
+  it("routes a placeholder by its service", () => {
+    const cards = buildConnectionCards([
+      conn({ service: "discord", id: null, channel: null, grants: { bot: "unauthorized" } }),
+    ]);
+    expect(cards[0].route).toBe("discord");
+    expect(cards[0].label).toBe("Discord");
   });
 });

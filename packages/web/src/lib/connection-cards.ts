@@ -2,7 +2,10 @@
  * Presentation adapter for the unified Connections surface.
  *
  * `GET /api/connections` is the single data source — this module adds ONLY
- * presentation: labels, brand keys, ordering, and slot grouping (the Telegram
+ * presentation: labels, brand keys, ordering, and slot grouping. A service can
+ * hold several Connections, each backing one account (channel), and each
+ * account gets its own card routed by its channel name. Only the first account
+ * of a service takes the folded slots below (the Telegram
  * personal account folds onto the Telegram card as its `session` slot; the
  * Composio account broker appends as a synthetic card since it is not a
  * registry connection). Connection state stays registry vocabulary
@@ -48,7 +51,11 @@ export interface ConnectionSlot {
 }
 
 export interface ConnectionCard {
-  /** Service name — the brand key, copy key, route id, and ceremony dispatch. */
+  /** The card's route id (`/settings/connections/:route`): the account's
+   *  channel name when it has one, else the service. The first account of a
+   *  service routes as the service (`feishu`), later ones as `feishu-2`. */
+  route: string;
+  /** Service name — the brand key, copy key, and ceremony dispatch. */
   service: string;
   label: string;
   kind: "channel" | "oauth" | "composio";
@@ -59,6 +66,10 @@ export interface ConnectionCard {
   degradation: CapabilityDegradation | null;
   slots: ConnectionSlot[];
   connect: ConnectHint | null;
+  /** The account's channel name; null for placeholders and services without a Talk. */
+  channel: string | null;
+  /** Whether the service offers "add another account". */
+  severalAccounts: boolean;
 }
 
 /** Fixed dashboard ordering: Talk channels, webchat, OAuth services; services
@@ -155,6 +166,12 @@ function runtimeDegradation(connection: ApiConnection): CapabilityDegradation | 
   return null;
 }
 
+/** Whether a connection is its service's first account: named after the
+ *  service, or not yet named at all (a placeholder). */
+function isFirstAccount(connection: ApiConnection): boolean {
+  return !connection.channel || connection.channel === connection.service;
+}
+
 function toCard(connection: ApiConnection): ConnectionCard {
   const alwaysOn = connection.service === "webchat";
   const slots = alwaysOn
@@ -171,14 +188,21 @@ function toCard(connection: ApiConnection): ConnectionCard {
         },
       ]
     : toSlots(connection);
+  const label = isFirstAccount(connection)
+    ? serviceLabel(connection.service)
+    : `${serviceLabel(connection.service)} · ${slots[0]?.identity ?? connection.channel}`;
   return {
+    route: connection.channel || connection.service,
     service: connection.service,
-    label: serviceLabel(connection.service),
+    label,
     kind: OAUTH_SERVICES.has(connection.service) ? "oauth" : "channel",
     alwaysOn,
     degradation: runtimeDegradation(connection),
     slots,
     connect: connection.connect,
+    // Read defensively: a core that predates accounts omits these fields.
+    channel: connection.channel ?? null,
+    severalAccounts: connection.severalAccounts === true,
   };
 }
 
@@ -188,6 +212,7 @@ function toCard(connection: ApiConnection): ConnectionCard {
  *  once the CLI is installed on the host. */
 function composioCard(status: ComposioCliStatus): ConnectionCard {
   return {
+    route: "composio",
     service: "composio",
     label: serviceLabel("composio"),
     kind: "composio",
@@ -205,6 +230,8 @@ function composioCard(status: ComposioCliStatus): ConnectionCard {
       },
     ],
     connect: null,
+    channel: null,
+    severalAccounts: false,
   };
 }
 
@@ -229,18 +256,20 @@ export function buildConnectionCards(
       folded.set(connection.service, connection);
       continue;
     }
-    // One card per service: the registry currently holds at most one connection
-    // per service, so a duplicate would be an upstream invariant break — keep
-    // the first and let the detail surface expose the anomaly.
-    if (!cards.has(connection.service)) {
-      cards.set(connection.service, toCard(connection));
+    // One card per account, keyed by its route. Two connections claiming one
+    // route would be an upstream invariant break — keep the first and let the
+    // detail surface expose the anomaly.
+    const card = toCard(connection);
+    if (!cards.has(card.route)) {
+      cards.set(card.route, card);
     }
   }
 
   // A personal account is its own registry service but presents as the
   // `session` slot of its brand's card. The brand card may be absent — a
   // service can be registered without the bot half ever being connected — so
-  // the fold creates it rather than dropping the account.
+  // the fold creates it rather than dropping the account. The fold lands on
+  // the brand's first account, whose route is the brand itself.
   for (const [service, connection] of folded) {
     const brand = FOLDED_ACCOUNT_SERVICES[service]!;
     const sessionSlots = toSlots(connection, "session");
@@ -250,6 +279,7 @@ export function buildConnectionCards(
       card.degradation ??= runtimeDegradation(connection);
     } else {
       cards.set(brand, {
+        route: brand,
         service: brand,
         label: serviceLabel(brand),
         kind: "channel",
@@ -257,6 +287,8 @@ export function buildConnectionCards(
         degradation: runtimeDegradation(connection),
         slots: sessionSlots,
         connect: null,
+        channel: null,
+        severalAccounts: false,
       });
     }
   }
@@ -270,8 +302,19 @@ export function buildConnectionCards(
     const ai = SERVICE_ORDER.indexOf(a.service);
     const bi = SERVICE_ORDER.indexOf(b.service);
     if (ai !== -1 || bi !== -1) {
-      return (ai === -1 ? SERVICE_ORDER.length : ai) - (bi === -1 ? SERVICE_ORDER.length : bi);
+      const byService =
+        (ai === -1 ? SERVICE_ORDER.length : ai) - (bi === -1 ? SERVICE_ORDER.length : bi);
+      if (byService !== 0) return byService;
+    } else if (a.service !== b.service) {
+      return a.service.localeCompare(b.service);
     }
-    return a.service.localeCompare(b.service);
+    return compareAccounts(a, b);
   });
+}
+
+/** Within one service the first account leads, then `feishu-2` before
+ *  `feishu-10`. */
+function compareAccounts(a: ConnectionCard, b: ConnectionCard): number {
+  if ((a.route === a.service) !== (b.route === b.service)) return a.route === a.service ? -1 : 1;
+  return a.route.localeCompare(b.route, undefined, { numeric: true });
 }

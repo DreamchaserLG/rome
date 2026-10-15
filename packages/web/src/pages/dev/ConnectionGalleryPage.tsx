@@ -145,6 +145,8 @@ function apiConnection(
     },
     connect: options.connect ?? null,
     setups: {},
+    channel: null,
+    severalAccounts: false,
   };
 }
 
@@ -359,7 +361,7 @@ function GallerySection({ scenario }: { scenario: GalleryScenario }) {
           mount-time effects). */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2" inert>
         {cards.map((card) => (
-          <DialogFrame key={card.service} card={card} scenario={scenario} />
+          <DialogFrame key={card.route} card={card} scenario={scenario} />
         ))}
       </div>
     </section>
@@ -374,7 +376,7 @@ function GallerySection({ scenario }: { scenario: GalleryScenario }) {
 function DialogFrame({ card, scenario }: { card: ConnectionCard; scenario: GalleryScenario }) {
   return (
     <div className="space-y-2">
-      <p className="font-mono text-aux text-muted-foreground">{card.service}</p>
+      <p className="font-mono text-aux text-muted-foreground">{card.route}</p>
       <div className="w-full max-w-2xl rounded-16 border border-border bg-surface text-foreground shadow-25 ring-1 ring-black/5">
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <div className="flex min-w-0 flex-1 items-center gap-3">

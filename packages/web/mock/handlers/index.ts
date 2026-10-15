@@ -43,6 +43,7 @@ import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
+import { SEVERAL_ACCOUNT_SERVICES } from "@rome/api-types/several-accounts";
 import { connections } from "./connections-store";
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
 import { memoryFileHandlers } from "./memory-files";
@@ -1222,6 +1223,45 @@ export const handlers = [
   http.get("/api/system/upgrade/status/snapshot", () => HttpResponse.json(upgradeStatus())),
   http.get("/api/agents", () => HttpResponse.json({ agents: [{ name: "build" }] })),
   http.get("/api/connections", () => HttpResponse.json(connections)),
+  // "Add another account": mint an unauthorized Connection under the lowest
+  // free channel name (`feishu-2`, `feishu-3`). Its setup ceremony is out of
+  // reach here (see "What mock mode cannot do"), so the new account stays
+  // unconnected until reload.
+  http.post("/api/connections", async ({ request }) => {
+    const body = (await request.json()) as { service?: string };
+    const service = body.service ?? "";
+    if (!SEVERAL_ACCOUNT_SERVICES.has(service)) {
+      return HttpResponse.json(
+        { error: `${service || "This service"} does not offer several accounts.` },
+        { status: 400 },
+      );
+    }
+    const first = connections.connections.find((candidate) => candidate.service === service);
+    const taken = new Set(connections.connections.map((candidate) => candidate.channel));
+    let n = 2;
+    while (taken.has(`${service}-${n}`)) n++;
+    const channel = `${service}-${n}`;
+    const grantNames = Object.keys(first?.grants ?? {});
+    const grants = Object.fromEntries(grantNames.map((grant) => [grant, "unauthorized" as const]));
+    const connection: ApiConnection = {
+      id: `${channel}-mock`,
+      service,
+      label: first?.label.split(" · ")[0] ?? service,
+      grants,
+      display: Object.fromEntries(grantNames.map((grant) => [grant, null])),
+      capabilities: {
+        talk: { state: "needs-auth", missingGrants: grantNames },
+        act: { state: "unsupported" },
+        watch: { state: "unsupported" },
+      },
+      connect: null,
+      setups: {},
+      channel,
+      severalAccounts: true,
+    };
+    connections.connections.push(connection);
+    return HttpResponse.json({ connection }, { status: 201 });
+  }),
   // An authorized grant is what puts Disconnect on a card, so seeding the three
   // above without this would make every one of those buttons fail locally.
   // Teardown is real here, the way the route runs it: the grant

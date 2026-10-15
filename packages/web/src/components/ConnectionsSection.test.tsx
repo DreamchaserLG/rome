@@ -46,6 +46,8 @@ function connection(
     },
     connect: null,
     setups: {},
+    channel: null,
+    severalAccounts: false,
     ...overrides,
   };
 }
@@ -275,5 +277,34 @@ describe("ConnectionsSection — Composio row", () => {
     renderSection(minimalConnections(), composioStatus({ installed: true, loggedIn: false }));
     fireEvent.click(screen.getByRole("button", { name: "Open Composio" }));
     expect(screen.getByText("Connect")).toBeTruthy();
+  });
+});
+
+describe("ConnectionsSection — several accounts", () => {
+  function feishu(overrides: Partial<ApiConnection> = {}): ApiConnection {
+    return connection({
+      service: "feishu",
+      channel: "feishu",
+      grants: { app: "authorized" },
+      severalAccounts: true,
+      ...overrides,
+    });
+  }
+
+  it("lists each account as its own row and opens the one clicked", () => {
+    renderSection([
+      feishu(),
+      feishu({
+        id: "conn-feishu-2",
+        channel: "feishu-2",
+        display: { app: grantDisplay({ displayName: "Sales Bot" }) },
+      }),
+    ]);
+
+    expect(screen.getByRole("button", { name: "Open Feishu" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open Feishu · Sales Bot" }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Feishu · Sales Bot")).toBeTruthy();
   });
 });

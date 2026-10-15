@@ -1,6 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "@/i18n";
@@ -58,6 +59,8 @@ function connection(
     },
     connect: null,
     setups: {},
+    channel: null,
+    severalAccounts: false,
     ...overrides,
   };
 }
@@ -366,5 +369,97 @@ describe("ConnectionDetailBody — webchat and remaining channels", () => {
 
     const bullet = "Reply when people message @mybot";
     expect(within(container).getAllByText(bullet)).toHaveLength(1);
+  });
+});
+
+describe("ConnectionDetailBody — accounts", () => {
+  function feishu(overrides: Partial<ApiConnection> = {}): ApiConnection {
+    return connection({
+      service: "feishu",
+      channel: "feishu",
+      grants: { app: "authorized" },
+      display: { app: grantDisplay({ displayName: "Support Bot" }) },
+      capabilities: {
+        talk: { state: "unlocked" },
+        act: { state: "unsupported" },
+        watch: { state: "unsupported" },
+      },
+      severalAccounts: true,
+      ...overrides,
+    });
+  }
+
+  type FetchCall = { url: string; method: string; body: unknown };
+
+  function mockAccountsFetch() {
+    const calls: FetchCall[] = [];
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (url === "/api/connections" && method === "POST") {
+        return new Response(
+          JSON.stringify({ connection: feishu({ id: "conn-feishu-2", channel: "feishu-2" }) }),
+          { status: 201 },
+        );
+      }
+      if (url === "/api/approvals") return new Response("[]", { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    return calls;
+  }
+
+  function renderAccountBody(
+    card: ConnectionCard,
+    handlers: {
+      onRefresh?: () => void;
+      onFlash?: (message: string) => void;
+      onOpenAccount?: (route: string) => void;
+    } = {},
+  ) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <ConnectionDetailBody
+            card={card}
+            composio={null}
+            onRefresh={handlers.onRefresh ?? (() => {})}
+            onFlash={handlers.onFlash ?? (() => {})}
+            onOpenAccount={handlers.onOpenAccount}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("adds another account and opens it by its route", async () => {
+    const calls = mockAccountsFetch();
+    const onOpenAccount = rs.fn();
+    renderAccountBody(cardFor([feishu()], "feishu"), { onOpenAccount });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Add another account" }));
+
+    await waitFor(() => expect(onOpenAccount).toHaveBeenCalledWith("feishu-2"));
+    expect(calls.find((call) => call.method === "POST")).toEqual({
+      url: "/api/connections",
+      method: "POST",
+      body: { service: "feishu" },
+    });
+  });
+
+  it("hides the account controls until the Talk is connected", () => {
+    renderAccountBody(cardFor([feishu({ grants: { app: "unauthorized" } })], "feishu"), {
+      onOpenAccount: rs.fn(),
+    });
+    expect(screen.queryByRole("button", { name: "Add another account" })).toBeNull();
+  });
+
+  it("offers no second account for a service that holds one", () => {
+    renderAccountBody(cardFor([feishu({ severalAccounts: false })], "feishu"), {
+      onOpenAccount: rs.fn(),
+    });
+    expect(screen.queryByRole("button", { name: "Add another account" })).toBeNull();
   });
 });

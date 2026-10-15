@@ -61,6 +61,12 @@ export interface ApiConnection {
    *  setup (if any). Lets a reopened dashboard re-attach instead of starting
    *  a fresh one. Empty when no setup is in progress. */
   setups: Record<string, string>;
+  /** The channel this Connection backs, shown on screens as an account. The
+   *  first account of a service is named after it (`feishu`); later ones are
+   *  `feishu-2`, `feishu-3`. Null for placeholders and services without a Talk. */
+  channel: string | null;
+  /** Whether the service offers "add another account". */
+  severalAccounts: boolean;
 }
 
 export async function fetchConnections(): Promise<ApiConnection[]> {
@@ -89,4 +95,15 @@ export async function revokeConnectionGrant(
     return { ok: false, error: payload?.error || "Failed to disconnect." };
   }
   return { ok: true };
+}
+
+/** Mint a fresh, unauthorized Connection for a service that offers several
+ *  accounts. The dashboard then runs the ordinary setup against its id. */
+export async function createConnection(service: string): Promise<ApiConnection> {
+  const payload = await fetchJson<{ connection: ApiConnection }>("/api/connections", {
+    method: "POST",
+    json: { service },
+    fallback: "Failed to add an account.",
+  });
+  return payload.connection;
 }
