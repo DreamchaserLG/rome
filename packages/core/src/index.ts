@@ -78,7 +78,7 @@ import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { createAccountNames } from "./channels/account-names.js";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
-import { channelList, laterChannel } from "./channels/channel-list.js";
+import { channelList, joinLaterChannel } from "./channels/channel-list.js";
 import { claimChannels } from "./channels/claim-channels.js";
 import type { ChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
@@ -1242,20 +1242,16 @@ async function main() {
   // list when its Connection first unlocks Talk, before its stream starts, and
   // a hook that takes added channels subscribes to it.
   connectionRegistry.onUnlocked("talk", (connection) => {
-    const name = channelOf(connection);
-    if (channels.some((channel) => channel.name === name)) return;
-    const channel = laterChannel(
-      { registry: connectionRegistry, admit, channelOf },
-      connection.service,
-      name,
+    const channel = joinLaterChannel(
+      { registry: connectionRegistry, admit, channelOf, channels },
+      connection,
     );
     if (!channel) return;
-    channels.push(channel);
     const added = withInboundSpans([channel], "channel-message");
     hookChannels.push(...added);
     messageHook.addChannels?.(added).catch((error: unknown) => {
       log.error("channel-message hook did not subscribe to a later channel", {
-        channel: name,
+        channel: channel.name,
         error: error instanceof Error ? error.message : String(error),
       });
     });
