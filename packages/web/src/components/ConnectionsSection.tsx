@@ -58,10 +58,17 @@ export function ConnectionsSection({
   const { t } = useTranslation("settings");
   const cards = buildConnectionCards(connections, composio);
 
-  // Which row's detail dialog is open (null = closed). Track the service, not
+  // Which row's detail dialog is open (null = closed). Track the route, not
   // the card object, so a refresh mid-dialog re-derives the LIVE card.
-  const [selectedService, setSelectedService] = useState<string | null>(null);
-  const selected = cards.find((card) => card.service === selectedService) ?? null;
+  const [selectedRoute, setSelectedRoute] = useState<string | null>(null);
+  const selected = cards.find((card) => card.route === selectedRoute) ?? null;
+
+  // A freshly added account has no card until the list refetches, so refetch
+  // first and then point the dialog at it.
+  const openAccount = async (route: string) => {
+    await onRefresh();
+    setSelectedRoute(route);
+  };
 
   return (
     <Measure className="space-y-6">
@@ -116,12 +123,12 @@ export function ConnectionsSection({
           ) : (
             cards.map((card) => (
               <Button
-                key={card.service}
+                key={card.route}
                 type="button"
                 variant="outline"
                 size="default"
                 align="between"
-                onClick={() => setSelectedService(card.service)}
+                onClick={() => setSelectedRoute(card.route)}
                 className="h-auto w-full bg-surface py-3 text-left hover:bg-accent"
                 aria-label={`Open ${card.label}`}
               >
@@ -139,9 +146,10 @@ export function ConnectionsSection({
         <ConnectionDetailDialog
           card={selected}
           composio={composio}
-          onClose={() => setSelectedService(null)}
+          onClose={() => setSelectedRoute(null)}
           onRefresh={() => void onRefresh()}
           onFlash={onFlash}
+          onOpenAccount={openAccount}
         />
       </Section>
     </Measure>

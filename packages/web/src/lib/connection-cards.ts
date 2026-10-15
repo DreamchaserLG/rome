@@ -2,7 +2,10 @@
  * Presentation adapter for the unified Connections surface.
  *
  * `GET /api/connections` is the single data source — this module adds ONLY
- * presentation: labels, brand keys, ordering, and slot grouping (the Telegram
+ * presentation: labels, brand keys, ordering, and slot grouping. A service can
+ * hold several Connections, each backing one account (channel), and each
+ * account gets its own card routed by its channel name. Only the first account
+ * of a service takes the folded slots below (the Telegram
  * personal account folds onto the Telegram card as its `session` slot; the
  * Composio account broker appends as a synthetic card since it is not a
  * registry connection). Connection state stays registry vocabulary
@@ -48,7 +51,12 @@ export interface ConnectionSlot {
 }
 
 export interface ConnectionCard {
-  /** Service name — the brand key, copy key, route id, and ceremony dispatch. */
+  /** The card's route id (`/settings/connections/:route`): the account's
+   *  channel id when it has one, else the service. The first account of a
+   *  service routes as the service (`feishu`), and later ones by their opaque
+   *  channel id. */
+  route: string;
+  /** Service name — the brand key, copy key, and ceremony dispatch. */
   service: string;
   label: string;
   kind: "channel" | "oauth" | "composio";
@@ -59,6 +67,11 @@ export interface ConnectionCard {
   degradation: CapabilityDegradation | null;
   slots: ConnectionSlot[];
   connect: ConnectHint | null;
+  /** The account's channel id; null for placeholders and services without a
+   *  Talk. Never shown on screens. */
+  channel: string | null;
+  /** Whether the service offers "add another account". */
+  severalAccounts: boolean;
 }
 
 /** Fixed dashboard ordering: Talk channels, webchat, OAuth services; services
@@ -172,13 +185,19 @@ function toCard(connection: ApiConnection): ConnectionCard {
       ]
     : toSlots(connection);
   return {
+    route: connection.channel || connection.service,
     service: connection.service,
+    // A later account's label is set once its place among its service's
+    // accounts is known (`labelLaterAccounts`).
     label: serviceLabel(connection.service),
     kind: OAUTH_SERVICES.has(connection.service) ? "oauth" : "channel",
     alwaysOn,
     degradation: runtimeDegradation(connection),
     slots,
     connect: connection.connect,
+    // Read defensively: a core that predates accounts omits these fields.
+    channel: connection.channel ?? null,
+    severalAccounts: connection.severalAccounts === true,
   };
 }
 
@@ -188,6 +207,7 @@ function toCard(connection: ApiConnection): ConnectionCard {
  *  once the CLI is installed on the host. */
 function composioCard(status: ComposioCliStatus): ConnectionCard {
   return {
+    route: "composio",
     service: "composio",
     label: serviceLabel("composio"),
     kind: "composio",
@@ -205,6 +225,8 @@ function composioCard(status: ComposioCliStatus): ConnectionCard {
       },
     ],
     connect: null,
+    channel: null,
+    severalAccounts: false,
   };
 }
 
@@ -229,18 +251,20 @@ export function buildConnectionCards(
       folded.set(connection.service, connection);
       continue;
     }
-    // One card per service: the registry currently holds at most one connection
-    // per service, so a duplicate would be an upstream invariant break — keep
-    // the first and let the detail surface expose the anomaly.
-    if (!cards.has(connection.service)) {
-      cards.set(connection.service, toCard(connection));
+    // One card per account, keyed by its route. Two connections claiming one
+    // route would be an upstream invariant break — keep the first and let the
+    // detail surface expose the anomaly.
+    const card = toCard(connection);
+    if (!cards.has(card.route)) {
+      cards.set(card.route, card);
     }
   }
 
   // A personal account is its own registry service but presents as the
   // `session` slot of its brand's card. The brand card may be absent — a
   // service can be registered without the bot half ever being connected — so
-  // the fold creates it rather than dropping the account.
+  // the fold creates it rather than dropping the account. The fold lands on
+  // the brand's first account, whose route is the brand itself.
   for (const [service, connection] of folded) {
     const brand = FOLDED_ACCOUNT_SERVICES[service]!;
     const sessionSlots = toSlots(connection, "session");
@@ -250,6 +274,7 @@ export function buildConnectionCards(
       card.degradation ??= runtimeDegradation(connection);
     } else {
       cards.set(brand, {
+        route: brand,
         service: brand,
         label: serviceLabel(brand),
         kind: "channel",
@@ -257,6 +282,8 @@ export function buildConnectionCards(
         degradation: runtimeDegradation(connection),
         slots: sessionSlots,
         connect: null,
+        channel: null,
+        severalAccounts: false,
       });
     }
   }
@@ -265,13 +292,42 @@ export function buildConnectionCards(
     cards.set("composio", composioCard(composio));
   }
 
-  return [...cards.values()].sort((a, b) => {
+  const sorted = [...cards.values()].sort((a, b) => {
     if ((a.kind === "composio") !== (b.kind === "composio")) return a.kind === "composio" ? 1 : -1;
     const ai = SERVICE_ORDER.indexOf(a.service);
     const bi = SERVICE_ORDER.indexOf(b.service);
     if (ai !== -1 || bi !== -1) {
-      return (ai === -1 ? SERVICE_ORDER.length : ai) - (bi === -1 ? SERVICE_ORDER.length : bi);
+      const byService =
+        (ai === -1 ? SERVICE_ORDER.length : ai) - (bi === -1 ? SERVICE_ORDER.length : bi);
+      if (byService !== 0) return byService;
+    } else if (a.service !== b.service) {
+      return a.service.localeCompare(b.service);
     }
-    return a.service.localeCompare(b.service);
+    return compareAccounts(a, b);
   });
+  labelLaterAccounts(sorted);
+  return sorted;
+}
+
+/** Within one service the first account leads. Later accounts keep the order
+ *  the server lists them in, since their channel ids are opaque. */
+function compareAccounts(a: ConnectionCard, b: ConnectionCard): number {
+  if ((a.route === a.service) !== (b.route === b.service)) return a.route === a.service ? -1 : 1;
+  return 0;
+}
+
+/** Labels each later account "Feishu · <identity>", or "Feishu 2" by its place
+ *  among the service's accounts until it has an identity. A channel id never
+ *  reaches a label. Takes the cards in display order. */
+function labelLaterAccounts(cards: ConnectionCard[]): void {
+  const seen = new Map<string, number>();
+  for (const card of cards) {
+    const place = (seen.get(card.service) ?? 0) + 1;
+    seen.set(card.service, place);
+    if (card.route === card.service) continue;
+    const identity = card.slots.find((slot) => slot.key !== "session")?.identity;
+    card.label = identity
+      ? `${serviceLabel(card.service)} · ${identity}`
+      : `${serviceLabel(card.service)} ${place}`;
+  }
 }

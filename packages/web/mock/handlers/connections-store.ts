@@ -1,3 +1,4 @@
+import { SEVERAL_ACCOUNT_SERVICES } from "@rome/api-types/several-accounts";
 import type { ApiConnection } from "@/lib/connections-api";
 
 // The connection ledger. In its own module because two surfaces read it and one
@@ -28,6 +29,8 @@ export const connections: { connections: ApiConnection[] } = {
       },
       connect: null,
       setups: {},
+      channel: null,
+      severalAccounts: false,
     },
     ...[
       { service: "email", label: "Email", grant: "inbox", email: "guardian@example.com" },
@@ -49,6 +52,8 @@ export const connections: { connections: ApiConnection[] } = {
         },
         connect: null,
         setups: {},
+        channel: service,
+        severalAccounts: SEVERAL_ACCOUNT_SERVICES.has(service),
       }),
     ),
     {
@@ -66,6 +71,8 @@ export const connections: { connections: ApiConnection[] } = {
       },
       connect: null,
       setups: {},
+      channel: "discord",
+      severalAccounts: true,
     },
     {
       id: "telegram-1",
@@ -82,6 +89,8 @@ export const connections: { connections: ApiConnection[] } = {
       },
       connect: null,
       setups: {},
+      channel: "telegram",
+      severalAccounts: true,
     },
     {
       // The channel behind the People page's WhatsApp section: the address-book
@@ -102,6 +111,8 @@ export const connections: { connections: ApiConnection[] } = {
       },
       connect: null,
       setups: {},
+      channel: "whatsapp",
+      severalAccounts: false,
     },
     {
       id: "linkedin-1",
@@ -118,6 +129,8 @@ export const connections: { connections: ApiConnection[] } = {
       },
       connect: null,
       setups: {},
+      channel: "linkedin",
+      severalAccounts: false,
     },
   ],
 };

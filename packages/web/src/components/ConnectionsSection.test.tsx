@@ -8,6 +8,9 @@ import { ConnectionsSection } from "@/components/ConnectionsSection";
 import type { ApiConnection, GrantDisplay, GrantState } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 
+/** A later account's channel id, opaque as core mints it. */
+const SECOND_FEISHU = "c7d1a0e2-5b3f-4e8a-9c61-2f0b7d4e8a13";
+
 beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
@@ -46,6 +49,8 @@ function connection(
     },
     connect: null,
     setups: {},
+    channel: null,
+    severalAccounts: false,
     ...overrides,
   };
 }
@@ -275,5 +280,34 @@ describe("ConnectionsSection — Composio row", () => {
     renderSection(minimalConnections(), composioStatus({ installed: true, loggedIn: false }));
     fireEvent.click(screen.getByRole("button", { name: "Open Composio" }));
     expect(screen.getByText("Connect")).toBeTruthy();
+  });
+});
+
+describe("ConnectionsSection — several accounts", () => {
+  function feishu(overrides: Partial<ApiConnection> = {}): ApiConnection {
+    return connection({
+      service: "feishu",
+      channel: "feishu",
+      grants: { app: "authorized" },
+      severalAccounts: true,
+      ...overrides,
+    });
+  }
+
+  it("lists each account as its own row and opens the one clicked", () => {
+    renderSection([
+      feishu(),
+      feishu({
+        id: "conn-feishu-2",
+        channel: SECOND_FEISHU,
+        display: { app: grantDisplay({ displayName: "Sales Bot" }) },
+      }),
+    ]);
+
+    expect(screen.getByRole("button", { name: "Open Feishu" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open Feishu · Sales Bot" }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Feishu · Sales Bot")).toBeTruthy();
   });
 });
