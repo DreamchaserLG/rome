@@ -1921,6 +1921,11 @@ export interface ChannelMessageHook {
    *  subscription follows whatever backs it, so the host never calls the hook
    *  per Connection. */
   register(): Promise<void>;
+  /** Subscribe to `channels`, which the host has just appended to the deps'
+   *  `channels`, such as a second bot whose Talk first unlocked. The host
+   *  calls it only on a hook that defines it. A hook without it hears those
+   *  channels from its next `register()`. */
+  addChannels?(channels: readonly Channel[]): Promise<void>;
   /** Detach every subscription `register` took out, so
    * the host can swap in a replacement instance (e.g. after an app-keys
    * environment change) without double-handling inbound messages. A hook
