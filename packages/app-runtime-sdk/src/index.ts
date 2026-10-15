@@ -1900,6 +1900,10 @@ export interface Channel {
   readonly name: string;
   readonly send: ChannelSend | null;
   readonly inbound: ChannelInbound | null;
+  /** The canonical id (`<app-id>:<local-name>`) of the agent linked to this
+   *  channel, or null or absent when none is linked. Read it when a message
+   *  arrives: a relink changes it without replacing the channel. */
+  readonly linkedAgent?: string | null;
 }
 
 /**

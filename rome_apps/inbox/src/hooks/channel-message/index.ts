@@ -170,17 +170,18 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         });
         return null;
       });
-    void this.runTurn(message, service, connectionId, attachments, routedAgentName, activity);
+    void this.runTurn(channel, message, connectionId, attachments, routedAgentName, activity);
   }
 
   private async runTurn(
+    channel: Channel,
     message: InboundEvent["message"],
-    service: string,
     connectionId: string,
     attachments: InboundEvent["message"]["attachments"],
     routedAgentName: string | undefined,
     activity: Promise<ChannelActivitySession | null>,
   ): Promise<void> {
+    const service = channel.name;
     const slowTurnMs = this.options.slowTurnMs ?? SLOW_TURN_MS;
     const slow = setTimeout(() => {
       (this.options.log ?? log).warn("message turn still running", {
@@ -208,6 +209,8 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           messageId: message.messageId,
           replyTo: message.replyTo,
           routedAgentName,
+          // Read per message: a relink changes it on the same channel.
+          linkedAgentName: channel.linkedAgent ?? undefined,
         },
         {
           initiator: `connection:${connectionId}`,

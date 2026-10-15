@@ -770,7 +770,7 @@ function fieldRow(label: string, control: object): object {
 function formatGroupConfigConfirmation(cfg: FeishuChannelConfig): string {
   return [
     "Feishu group settings updated.",
-    `Agent: ${cfg.agentName ?? "main"}`,
+    `Agent: ${cfg.agentName ?? "account default"}`,
     `Group policy: ${cfg.mode === "ignore" ? "Disabled" : "Active"}`,
     `Reply trigger: ${(cfg.requireMention ?? true) ? "@ only" : "Every message"}`,
     `Reply placement: ${(cfg.autoThread ?? true) ? "Thread" : "Inline"}`,

@@ -93,8 +93,9 @@ function createHarness(options: ConstructorParameters<typeof ChannelMessageHook>
     (features.get(connectionId)?.[name] ?? null) as ChannelFeatures[K] | null;
   // One channel per Connection, as the channel list builds them.
   const subscribes = rs.fn((_name: string) => undefined);
-  const channel = (name: string, connectionId: string): Channel => ({
+  const channel = (name: string, connectionId: string, linkedAgent?: string | null): Channel => ({
     name,
+    linkedAgent,
     send: {
       send: (conversationId, outgoing) => send(connectionId, conversationId, outgoing),
       get activity() {
@@ -440,6 +441,24 @@ describe("ChannelMessageHook", () => {
     await expect(harness.emit(FEISHU_2_ID, message())).rejects.toThrow("no subscription");
     await harness.hook.register();
     expect(harness.subscribes).toHaveBeenCalledTimes(8);
+  });
+
+  it("passes the channel's linked agent beside the routed agent", async () => {
+    harness.channels.push(harness.channel("feishu-2", FEISHU_2_ID, "envoy:scout"));
+    await harness.hook.register();
+    harness.get.mockImplementation(async ({ connectionId, conversationId }) =>
+      snapshot(connectionId, conversationId, { agentName: "override" }),
+    );
+
+    await harness.emit(FEISHU_2_ID, message());
+    await harness.emit(TELEGRAM_ID, message());
+
+    expect(harness.run.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ routedAgentName: "override", linkedAgentName: "envoy:scout" }),
+    );
+    expect(harness.run.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({ routedAgentName: "override", linkedAgentName: undefined }),
+    );
   });
 
   it("refuses, by name, a host that passes no channels", () => {

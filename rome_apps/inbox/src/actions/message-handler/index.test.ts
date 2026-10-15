@@ -963,3 +963,106 @@ describe("per-channel agent routing (trusted path)", () => {
     expect(agentRunner.calls[0].agentName).toBe("sentinel");
   });
 });
+
+// ---------------------------------------------------------------------------
+// The channel's linked agent answers when the group has no override. The
+// conversation stores only the override, so a relink takes effect on the next
+// message.
+// ---------------------------------------------------------------------------
+
+describe("linked agent", () => {
+  beforeEach(() => {
+    rs.clearAllMocks();
+  });
+
+  const guardianPerson: PersonRecord = {
+    id: "guardian",
+    displayName: "Guardian",
+    bondLevel: "guardian",
+    channelMappings: [{ channel: "feishu", channelUserId: "g-feishu" }],
+    profilePath: null,
+  };
+
+  const inbound = (overrides: Record<string, unknown> = {}) => ({
+    channel: "feishu-2",
+    channelUserId: "g-feishu",
+    threadId: "group-1",
+    threadType: "group",
+    displayName: "Guardian",
+    text: "hello",
+    messageId: "msg-1",
+    ...overrides,
+  });
+
+  it("answers with the group's override before the linked agent", async () => {
+    const { deps, agentRunner } = createMessageHandlerDeps({
+      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
+      knownAgents: ["main", "sentinel", "envoy", "pm:assistant", "envoy:scout"],
+      agentResponses: [[{ type: "result", content: "Hi." }]],
+    });
+    const action = createAction(actionConfig, deps);
+
+    await action.execute(
+      inbound({ routedAgentName: "pm:assistant", linkedAgentName: "envoy:scout" }),
+    );
+
+    expect(agentRunner.calls[0].agentName).toBe("pm:assistant");
+  });
+
+  it("answers with the linked agent before main", async () => {
+    const { deps, agentRunner, approvals } = createMessageHandlerDeps({
+      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
+      knownAgents: ["main", "sentinel", "envoy", "envoy:scout"],
+      agentResponses: [[{ type: "result", content: "Hi." }]],
+    });
+    const action = createAction(actionConfig, deps);
+
+    await action.execute(inbound({ linkedAgentName: "envoy:scout" }));
+
+    expect(agentRunner.calls[0].agentName).toBe("envoy:scout");
+    expect(approvals[0]).toMatchObject({ requestedBy: "envoy:scout" });
+  });
+
+  it("answers a private chat on the linked channel with the linked agent", async () => {
+    const { deps, agentRunner } = createMessageHandlerDeps({
+      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
+      knownAgents: ["main", "sentinel", "envoy", "envoy:scout"],
+      agentResponses: [[{ type: "result", content: "Hi." }]],
+    });
+    const action = createAction(actionConfig, deps);
+
+    await action.execute(
+      inbound({ threadId: "g-feishu", threadType: "private", linkedAgentName: "envoy:scout" }),
+    );
+
+    expect(agentRunner.calls[0].agentName).toBe("envoy:scout");
+  });
+
+  it("falls back to main when the linked agent is not loaded", async () => {
+    const { deps, agentRunner } = createMessageHandlerDeps({
+      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
+      knownAgents: ["main", "sentinel", "envoy"],
+      agentResponses: [[{ type: "result", content: "Hi." }]],
+    });
+    const action = createAction(actionConfig, deps);
+
+    await action.execute(inbound({ linkedAgentName: "envoy:scout" }));
+
+    expect(agentRunner.calls[0].agentName).toBe("main");
+  });
+
+  it("never stores the linked agent on the conversation", async () => {
+    const { deps, conversations } = createMessageHandlerDeps({
+      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
+      knownAgents: ["main", "sentinel", "envoy", "envoy:scout"],
+      agentResponses: [[{ type: "result", content: "Hi." }]],
+    });
+    const action = createAction(actionConfig, deps);
+
+    await action.execute(inbound({ linkedAgentName: "envoy:scout" }));
+
+    expect(conversations.ensureChannelConversation).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: "feishu-2", threadId: "group-1", agentName: "main" }),
+    );
+  });
+});

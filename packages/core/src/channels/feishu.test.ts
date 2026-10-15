@@ -870,7 +870,7 @@ describe("FeishuAdapter", () => {
       input: {
         markdown: [
           "Feishu group settings updated.",
-          "Agent: main",
+          "Agent: account default",
           "Group policy: Active",
           "Reply trigger: @ only",
           "Reply placement: Thread",

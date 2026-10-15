@@ -73,6 +73,13 @@ export interface MessageHandlerInput {
   personOverride?: MessageHandlerPersonOverride;
   /** Optional project working directory for this dedicated chat session. */
   workingDir?: string;
+  /** The group's per-conversation agent override (`routing.agentName`). The
+   *  conversation stores it, and it answers before the channel's linked agent. */
+  routedAgentName?: string;
+  /** Canonical id of the agent linked to the channel. It answers when the
+   *  conversation has no override, and the conversation never stores it. An
+   *  agent that is not loaded falls back to main. */
+  linkedAgentName?: string;
 }
 
 export interface MessageHandlerOutput {

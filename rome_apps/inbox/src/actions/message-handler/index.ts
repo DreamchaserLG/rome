@@ -322,6 +322,19 @@ async function resolveRequestedAgent(
   }
 }
 
+/** The channel's linked agent when it is loaded, otherwise main. */
+async function resolveLinkedAgent(
+  deps: MessageHandlerRuntimeDeps,
+  linkedAgent: string,
+  channel: string,
+): Promise<string> {
+  const resolved = await resolveRequestedAgent(deps, linkedAgent);
+  if (resolved !== linkedAgent) {
+    log.warn("linked agent is not loaded; main answers", { channel, linkedAgent });
+  }
+  return resolved;
+}
+
 // ---------------------------------------------------------------------------
 // Trusted path: main agent -> envoy check -> send / approval gate
 // ---------------------------------------------------------------------------
@@ -644,9 +657,6 @@ export function createMessageHandlerAction(
           projectName: selectedProjectName,
           projectPath: selectedProjectPath,
         });
-        // Root conversations retain their persisted binding. Native thread
-        // sessions are refreshed by the repository from their parent binding.
-        const targetAgent = conversation.agentName ?? "main";
         const platformMessageId =
           typeof args.messageId === "string" && args.messageId
             ? args.messageId
@@ -661,6 +671,18 @@ export function createMessageHandlerAction(
             : undefined;
         const replyTo = parseMessageReplyReference(args.replyTo);
         const replyToPlatformMessageId = replyTo?.messageId;
+
+        // The conversation's agent_name holds only the group's override, so a
+        // relink takes effect on the next message. Root conversations retain
+        // their persisted binding, and native thread sessions are refreshed by
+        // the repository from their parent binding.
+        const linkedAgent =
+          typeof args.linkedAgentName === "string" && args.linkedAgentName.trim()
+            ? args.linkedAgentName.trim()
+            : undefined;
+        const targetAgent =
+          conversation.agentName ??
+          (linkedAgent ? await resolveLinkedAgent(deps, linkedAgent, channel) : "main");
         const replyToLevels =
           (await settings.get<string[]>("replyToBondLevels")) ?? DEFAULT_REPLY_TO_BOND_LEVELS;
         if (!canReplyToBondLevel(bondLevel, replyToLevels)) {

@@ -80,6 +80,7 @@ import { createAccountNames } from "./channels/account-names.js";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList, laterChannel } from "./channels/channel-list.js";
 import { claimChannels } from "./channels/claim-channels.js";
+import { withLinkedAgent } from "./channels/linked-agents.js";
 import type { ChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { sendApprovalCard } from "./actions/approval-card.js";
@@ -1183,8 +1184,11 @@ async function main() {
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
 
   // The channel-message hook hears every channel through these, so each
-  // inbound message it handles is traced and logged once.
-  const hookChannels = withInboundSpans(channels, "channel-message");
+  // inbound message it handles is traced and logged once. The hook alone reads
+  // a channel's linked agent, so the getter goes on these copies.
+  const hookChannels = withInboundSpans(channels, "channel-message").map((channel) =>
+    withLinkedAgent(channel, channelRecords),
+  );
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
   const channelMessageHookArtifact = appCatalog
     .listArtifacts("hook")
@@ -1250,7 +1254,9 @@ async function main() {
     );
     if (!channel) return;
     channels.push(channel);
-    const added = withInboundSpans([channel], "channel-message");
+    const added = withInboundSpans([channel], "channel-message").map((spanned) =>
+      withLinkedAgent(spanned, channelRecords),
+    );
     hookChannels.push(...added);
     messageHook.addChannels?.(added).catch((error: unknown) => {
       log.error("channel-message hook did not subscribe to a later channel", {

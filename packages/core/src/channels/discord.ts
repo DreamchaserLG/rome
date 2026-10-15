@@ -1144,7 +1144,7 @@ export class DiscordAdapter {
           if (sub === "clear") {
             await this.updateChannelConfig(channelId, { agentName: undefined, ...audit });
             await interaction.editReply({
-              content: `✓ ${mention} agent binding removed — messages now route to main`,
+              content: `✓ ${mention} agent binding removed — messages now route to this account's default agent`,
             });
             return;
           }
@@ -1162,7 +1162,7 @@ export class DiscordAdapter {
             if (isCoreMainAgentId(name)) {
               await this.updateChannelConfig(channelId, { agentName: undefined, ...audit });
               await interaction.editReply({
-                content: `✓ ${mention} binding removed — messages now route to main`,
+                content: `✓ ${mention} binding removed — messages now route to this account's default agent`,
               });
               return;
             }

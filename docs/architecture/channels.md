@@ -48,6 +48,8 @@ A channel can be linked to an [agent](../concepts/agents.md) ([ADR](../adrs/chan
 - Only a channel of a Feishu, Telegram, or Discord bot, or of the signed-in Telegram user, can be linked. A channel that carries Rome's own traffic, such as the Cloud `agents` channel, stays with main.
 - On one platform, an agent is linked to at most one channel. A database constraint enforces it, not a check before the write. Linking an agent to a second channel on that platform moves the link and leaves the first channel unlinked, in one transaction.
 - A channel whose Connection is removed loses its link.
+- In phase 1 the answering agent is a conversation's override if one is set, then the channel's linked agent, then the main agent. Private chats follow the linked agent too. A linked agent that is not loaded falls back to main. The conversation never stores the linked agent, so a relink takes effect on the next message ([ADR](../adrs/conversation-identity-from-channel-address-not-session-lifetime.md#amendment-2026-10-15-the-answering-agent-comes-from-the-channel)).
+- In phase 1 an override of main is stored as no override, so a conversation on a linked channel cannot be pinned to main. Session lists and filters that read a conversation's stored agent show the linked agent's conversations under main.
 - In phase 1, People and [account pairing](#account-pairing) key an account by its service, not by its channel. An address on a service's second channel resolves to the same person as on its first, when the platform gives that person one address across bots. Telegram and Discord do. Feishu does not: its sender id is issued per app, so a guardian is paired again on a second Feishu bot.
 
 ## Connection setup

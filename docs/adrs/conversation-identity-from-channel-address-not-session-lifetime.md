@@ -46,3 +46,16 @@ Future diffs must respect:
 - The conversation and the provider session stay independently derived from the same address. Neither stores a reference to the other.
 - Elapsed time never ends a conversation. The `session.reset` policy rotates the provider generation behind an unchanged address, and the conversation record and its messages survive that rotation.
 - The bound agent is metadata on a conversation, not part of its address. Rebinding an agent stays an explicit operation.
+
+## Amendment (2026-10-15): the answering agent comes from the channel
+
+The agent that answers in a conversation is read from the conversation's channel at turn time: it is the channel's [linked agent](../architecture/channels.md#linked-agents). The conversation does not store it. In phase 1 a group's existing per-conversation agent override still wins, then the channel's linked agent, then the main agent.
+
+Relinking a channel changes no conversation address and keeps the transcript. The new agent's first turn opens its own provider session over the stored transcript. The old agent's provider thread is not carried over.
+
+This narrows the last "future diffs must respect" rule. The bound agent is not part of the address, and relinking the channel is the explicit operation that changes it.
+
+### Alternatives
+
+- **Lock the agent on a conversation's first turn.** Rejected because a relink then reaches only new conversations. Every existing group keeps answering as the old agent, with no way to move it short of a reset.
+- **Fold the agent into the conversation address.** Rejected for the reason recorded above: a relink would split every conversation on the channel at an unchanged chat. The new agent would start without the history the guardian expects it to keep.
