@@ -13,45 +13,46 @@
     "description": "人们可以在聊天应用中找到的智能体，每个都通过自己的关联账号。",
     "add": "添加智能体",
     "emptyTitle": "还没有外联智能体",
-    "emptyBody": "智能体有了关联账号后会出现在这里。添加一个智能体，为它创建飞书账号。"
+    "emptyBody": "智能体有了关联账号后会出现在这里。添加一个智能体，给它在聊天应用里开一个账号。"
   },
   "add": {
     "title": "添加智能体",
-    "description": "选择人们要找的智能体，下一步为它创建飞书账号。",
+    "description": "选择大家要找的智能体。接下来选一个聊天应用，在那里给它开一个账号。",
     "search": "搜索智能体",
     "noMatch": "没有匹配的智能体。",
     "footnote_one": "{{count}} 个智能体没有关联账号。智能体在应用中创建和编辑。",
     "footnote_other": "{{count}} 个智能体没有关联账号。智能体在应用中创建和编辑。"
   },
   "newBot": {
-    "title": "为 {{agent}} 创建飞书账号",
+    "title": "{{agent}} 在{{app}}",
     "description": "账号关联到 {{agent}}。之后可以改为关联其他智能体。",
-    "name": "飞书中的账号名称",
+    "name": "{{app}}里的账号名",
     "nameHint": "人们在群里看到并 @ 这个名称。",
     "region": "区域",
     "regionFeishu": "飞书（中国）",
     "regionLark": "Lark（国际）",
     "showQr": "显示二维码",
     "qrPlaceholder": "二维码显示在这里。",
-    "qrAlt": "飞书应用扫码二维码",
-    "scanTitle": "用飞书应用扫码",
-    "scanBody": "飞书会在你的企业中创建 {{bot}} 账号并关联到 Rome。",
-    "waiting": "等待扫码"
+    "qrAlt": "{{app}}应用的二维码",
+    "scanTitle": "用{{app}}应用扫码",
+    "scanBody": "{{app}}会创建 {{bot}} 账号并关联到 Rome。",
+    "waiting": "等待扫码",
+    "token": "机器人令牌",
+    "connect": "连接",
+    "replaces": "{{agent}} 在{{app}}已经有 {{bot}}。一个智能体在每个应用里只有一个账号，所以 {{bot}} 会失去关联，在你关联其他智能体之前由 main 回答。"
   },
   "agent": {
     "missing": "没有这个智能体"
   },
   "overview": {
     "bots": "关联账号",
-    "noBots": "{{agent}} 还没有关联账号。为它创建飞书账号，然后邀请进任意群或私聊。",
+    "noBots": "{{agent}} 还没有关联账号。先在聊天应用里给它开一个账号，再邀请它进任意群或私聊。",
     "botStats": "{{groups}} 个群，{{dms}} 个私聊",
     "since": "始于",
     "connected": "已连接",
-    "inviteTitle": "在飞书中邀请 {{bot}}。",
-    "inviteBody": "打开一个群，进入设置、群机器人、添加机器人，选择 {{bot}}。要发起私聊，在飞书中搜索 {{bot}}。聊天会自动出现在这里。",
+    "inviteTitle": "邀请 {{bot}}。",
     "seeChats": "查看聊天",
-    "addBot": "添加账号",
-    "addToFeishu": "添加到飞书"
+    "addBot": "添加账号"
   },
   "chats": {
     "groups": "群聊",
@@ -67,10 +68,10 @@
     "groupMeta_other": "群聊 · {{count}} 位成员 · 由 {{name}} 添加",
     "dmMeta": "私聊 · 由 {{name}} 发起",
     "botsHere": "这里的关联账号：{{bots}}",
-    "shared_one": "{{bots}} 也在这个群里。每个智能体只看到飞书推送给它自己账号的消息，可能看不到其他智能体的回复。",
-    "shared_other": "{{bots}} 也在这个群里。每个智能体只看到飞书推送给它自己账号的消息，可能看不到其他智能体的回复。",
+    "shared_one": "{{bots}} 也在这个群里。每个智能体只看到聊天应用推送给它自己账号的消息，可能看不到其他智能体的回复。",
+    "shared_other": "{{bots}} 也在这个群里。每个智能体只看到聊天应用推送给它自己账号的消息，可能看不到其他智能体的回复。",
     "settings": "聊天设置：被 @ 时回答 · 在话题中回复",
-    "override": "由哪个智能体回答：关联的智能体。群仍然可以在飞书的群设置卡片里改用其他智能体。"
+    "override": "由哪个智能体回答：关联的智能体。群仍然可以在聊天应用的群设置里改用其他智能体。"
   },
   "activity": {
     "description": "{{agent}} 在各个聊天中收到和发出的消息，最新的在前。",
@@ -93,6 +94,38 @@
     "move": "更改智能体",
     "cancel": "取消",
     "removeBot": "移除账号",
-    "moveReplaces": "{{to}} 在飞书上已经有 {{previous}}。一个智能体在一个平台上只有一个账号，所以 {{previous}} 会失去关联，在你关联其他智能体之前由 main 回答。"
+    "moveReplaces": "{{to}} 在{{app}}已经有 {{previous}}。一个智能体在每个应用里只有一个账号，所以 {{previous}} 会失去关联，在你关联其他智能体之前由 main 回答。"
+  },
+  "choose": {
+    "title": "给 {{agent}} 开一个账号",
+    "description": "选择聊天应用。一个智能体在每个应用里只有一个账号。",
+    "replaces": "已有 {{bot}}。在这里新开账号会替换它。",
+    "back": "聊天应用"
+  },
+  "platforms": {
+    "feishu": {
+      "name": "飞书",
+      "setup": "在飞书应用里扫码",
+      "invite": "打开一个群，进入设置、群机器人、添加机器人，选择 {{bot}}。要发起私聊，在飞书里搜索 {{bot}}。聊天会自动出现在这里。",
+      "tokenHint": ""
+    },
+    "telegram": {
+      "name": "Telegram",
+      "setup": "粘贴 @BotFather 给的机器人令牌",
+      "invite": "在群成员列表里添加 {{bot}}，或在 Telegram 里搜索 {{bot}} 发起私聊。聊天会自动出现在这里。",
+      "tokenHint": "在 Telegram 里用 @BotFather 创建机器人，然后粘贴它给你的令牌。"
+    },
+    "discord": {
+      "name": "Discord",
+      "setup": "粘贴 Discord 开发者门户里的机器人令牌",
+      "invite": "用安装链接把 {{bot}} 邀请进服务器，然后在频道里 @ 它。聊天会自动出现在这里。",
+      "tokenHint": "在 Discord 开发者门户创建应用，添加机器人，然后粘贴机器人的令牌。"
+    },
+    "wechat": {
+      "name": "微信",
+      "setup": "在微信应用里扫码",
+      "invite": "在群成员列表里添加 {{bot}}，或在微信里直接给 {{bot}} 发消息。聊天会自动出现在这里。",
+      "tokenHint": ""
+    }
   }
 }

@@ -13,7 +13,19 @@ import { fetchJson } from "@/lib/fetch-json";
 // `mock/handlers/outreach.ts`, and the types here are the contract a backend
 // would implement.
 
-export type ChatPlatform = "feishu";
+export type ChatPlatform = "feishu" | "telegram" | "discord" | "wechat";
+
+/** Every chat app an agent can get an account on, in the order Outreach offers them. */
+export const CHAT_PLATFORMS: readonly ChatPlatform[] = ["feishu", "telegram", "discord", "wechat"];
+
+/** How an account is created on each app: scanning a QR code in the app, or
+ *  pasting the token the app's developer console issued. */
+export const PLATFORM_SETUP: Record<ChatPlatform, "qr" | "token"> = {
+  feishu: "qr",
+  wechat: "qr",
+  telegram: "token",
+  discord: "token",
+};
 
 export interface OutreachFolder {
   path: string;
@@ -93,9 +105,10 @@ export interface BotRegistration {
   id: string;
   agent: string;
   botName: string;
+  platform: ChatPlatform;
   status: "waiting" | "connected" | "expired";
-  /** A data URL of the QR code to scan with the Feishu app. */
-  qr: string;
+  /** A data URL of the QR code to scan in the chat app, for apps set up by QR. */
+  qr: string | null;
   botId?: string;
 }
 
@@ -226,11 +239,17 @@ export function useRemoveBot() {
 
 export function useStartRegistration() {
   return useMutation({
-    mutationFn: (vars: { agent: string; botName: string; region: "feishu" | "lark" }) =>
+    mutationFn: (vars: {
+      agent: string;
+      botName: string;
+      platform: ChatPlatform;
+      region?: "feishu" | "lark";
+      token?: string;
+    }) =>
       fetchJson<BotRegistration>("/api/outreach/registrations", {
         method: "POST",
         json: vars,
-        fallback: "Failed to create the QR code",
+        fallback: "Failed to create the account",
       }),
   });
 }

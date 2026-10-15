@@ -49,11 +49,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { FeishuIcon } from "@/components/brand-icons/connection-badges";
+import {
+  DiscordIcon,
+  FeishuIcon,
+  TelegramIcon,
+  WeChatIcon,
+} from "@/components/brand-icons/connection-badges";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { Avatar } from "../people/avatar";
 import {
+  CHAT_PLATFORMS,
   type ChatEntry,
+  type ChatPlatform,
+  PLATFORM_SETUP,
   type OutreachAgentSummary,
   type OutreachBot,
   type OutreachChat,
@@ -77,21 +85,38 @@ import {
  * Rome may have many agents; only the ones with a linked account are listed here.
  * Each such agent has an Overview (its bots and what it can use), its Chats
  * (every group and DM one of its bots is in), Activity across those chats, and
- * Settings. A chat is stored once, so a group that holds two of the guardian's
- * bots shows the same history on both agents.
+ * Settings. Each account keeps its own history of a chat: what the chat app
+ * delivered to it.
  */
 export default function OutreachPage() {
   return (
     <Routes>
       <Route index element={<OutreachIndex />} />
       <Route path="add" element={<AddAgent />} />
-      <Route path=":agent/feishu/new" element={<NewFeishuBot />} />
+      <Route path=":agent/new" element={<ChoosePlatform />} />
+      <Route path=":agent/:platform/new" element={<NewBot />} />
       <Route path=":agent/*" element={<AgentPage />} />
     </Routes>
   );
 }
 
 const agentPath = (name: string, rest = "") => `/outreach/${encodeURIComponent(name)}${rest}`;
+
+const PLATFORM_ICONS: Record<ChatPlatform, typeof FeishuIcon> = {
+  feishu: FeishuIcon,
+  telegram: TelegramIcon,
+  discord: DiscordIcon,
+  wechat: WeChatIcon,
+};
+
+function PlatformIcon({ platform, className }: { platform: ChatPlatform; className?: string }) {
+  const Icon = PLATFORM_ICONS[platform];
+  return <Icon className={className} aria-hidden="true" />;
+}
+
+function isPlatform(value: string | undefined): value is ChatPlatform {
+  return CHAT_PLATFORMS.includes(value as ChatPlatform);
+}
 
 function BackLink({ to, children }: { to: string; children: ReactNode }) {
   return (
@@ -118,7 +143,7 @@ function BotPills({ bots }: { bots: OutreachBot[] }) {
     <span className="flex flex-wrap gap-1">
       {bots.map((b) => (
         <Badge key={b.id} variant="outline">
-          <FeishuIcon aria-hidden="true" />
+          <PlatformIcon platform={b.platform} />
           {b.name}
         </Badge>
       ))}
@@ -236,7 +261,7 @@ function AddAgent() {
           <List>
             {shown.map((a) => (
               <ListRow key={a.name} asChild interactive>
-                <Link to={agentPath(a.name, "/feishu/new")}>
+                <Link to={agentPath(a.name, "/new")}>
                   <Avatar name={a.name} size="sm" />
                   <ListRowContent>
                     <div className="font-medium">{a.name}</div>
@@ -257,24 +282,71 @@ function AddAgent() {
   );
 }
 
-// ─── Give an agent a Feishu bot ──────────────────────────────────────────────
+// ─── Give an agent an account on a chat app ─────────────────────────────────
 
-function NewFeishuBot() {
+function ChoosePlatform() {
   const { t } = useTranslation("outreach");
-  const navigate = useNavigate();
   const name = useParams<{ agent: string }>().agent ?? "";
   const agentQuery = useOutreachAgent(name);
-  const hasBot = (agentQuery.data?.bots.length ?? 0) > 0;
+  const bots = agentQuery.data?.bots ?? [];
+  useDocumentTitle([t("choose.title", { agent: name }), t("index.title")]);
+  return (
+    <Page>
+      <BackLink to={bots.length ? agentPath(name) : "/outreach/add"}>
+        {bots.length ? name : t("add.title")}
+      </BackLink>
+      <PageHeader>
+        <PageHeading>
+          <PageTitle>{t("choose.title", { agent: name })}</PageTitle>
+          <PageDescription>{t("choose.description", { agent: name })}</PageDescription>
+        </PageHeading>
+      </PageHeader>
+      <Card className="max-w-3xl py-0">
+        <List>
+          {CHAT_PLATFORMS.map((p) => {
+            const current = bots.find((b) => b.platform === p);
+            return (
+              <ListRow key={p} asChild interactive>
+                <Link to={agentPath(name, `/${p}/new`)}>
+                  <PlatformIcon platform={p} className="size-6" />
+                  <ListRowContent>
+                    <div className="font-medium">{t(`platforms.${p}.name`)}</div>
+                    <div className="truncate text-aux text-muted-foreground">
+                      {current
+                        ? t("choose.replaces", { bot: current.name })
+                        : t(`platforms.${p}.setup`)}
+                    </div>
+                  </ListRowContent>
+                </Link>
+              </ListRow>
+            );
+          })}
+        </List>
+      </Card>
+    </Page>
+  );
+}
+
+function NewBot() {
+  const { t } = useTranslation("outreach");
+  const navigate = useNavigate();
+  const params = useParams<{ agent: string; platform: string }>();
+  const name = params.agent ?? "";
+  const agentQuery = useOutreachAgent(name);
   const [botName, setBotName] = useState(name.charAt(0).toUpperCase() + name.slice(1));
   const [region, setRegion] = useState<"feishu" | "lark">("feishu");
+  const [token, setToken] = useState("");
   const queryClient = useQueryClient();
   const start = useStartRegistration();
   const reg = useRegistration(start.data?.id ?? null);
   const status = reg.data?.status ?? start.data?.status;
-  useDocumentTitle([t("newBot.title", { agent: name }), t("index.title")]);
+  const platform = isPlatform(params.platform) ? params.platform : null;
+  const app = platform ? t(`platforms.${platform}.name`) : "";
+  const current = agentQuery.data?.bots.find((b) => b.platform === platform);
+  useDocumentTitle([t("newBot.title", { agent: name, app }), t("index.title")]);
 
-  // The scan creates a bot, which moves this agent into Outreach and changes
-  // its counts, so every Outreach read is stale once it lands.
+  // Creating the account moves this agent into Outreach and changes its
+  // counts, so every Outreach read is stale once it lands.
   useEffect(() => {
     if (status !== "connected") return;
     void queryClient
@@ -282,71 +354,99 @@ function NewFeishuBot() {
       .then(() => navigate(agentPath(name), { replace: true }));
   }, [status, name, navigate, queryClient]);
 
+  if (!platform) return <Navigate to={agentPath(name, "/new")} replace />;
+  const byQr = PLATFORM_SETUP[platform] === "qr";
+
   return (
     <Page>
-      <BackLink to={hasBot ? agentPath(name) : "/outreach/add"}>
-        {hasBot ? name : t("add.title")}
-      </BackLink>
+      <BackLink to={agentPath(name, "/new")}>{t("choose.back")}</BackLink>
       <PageHeader>
         <PageHeading>
-          <PageTitle>{t("newBot.title", { agent: name })}</PageTitle>
+          <PageTitle>{t("newBot.title", { agent: name, app })}</PageTitle>
           <PageDescription>{t("newBot.description", { agent: name })}</PageDescription>
         </PageHeading>
       </PageHeader>
+      {current && (
+        <p className="max-w-4xl rounded-8 bg-surface-muted p-3 text-ui">
+          {t("newBot.replaces", { agent: name, bot: current.name, app })}
+        </p>
+      )}
       <div className="grid max-w-4xl gap-6 md:grid-cols-2">
         <form
           className="flex flex-col gap-4"
           onSubmit={(e) => {
             e.preventDefault();
-            start.mutate({ agent: name, botName, region });
+            start.mutate({
+              agent: name,
+              botName,
+              platform,
+              ...(platform === "feishu" ? { region } : {}),
+              ...(byQr ? {} : { token }),
+            });
           }}
         >
           <Field>
-            <FieldLabel htmlFor="bot-name">{t("newBot.name")}</FieldLabel>
+            <FieldLabel htmlFor="bot-name">{t("newBot.name", { app })}</FieldLabel>
             <Input id="bot-name" value={botName} onChange={(e) => setBotName(e.target.value)} />
             <FieldDescription>{t("newBot.nameHint")}</FieldDescription>
           </Field>
-          <Field>
-            <FieldLabel htmlFor="bot-region">{t("newBot.region")}</FieldLabel>
-            <Select value={region} onValueChange={(v) => setRegion(v as "feishu" | "lark")}>
-              <SelectTrigger id="bot-region" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="feishu">{t("newBot.regionFeishu")}</SelectItem>
-                <SelectItem value="lark">{t("newBot.regionLark")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
+          {platform === "feishu" && (
+            <Field>
+              <FieldLabel htmlFor="bot-region">{t("newBot.region")}</FieldLabel>
+              <Select value={region} onValueChange={(v) => setRegion(v as "feishu" | "lark")}>
+                <SelectTrigger id="bot-region" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="feishu">{t("newBot.regionFeishu")}</SelectItem>
+                  <SelectItem value="lark">{t("newBot.regionLark")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
+          {!byQr && (
+            <Field>
+              <FieldLabel htmlFor="bot-token">{t("newBot.token")}</FieldLabel>
+              <Input
+                id="bot-token"
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+              />
+              <FieldDescription>{t(`platforms.${platform}.tokenHint`)}</FieldDescription>
+            </Field>
+          )}
           <div>
             <Button type="submit" disabled={start.isPending || status === "waiting"}>
-              {t("newBot.showQr")}
+              {byQr ? t("newBot.showQr") : t("newBot.connect")}
             </Button>
           </div>
           {start.error && <LoadError message={start.error.message} />}
         </form>
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-6 text-center">
-            {start.data ? (
-              <>
-                <img
-                  src={start.data.qr}
-                  alt={t("newBot.qrAlt")}
-                  className="size-44 rounded-8 border border-border bg-white p-2"
-                />
-                <p className="text-ui font-medium">{t("newBot.scanTitle")}</p>
-                <p className="text-aux text-muted-foreground">
-                  {t("newBot.scanBody", { bot: start.data.botName })}
-                </p>
-                <p className="text-aux text-muted-foreground" role="status">
-                  {t("newBot.waiting")}
-                </p>
-              </>
-            ) : (
-              <p className="py-16 text-ui text-muted-foreground">{t("newBot.qrPlaceholder")}</p>
-            )}
-          </CardContent>
-        </Card>
+        {byQr && (
+          <Card>
+            <CardContent className="flex flex-col items-center gap-3 py-6 text-center">
+              {start.data?.qr ? (
+                <>
+                  <img
+                    src={start.data.qr}
+                    alt={t("newBot.qrAlt", { app })}
+                    className="size-44 rounded-8 border border-border bg-white p-2"
+                  />
+                  <p className="text-ui font-medium">{t("newBot.scanTitle", { app })}</p>
+                  <p className="text-aux text-muted-foreground">
+                    {t("newBot.scanBody", { bot: start.data.botName, app })}
+                  </p>
+                  <p className="text-aux text-muted-foreground" role="status">
+                    {t("newBot.waiting")}
+                  </p>
+                </>
+              ) : (
+                <p className="py-16 text-ui text-muted-foreground">{t("newBot.qrPlaceholder")}</p>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
     </Page>
   );
@@ -441,7 +541,7 @@ function Overview({ agent }: { agent: OutreachAgentSummary }) {
             <List>
               {agent.bots.map((b) => (
                 <ListRow key={b.id}>
-                  <FeishuIcon className="size-6" aria-hidden="true" />
+                  <PlatformIcon platform={b.platform} className="size-6" />
                   <ListRowContent>
                     <div className="font-medium">{b.name}</div>
                     <div className="text-aux text-muted-foreground">
@@ -460,7 +560,7 @@ function Overview({ agent }: { agent: OutreachAgentSummary }) {
               <span className="font-medium">
                 {t("overview.inviteTitle", { bot: agent.bots[0]!.name })}
               </span>{" "}
-              {t("overview.inviteBody", { bot: agent.bots[0]!.name })}
+              {t(`platforms.${agent.bots[0]!.platform}.invite`, { bot: agent.bots[0]!.name })}
             </p>
           )}
           <div className="flex flex-wrap gap-2">
@@ -470,9 +570,7 @@ function Overview({ agent }: { agent: OutreachAgentSummary }) {
               </Button>
             )}
             <Button asChild variant={agent.bots.length ? "ghost" : "default"} size="sm">
-              <Link to={agentPath(agent.name, "/feishu/new")}>
-                {agent.bots.length ? t("overview.addBot") : t("overview.addToFeishu")}
-              </Link>
+              <Link to={agentPath(agent.name, "/new")}>{t("overview.addBot")}</Link>
             </Button>
           </div>
         </CardContent>
@@ -497,7 +595,7 @@ function Chats({ agent }: { agent: OutreachAgentSummary }) {
         <EmptyStateTitle>{t("chats.emptyTitle")}</EmptyStateTitle>
         <EmptyStateDescription>
           {agent.bots[0]
-            ? t("overview.inviteBody", { bot: agent.bots[0].name })
+            ? t(`platforms.${agent.bots[0].platform}.invite`, { bot: agent.bots[0].name })
             : t("overview.noBots", { agent: agent.name })}
         </EmptyStateDescription>
       </EmptyState>
@@ -796,7 +894,7 @@ function Settings({ agent }: { agent: OutreachAgentSummary }) {
             return (
               <div key={b.id} className="flex flex-col gap-3 py-3">
                 <div className="flex items-center gap-3">
-                  <FeishuIcon className="size-5" aria-hidden="true" />
+                  <PlatformIcon platform={b.platform} className="size-5" />
                   <span className="flex-1 font-medium">{b.name}</span>
                   <Button
                     variant="destructive"
@@ -838,14 +936,18 @@ function Settings({ agent }: { agent: OutreachAgentSummary }) {
                     <p>{t("settings.moveConfirm", { bot: b.name, to: moving.to, count })}</p>
                     {(() => {
                       // One account per agent on a platform: the target's
-                      // current Feishu account loses its agent and, in phase 1,
-                      // answers as main until another agent is linked.
+                      // current account on this app loses its agent and, in
+                      // phase 1, answers as main until another agent is linked.
                       const previous = (all.data?.agents ?? [])
                         .find((a) => a.name === moving.to)
                         ?.bots.find((other) => other.platform === b.platform && other.id !== b.id);
                       return previous && moving.to !== "main" ? (
                         <p>
-                          {t("settings.moveReplaces", { to: moving.to, previous: previous.name })}
+                          {t("settings.moveReplaces", {
+                            to: moving.to,
+                            previous: previous.name,
+                            app: t(`platforms.${b.platform}.name`),
+                          })}
                         </p>
                       ) : null;
                     })()}

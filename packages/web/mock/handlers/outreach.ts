@@ -2,6 +2,7 @@ import { http, HttpResponse } from "msw";
 import type {
   ActivityItem,
   BotRegistration,
+  ChatPlatform,
   ChatEntry,
   OutreachAgent,
   OutreachAgentSummary,
@@ -19,6 +20,7 @@ import type {
 
 interface StoredBot {
   id: string;
+  platform: ChatPlatform;
   name: string;
   answersAs: string;
   connectedAt: string;
@@ -108,8 +110,27 @@ const agents: OutreachAgent[] = [
 ];
 
 let bots: StoredBot[] = [
-  { id: "cli_rome", name: "Rome", answersAs: "main", connectedAt: day(2, 10, 0) },
-  { id: "cli_writer", name: "Writer", answersAs: "writer", connectedAt: day(9, 9, 12) },
+  {
+    id: "cli_rome",
+    platform: "feishu",
+    name: "Rome",
+    answersAs: "main",
+    connectedAt: day(2, 10, 0),
+  },
+  {
+    id: "cli_writer",
+    platform: "feishu",
+    name: "Writer",
+    answersAs: "writer",
+    connectedAt: day(9, 9, 12),
+  },
+  {
+    id: "tg_writer",
+    platform: "telegram",
+    name: "WriterRomeBot",
+    answersAs: "writer",
+    connectedAt: day(11, 14, 0),
+  },
 ];
 
 let entrySeq = 0;
@@ -230,9 +251,31 @@ let chats: StoredChat[] = [
       botSay(day(13, 10, 3), "cli_rome", "Done. Your 11:00 is now at 11:30."),
     ],
   },
+  {
+    id: "tg_press",
+    kind: "group",
+    name: "Press list",
+    members: 5,
+    botIds: ["tg_writer"],
+    addedBy: "Sam Lee",
+    joinedAt: day(11, 14, 10),
+    entries: [
+      ev(day(11, 14, 10), "Sam Lee added WriterRomeBot to the group"),
+      say(
+        day(13, 11, 5),
+        "Sam Lee",
+        "@WriterRomeBot an English version of the launch note, please.",
+      ),
+      botSay(
+        day(13, 11, 7),
+        "tg_writer",
+        "Here it is: “Rome agents now join your team's chats, each under its own name.”",
+      ),
+    ],
+  },
 ];
 
-const registrations = new Map<string, BotRegistration & { startedAt: number; region: string }>();
+const registrations = new Map<string, BotRegistration & { startedAt: number }>();
 
 const SCAN_AFTER_MS = 4000;
 
@@ -253,7 +296,7 @@ function toBot(b: StoredBot): OutreachBot {
   const its = chats.filter((c) => c.botIds.includes(b.id));
   return {
     id: b.id,
-    platform: "feishu",
+    platform: b.platform,
     name: b.name,
     answersAs: b.answersAs,
     connectedAt: b.connectedAt,
@@ -266,7 +309,7 @@ function toChat(c: StoredChat): OutreachChat {
   const last = [...c.entries].reverse().find((e) => e.kind === "message");
   return {
     id: c.id,
-    platform: "feishu",
+    platform: bots.find((b) => b.id === c.botIds[0])?.platform ?? "feishu",
     kind: c.kind,
     name: c.name,
     members: c.members,
@@ -308,13 +351,41 @@ function fakeQr(seed: string): string {
   return `data:image/svg+xml;base64,${btoa(svg)}`;
 }
 
+/**
+ * An agent has one account per app. Linking it to `keep` takes it off any other
+ * account on that app, which in phase 1 answers as main until another agent is
+ * linked. main itself is the phase 1 fallback, so it is never taken off.
+ */
+function unlinkOthers(agent: string, platform: ChatPlatform, keep: string, at: string) {
+  if (agent === "main") return;
+  for (const other of bots) {
+    if (other.id === keep || other.platform !== platform || other.answersAs !== agent) continue;
+    other.answersAs = "main";
+    for (const c of chats) {
+      if (c.botIds.includes(other.id)) {
+        c.entries = [
+          ...c.entries,
+          ev(at, `${other.name} is no longer linked to ${agent}, so main answers for now`),
+        ];
+      }
+    }
+  }
+}
+
 /** The scan happens on a phone, so mock mode completes it on a timer. */
 function settle(reg: BotRegistration & { startedAt: number }) {
   if (reg.status !== "waiting" || Date.now() - reg.startedAt < SCAN_AFTER_MS) return;
   const id = `cli_${reg.agent.replace(/[^a-z0-9]/gi, "")}${bots.length}`;
+  unlinkOthers(reg.agent, reg.platform, id, new Date().toISOString());
   bots = [
     ...bots,
-    { id, name: reg.botName, answersAs: reg.agent, connectedAt: new Date().toISOString() },
+    {
+      id,
+      platform: reg.platform,
+      name: reg.botName,
+      answersAs: reg.agent,
+      connectedAt: new Date().toISOString(),
+    },
   ];
   reg.status = "connected";
   reg.botId = id;
@@ -383,22 +454,7 @@ export const outreachHandlers = [
     }
     const from = b.answersAs;
     const at = new Date().toISOString();
-    // An agent has one account per platform. Its previous one loses the link
-    // and, in phase 1, answers as main until another agent is linked.
-    if (answersAs !== "main") {
-      for (const other of bots) {
-        if (other.id === b.id || other.answersAs !== answersAs) continue;
-        other.answersAs = "main";
-        for (const c of chats) {
-          if (c.botIds.includes(other.id)) {
-            c.entries = [
-              ...c.entries,
-              ev(at, `${other.name} is no longer linked to ${answersAs}, so main answers for now`),
-            ];
-          }
-        }
-      }
-    }
+    unlinkOthers(answersAs, b.platform, b.id, at);
     b.answersAs = answersAs;
     for (const c of chats) {
       if (c.botIds.includes(b.id)) {
@@ -416,19 +472,29 @@ export const outreachHandlers = [
   }),
 
   http.post("/api/outreach/registrations", async ({ request }) => {
-    const body = (await request.json()) as { agent: string; botName: string; region: string };
+    const body = (await request.json()) as {
+      agent: string;
+      botName: string;
+      platform: ChatPlatform;
+      token?: string;
+    };
     if (!agentNamed(body.agent)) {
       return HttpResponse.json({ detail: "No such agent" }, { status: 400 });
+    }
+    const byToken = body.token !== undefined;
+    if (byToken && !body.token?.trim()) {
+      return HttpResponse.json({ detail: "Paste the bot token first" }, { status: 400 });
     }
     const id = `reg_${registrations.size + 1}`;
     const reg = {
       id,
       agent: body.agent,
       botName: body.botName.trim() || body.agent,
+      platform: body.platform,
       status: "waiting" as const,
-      qr: fakeQr(id + body.agent),
-      startedAt: Date.now(),
-      region: body.region,
+      qr: byToken ? null : fakeQr(id + body.agent),
+      // A pasted token needs no phone, so it settles on the next read.
+      startedAt: byToken ? 0 : Date.now(),
     };
     registrations.set(id, reg);
     return HttpResponse.json(reg);
