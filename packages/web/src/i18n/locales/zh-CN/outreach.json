@@ -67,9 +67,10 @@
     "groupMeta_other": "群聊 · {{count}} 位成员 · 由 {{name}} 添加",
     "dmMeta": "私聊 · 由 {{name}} 发起",
     "botsHere": "这里的关联账号：{{bots}}",
-    "shared_one": "{{bots}} 也在这个聊天中。Rome 只保存一份记录，这里的每个智能体读到的消息相同。",
-    "shared_other": "{{bots}} 也在这个聊天中。Rome 只保存一份记录，这里的每个智能体读到的消息相同。",
-    "settings": "聊天设置：被 @ 时回答 · 在话题中回复"
+    "shared_one": "{{bots}} 也在这个群里。每个智能体只看到飞书推送给它自己账号的消息，可能看不到其他智能体的回复。",
+    "shared_other": "{{bots}} 也在这个群里。每个智能体只看到飞书推送给它自己账号的消息，可能看不到其他智能体的回复。",
+    "settings": "聊天设置：被 @ 时回答 · 在话题中回复",
+    "override": "由哪个智能体回答：关联的智能体。群仍然可以在飞书的群设置卡片里改用其他智能体。"
   },
   "activity": {
     "description": "{{agent}} 在各个聊天中收到和发出的消息，最新的在前。",
@@ -91,6 +92,7 @@
     "moveConfirm_other": "把 {{bot}} 关联到 {{to}}？此后由 {{to}} 在它的 {{count}} 个聊天中回答，聊天和记录保持不变。",
     "move": "更改智能体",
     "cancel": "取消",
-    "removeBot": "移除账号"
+    "removeBot": "移除账号",
+    "moveReplaces": "{{to}} 在飞书上已经有 {{previous}}。一个智能体在一个平台上只有一个账号，所以 {{previous}} 会失去关联，在你关联其他智能体之前由 main 回答。"
   }
 }

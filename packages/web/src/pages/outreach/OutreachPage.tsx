@@ -611,6 +611,7 @@ function ChatView({ agent }: { agent: OutreachAgentSummary }) {
         </p>
       )}
       <p className="text-aux text-muted-foreground">{t("chat.settings")}</p>
+      <p className="text-aux text-muted-foreground">{t("chat.override")}</p>
     </div>
   );
 }
@@ -835,6 +836,19 @@ function Settings({ agent }: { agent: OutreachAgentSummary }) {
                 {moving && (
                   <div className="flex flex-col gap-3 rounded-8 bg-surface-muted p-3 text-ui">
                     <p>{t("settings.moveConfirm", { bot: b.name, to: moving.to, count })}</p>
+                    {(() => {
+                      // One account per agent on a platform: the target's
+                      // current Feishu account loses its agent and, in phase 1,
+                      // answers as main until another agent is linked.
+                      const previous = (all.data?.agents ?? [])
+                        .find((a) => a.name === moving.to)
+                        ?.bots.find((other) => other.platform === b.platform && other.id !== b.id);
+                      return previous && moving.to !== "main" ? (
+                        <p>
+                          {t("settings.moveReplaces", { to: moving.to, previous: previous.name })}
+                        </p>
+                      ) : null;
+                    })()}
                     <div className="flex gap-2">
                       <Button
                         size="sm"

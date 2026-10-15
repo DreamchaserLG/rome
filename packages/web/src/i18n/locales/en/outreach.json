@@ -67,9 +67,10 @@
     "groupMeta_other": "Group · {{count}} members · added by {{name}}",
     "dmMeta": "DM · started by {{name}}",
     "botsHere": "Linked accounts here: {{bots}}",
-    "shared_one": "{{bots}} is in this chat too. Rome keeps one history for it, so every agent here reads the same messages.",
-    "shared_other": "{{bots}} are in this chat too. Rome keeps one history for it, so every agent here reads the same messages.",
-    "settings": "Chat settings: answers when @mentioned · replies in thread"
+    "shared_one": "{{bots}} is in this chat too. Each agent sees what Feishu delivers to its own account here, which may not include the other agents' replies.",
+    "shared_other": "{{bots}} are in this chat too. Each agent sees what Feishu delivers to its own account here, which may not include the other agents' replies.",
+    "settings": "Chat settings: answers when @mentioned · replies in thread",
+    "override": "Which agent answers: the linked agent. A group can still pick another agent from its settings card in Feishu."
   },
   "activity": {
     "description": "What was said to and by {{agent}} across its chats, newest first.",
@@ -91,6 +92,7 @@
     "moveConfirm_other": "Link {{bot}} to {{to}}? From now on {{to}} answers in its {{count}} chats. The chats and their history stay as they are.",
     "move": "Change agent",
     "cancel": "Cancel",
-    "removeBot": "Remove account"
+    "removeBot": "Remove account",
+    "moveReplaces": "{{to}} already has {{previous}} on Feishu. An agent has one account per platform, so {{previous}} loses its link, and main answers there until you link another agent."
   }
 }

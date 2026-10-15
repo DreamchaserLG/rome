@@ -382,8 +382,24 @@ export const outreachHandlers = [
       return HttpResponse.json({ detail: "No such agent" }, { status: 400 });
     }
     const from = b.answersAs;
-    b.answersAs = answersAs;
     const at = new Date().toISOString();
+    // An agent has one account per platform. Its previous one loses the link
+    // and, in phase 1, answers as main until another agent is linked.
+    if (answersAs !== "main") {
+      for (const other of bots) {
+        if (other.id === b.id || other.answersAs !== answersAs) continue;
+        other.answersAs = "main";
+        for (const c of chats) {
+          if (c.botIds.includes(other.id)) {
+            c.entries = [
+              ...c.entries,
+              ev(at, `${other.name} is no longer linked to ${answersAs}, so main answers for now`),
+            ];
+          }
+        }
+      }
+    }
+    b.answersAs = answersAs;
     for (const c of chats) {
       if (c.botIds.includes(b.id)) {
         c.entries = [...c.entries, ev(at, `${b.name} is now linked to ${answersAs} (was ${from})`)];
