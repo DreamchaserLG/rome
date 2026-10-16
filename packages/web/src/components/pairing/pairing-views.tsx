@@ -121,7 +121,9 @@ export function PairingRequestCard({
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="flex min-w-0 flex-1 flex-col gap-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="break-words text-title [overflow-wrap:anywhere]">{name}</h3>
+                  <h3 className="break-words text-title [overflow-wrap:anywhere]">
+                    {t("pairing.heading", { name, channel })}
+                  </h3>
                   {accountId.length > ID_TRUNCATION_THRESHOLD ? (
                     <PairingDetail
                       label={`ID ${accountId}`}
@@ -142,7 +144,6 @@ export function PairingRequestCard({
                     </Badge>
                   )}
                 </div>
-                <p className="text-ui text-muted-foreground">{channel}</p>
               </div>
             </div>
             <p className="text-aux text-muted-foreground">
@@ -315,7 +316,7 @@ export function PairingConfirmationDialog({
       className="max-w-[calc(100vw-2rem)] sm:max-w-lg"
     >
       <DialogHeader>
-        <DialogTitle>{t("pairing.confirmTitle")}</DialogTitle>
+        <DialogTitle>{t("pairing.confirmTitle", { name, channel })}</DialogTitle>
       </DialogHeader>
       <DialogBody className="flex flex-col gap-3">
         <DialogDescription className="break-words [overflow-wrap:anywhere]">

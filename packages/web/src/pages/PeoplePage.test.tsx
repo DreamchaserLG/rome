@@ -1035,8 +1035,10 @@ describe("PeoplePage pairing requests", () => {
     renderPage(entry);
 
     const section = await screen.findByRole("region", { name: "Pairing requests" });
-    expect(within(section).getByRole("button", { name: "Approve" })).toBeTruthy();
-    expect(within(section).getByText("Alex")).toBeTruthy();
+    expect(within(section).getByRole("button", { name: "Recognise as me" })).toBeTruthy();
+    expect(
+      within(section).getByText("Alex on Telegram wants to be recognised as you"),
+    ).toBeTruthy();
   });
 
   it("leaves out a request that is resolved or past its expiry", async () => {
@@ -1055,8 +1057,10 @@ describe("PeoplePage pairing requests", () => {
     renderPage("/people/latest");
 
     const section = await screen.findByRole("region", { name: "Pairing requests" });
-    expect(within(section).getAllByRole("button", { name: "Approve" })).toHaveLength(1);
-    expect(within(section).getByText("Telegram")).toBeTruthy();
+    expect(within(section).getAllByRole("button", { name: "Recognise as me" })).toHaveLength(1);
+    expect(
+      within(section).getByText("Alex on Telegram wants to be recognised as you"),
+    ).toBeTruthy();
   });
 });
 

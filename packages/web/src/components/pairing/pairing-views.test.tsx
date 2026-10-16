@@ -25,16 +25,18 @@ describe("pairing presentation without query or router providers", () => {
     const view = render(<PairingRequestCard {...props} />);
     expect(screen.getByText("ID alice").tagName).toBe("SPAN");
     expect(screen.queryByRole("button", { name: "ID alice" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Recognise as me" }));
     expect(onApprove).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText("Approved")).toBeNull();
+    expect(screen.queryByText("Recognised")).toBeNull();
     view.rerender(<PairingRequestCard {...props} busy="approve" />);
-    expect(screen.getByRole("button", { name: "Approving…" }).hasAttribute("disabled")).toBe(true);
-    expect(screen.getByRole("button", { name: "Reject" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Recognising…" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+    expect(screen.getByRole("button", { name: "Not me" }).hasAttribute("disabled")).toBe(true);
     view.rerender(<PairingRequestCard {...props} status="approved" />);
-    expect(screen.getByText("Approved")).toBeTruthy();
+    expect(screen.getByText("Recognised")).toBeTruthy();
     expect(screen.getByText(/Valid for 10 minutes/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Recognise as me" })).toBeNull();
   });
 
   it("delegates retry and copy while rendering the supplied feedback", async () => {
@@ -89,12 +91,14 @@ describe("pairing presentation without query or router providers", () => {
     const view = render(<PairingConfirmationDialog {...props} busy />);
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(onCancel).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Approving…" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Recognising…" }).hasAttribute("disabled")).toBe(
+      true,
+    );
     view.rerender(<PairingConfirmationDialog {...props} error />);
     expect(screen.getByRole("alert").textContent).toBe(
       i18n.t("pairing.resolveFailed", { ns: "activity" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Recognise as me" }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onCancel).toHaveBeenCalledTimes(1);

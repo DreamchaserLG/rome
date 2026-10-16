@@ -91,9 +91,9 @@ describe("shared pairing approvals", () => {
     );
     const activity = within(screen.getByTestId("activity"));
     const connections = within(screen.getByTestId("connections"));
-    await activity.findByRole("button", { name: "Approve" });
+    await activity.findByRole("button", { name: "Recognise as me" });
     expect(activity.getByText("ID alice")).toBeTruthy();
-    expect(activity.getByText("Telegram")).toBeTruthy();
+    expect(activity.getByText("Alice on Telegram wants to be recognised as you")).toBeTruthy();
     for (const slice of [activity, connections]) {
       const summary = slice.getByText("Pair with a verification code");
       expect(summary.closest("details")?.open).toBe(false);
@@ -109,17 +109,17 @@ describe("shared pairing approvals", () => {
     fireEvent.click(activity.getByRole("button", { name: "Copy" }));
     await activity.findByRole("button", { name: "Code copied" });
     expect(writeText).toHaveBeenCalledWith(code);
-    fireEvent.click(connections.getByRole("button", { name: "Approve" }));
+    fireEvent.click(connections.getByRole("button", { name: "Recognise as me" }));
     expect(resolve).not.toHaveBeenCalled();
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/Alice \(alice\).*guardian authority/)).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Approve" }));
-    await waitFor(() => expect(activity.getByText("Approved")).toBeTruthy());
-    expect(connections.queryByText("Approved")).toBeNull();
-    expect(connections.getByText(/No pending pairing requests/)).toBeTruthy();
+    expect(within(dialog).getByText(/Alice \(alice\).*guardian permissions/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Recognise as me" }));
+    await waitFor(() => expect(activity.getByText("Recognised")).toBeTruthy());
+    expect(connections.queryByText("Recognised")).toBeNull();
+    expect(connections.getByText(/No pairing requests are waiting/)).toBeTruthy();
     expect(activity.queryByText(code)).toBeNull();
     expect(resolve).toHaveBeenCalledTimes(1);
-    fireEvent.focus(activity.getByText("Approved", { exact: true }));
+    fireEvent.focus(activity.getByText("Recognised", { exact: true }));
     expect((await screen.findByRole("tooltip")).textContent).toContain("verified-owner");
     client.clear();
   });
@@ -165,11 +165,11 @@ describe("shared pairing approvals", () => {
         </QueryClientProvider>
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Recognise as me" }));
     fireEvent.click(
-      within(await screen.findByRole("dialog")).getByRole("button", { name: "Approve" }),
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Recognise as me" }),
     );
-    await screen.findByText(/No pending pairing requests/);
+    await screen.findByText(/No pairing requests are waiting/);
     expect(notify).toHaveBeenCalledWith(error);
     expect(screen.queryByRole("dialog")).toBeNull();
     client.clear();
@@ -205,9 +205,9 @@ describe("shared pairing approvals", () => {
         </QueryClientProvider>
       </MemoryRouter>,
     );
-    await screen.findByText(/No pending pairing requests/);
+    await screen.findByText(/No pairing requests are waiting/);
     expect(screen.queryByText("Expired")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Recognise as me" })).toBeNull();
     expect(fetch.mock.calls.every(([url]) => String(url) === "/api/approvals")).toBe(true);
     client.clear();
   });
@@ -261,14 +261,14 @@ describe("shared pairing approvals", () => {
     const activity = within(screen.getByTestId("activity"));
     const connections = within(screen.getByTestId("connections"));
     fireEvent.click(await activity.findByRole("button", { name: "Load earlier pairing requests" }));
-    await activity.findByText("earlier-user");
-    expect(connections.queryByText("earlier-user")).toBeNull();
+    await activity.findByText(/^earlier-user on/);
+    expect(connections.queryByText(/^earlier-user on/)).toBeNull();
     expect(connections.queryByText("history-0")).toBeNull();
     expect(
       connections.getByRole("link", { name: "View all requests in Activity" }).getAttribute("href"),
     ).toBe("/activity");
     expect(connections.queryByRole("button", { name: "Load earlier pairing requests" })).toBeNull();
-    expect(activity.getByText("pending-user")).toBeTruthy();
+    expect(activity.getByText(/^pending-user on/)).toBeTruthy();
     expect(activity.queryByRole("button", { name: "Load earlier pairing requests" })).toBeNull();
     expect(fetch.mock.calls.some(([url]) => String(url).includes("pairingHistoryOffset=100"))).toBe(
       true,
