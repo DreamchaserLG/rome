@@ -4,7 +4,7 @@ import { pairingPayload, pairingPayloadSchema } from "@rome/api-types/approvals"
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { createLogger } from "../logger.js";
-import type { Admission } from "./admission.js";
+import type { Admission, InteractionAdmission } from "./admission.js";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import { isPairingCodeMessage } from "./pairing-code.js";
 import { sendThrough } from "./connection-ports.js";
@@ -140,6 +140,27 @@ export function createPairingAdmission(deps: {
     } catch {
       // Provider errors may include the rejected request body. Do not log them.
       log.error("pairing admission failed", { connectionId, senderId: message.senderId });
+      return false;
+    }
+  };
+}
+
+/**
+ * Admits an interaction, such as a card click, only from an account already
+ * linked to a person on a channel that pairs. It creates no pairing request
+ * and sends no guidance: an account that has not paired reaches nothing by
+ * clicking, and pairs by messaging the bot as any account does.
+ */
+export function createPairingInteractionAdmission(deps: {
+  personMappingRepo: PersonMappingRepository;
+}): InteractionAdmission {
+  return async (connectionId, service, interaction) => {
+    if (!pairingPayloadSchema.shape.channel.safeParse(service).success) return true;
+    try {
+      const person = await deps.personMappingRepo.findByChannelUser(service, interaction.senderId);
+      return Boolean(person && person.id !== STRANGER_PERSON_ID);
+    } catch {
+      log.error("interaction admission failed", { connectionId, senderId: interaction.senderId });
       return false;
     }
   };

@@ -957,6 +957,88 @@ describe("FeishuAdapter", () => {
     expect(channel.sent).toHaveLength(0);
   });
 
+  it("sends a card part as an interactive card in place of the text", async () => {
+    const card = { elements: [{ tag: "markdown", content: "确认拜访？" }] };
+    const receipt = await adapter.send("oc_chat" as ConversationId, {
+      text: "确认拜访？",
+      parts: [{ type: "feishu_card", card }],
+    });
+    expect(channel.sent).toEqual([{ to: "oc_chat", input: { card }, opts: undefined }]);
+    expect(receipt).toStrictEqual({ conversationId: "oc_chat", messageId: "om_sent" });
+  });
+
+  it("sends each card part as its own message and receipts every one", async () => {
+    const first = { elements: [{ tag: "markdown", content: "1" }] };
+    const second = { elements: [{ tag: "markdown", content: "2" }] };
+    const receipt = await adapter.send("oc_chat" as ConversationId, {
+      parts: [
+        { type: "text", content: "ignored on Feishu" },
+        { type: "feishu_card", card: first },
+        { type: "feishu_card", card: second },
+      ],
+    });
+    expect(channel.sent.map((entry) => entry.input)).toEqual([{ card: first }, { card: second }]);
+    expect(receipt.parts).toEqual([
+      { messageId: "om_sent", kind: "card" },
+      { messageId: "om_sent", kind: "card" },
+    ]);
+  });
+
+  it("sends to an open_id, which reaches that account's private chat", async () => {
+    await adapter.send("ou_alice" as ConversationId, { text: "早上好" });
+    expect(channel.sent).toEqual([
+      { to: "ou_alice", input: { markdown: "早上好" }, opts: undefined },
+    ]);
+  });
+
+  it("hands a click on an app's card to the interaction handlers", async () => {
+    const heard: unknown[] = [];
+    adapter.onInteraction(async (interaction) => {
+      heard.push(interaction);
+    });
+    await channel.emitCardAction({
+      action: { tag: "button", name: "confirm", value: { romeAction: "confirm_visit", id: "V01" } },
+      raw: { action: { value: {}, form_value: { note: "ok" } } },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(heard).toEqual([
+      expect.objectContaining({
+        channel: "feishu",
+        conversationId: "oc_chat",
+        messageId: "om_card",
+        senderId: "ou_alice",
+        senderDisplayName: "Alice",
+        action: {
+          tag: "button",
+          name: "confirm",
+          value: { romeAction: "confirm_visit", id: "V01" },
+          formValue: { note: "ok" },
+        },
+      }),
+    ]);
+  });
+
+  it("keeps Rome's group-settings clicks from the interaction handlers", async () => {
+    const heard: unknown[] = [];
+    adapter.onInteraction(async (interaction) => {
+      heard.push(interaction);
+    });
+    await channel.emitCardAction({});
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(heard).toEqual([]);
+  });
+
+  it("stops handing clicks to a handler once it unsubscribes", async () => {
+    const heard: unknown[] = [];
+    const unsubscribe = adapter.onInteraction(async (interaction) => {
+      heard.push(interaction);
+    });
+    unsubscribe();
+    await channel.emitCardAction({ action: { tag: "button", value: { romeAction: "x" } } });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(heard).toEqual([]);
+  });
+
   it("disconnects on stop", async () => {
     await adapter.stop();
     expect(channel.connected).toBe(false);

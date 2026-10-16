@@ -5,7 +5,7 @@
  * inbound port rule R1.
  */
 
-import type { ChannelMessage } from "@rome-os/app-runtime";
+import type { ChannelInteraction, ChannelMessage } from "@rome-os/app-runtime";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger } from "../logger.js";
 
@@ -16,6 +16,14 @@ export type Admission = (
   connectionId: string,
   service: string,
   message: ChannelMessage,
+) => Promise<boolean>;
+
+/** Decides whether subscribers may hear an interaction from one Connection.
+ *  Unlike a message's admission, it never answers the account. */
+export type InteractionAdmission = (
+  connectionId: string,
+  service: string,
+  interaction: ChannelInteraction,
 ) => Promise<boolean>;
 
 /** How long one admission may hold its conversation. Pairing admission is a

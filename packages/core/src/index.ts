@@ -1,5 +1,10 @@
 import { createNodeDevicesService } from "./lib/node-devices.js";
-import { createPairingAdmission, notifyPairingResolution } from "./channels/pairing.js";
+import {
+  createPairingAdmission,
+  createPairingInteractionAdmission,
+  notifyPairingResolution,
+} from "./channels/pairing.js";
+import { routeInteractionsToActions } from "./channels/interaction-actions.js";
 import type { Admission } from "./channels/admission.js";
 import { createAgentsGuardianLink } from "./channels/agents-guardian.js";
 import { dirname, join } from "node:path";
@@ -1171,7 +1176,12 @@ async function main() {
     whatsAppAccounts,
     linkedInAccounts,
     ...(wechatUserReader ? { wechatUserReader } : {}),
-    connections: { registry: connectionRegistry, admit, channelOf },
+    connections: {
+      registry: connectionRegistry,
+      admit,
+      admitInteraction: createPairingInteractionAdmission({ personMappingRepo }),
+      channelOf,
+    },
     connectionAccounts: {
       [AGENTS_SERVICE]: agentsAccounts(listedAgents),
     },
@@ -1181,6 +1191,8 @@ async function main() {
       .map((record) => ({ name: record.id, service: record.service })),
   });
   builtChannels = channels;
+  // Card clicks run the app action the card names, for the process lifetime.
+  routeInteractionsToActions({ channels, actions: actionLoader, actionEngine });
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
 
   // The channel-message hook hears every channel through these, so each

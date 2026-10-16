@@ -40,7 +40,7 @@ import { CredentialRejected, Disconnected } from "../errors.js";
 import { credentialsPaste } from "../schemes.js";
 import type { SetupFn, SetupView } from "../setup/types.js";
 import type { ChannelActivity } from "@rome-os/app-runtime";
-import type { TalkDirectory, TalkFeatures } from "../types.js";
+import type { TalkDirectory, TalkFeatures, TalkInteractions } from "../types.js";
 import type {
   ConnectionDescriptor,
   ProfileDisplay,
@@ -508,10 +508,16 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
               };
             },
           };
+          // Card clicks on anything but Rome's own group-settings card.
+          const interactions: TalkInteractions = {
+            hear: (handler) => adapter.onInteraction(handler),
+          };
           const features: TalkFeatures = {
+            // An open_id addresses the account's private chat with the bot.
             directMessaging: addressIsConversationFeature(),
             activity,
             directory,
+            interactions,
           };
           return {
             start(deliver, fault): void {

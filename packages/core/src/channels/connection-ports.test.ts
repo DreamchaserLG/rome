@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type {
+  ChannelInteraction,
+  ChannelMessage,
+  ConversationId,
+  InboundInteractionEvent,
+} from "@rome-os/app-runtime";
 import type { TalkHistory } from "../connections/types.js";
 import {
   historyQueryLimit,
@@ -370,5 +375,97 @@ describe("connection ports for a service's later channels", () => {
     await ports.second?.send?.send("dm-1" as ConversationId, { text: "hi" });
     expect(secondTalker.state.sends).toHaveLength(1);
     expect(firstTalker.state.sends).toHaveLength(0);
+  });
+});
+
+describe("connection-backed interactions", () => {
+  function interaction(senderId: string, conversationId = "oc_chat"): ChannelInteraction {
+    return {
+      channel: "feishu",
+      conversationId: conversationId as ConversationId,
+      messageId: "om_card",
+      senderId,
+      action: { tag: "button", value: { romeAction: "confirm" } },
+      timestamp: new Date(),
+    };
+  }
+
+  function backedBy(admitInteraction?: ConnectionPortsDeps["admitInteraction"]) {
+    const handlers = new Set<(interaction: ChannelInteraction) => Promise<void>>();
+    const connection = {
+      id: "conn-1",
+      service: "feishu",
+      withTalker: (call: (talker: object) => unknown) =>
+        call({
+          interactions: {
+            hear: (handler: (interaction: ChannelInteraction) => Promise<void>) => {
+              handlers.add(handler);
+              return () => handlers.delete(handler);
+            },
+          },
+        }),
+      hearTalker: () => () => {},
+    };
+    const deps = {
+      registry: {
+        getDescriptor: () => ({ capabilities: { talker: {} } }),
+        find: () => [connection],
+        onUnlocked: (_cap: string, fire: (c: typeof connection) => void) => fire(connection),
+        registeredServices: () => ["feishu"],
+      },
+      ...(admitInteraction ? { admitInteraction } : {}),
+    } as unknown as ConnectionPortsDeps;
+    const interactions = connectionPorts(deps, "feishu")?.inbound?.interactions;
+    if (!interactions) throw new Error("a talked channel has an interactions port");
+    const deliver = async (each: ChannelInteraction) => {
+      for (const handler of handlers) await handler(each);
+    };
+    return { interactions, deliver };
+  }
+
+  it("hands every subscriber an admitted interaction with its conversation's ref", async () => {
+    const { interactions, deliver } = backedBy();
+    const heard: InboundInteractionEvent[] = [];
+    interactions.subscribe(async (event) => {
+      heard.push(event);
+    });
+    await deliver(interaction("ou_alice"));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(heard).toEqual([
+      {
+        kind: "interaction",
+        interaction: interaction("ou_alice"),
+        ref: { connectionId: "conn-1", conversationId: "oc_chat" },
+      },
+    ]);
+    expect(heard[0]?.interaction.timestamp).toBeInstanceOf(Date);
+  });
+
+  it("drops an interaction its admission refuses", async () => {
+    const admit = rs.fn(async (_id: string, _service: string, each: ChannelInteraction) =>
+      Promise.resolve(each.senderId === "ou_paired"),
+    );
+    const { interactions, deliver } = backedBy(admit);
+    const heard: string[] = [];
+    interactions.subscribe(async (event) => {
+      heard.push(event.interaction.senderId);
+    });
+    await deliver(interaction("ou_stranger"));
+    await deliver(interaction("ou_paired"));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(heard).toEqual(["ou_paired"]);
+    expect(admit).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops hearing once the subscription ends", async () => {
+    const { interactions, deliver } = backedBy();
+    const heard: unknown[] = [];
+    const unsubscribe = interactions.subscribe(async (event) => {
+      heard.push(event);
+    });
+    unsubscribe();
+    await deliver(interaction("ou_alice"));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(heard).toEqual([]);
   });
 });

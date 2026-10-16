@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelInteraction, ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import type { ChannelSend } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
@@ -13,7 +13,11 @@ import {
   connectionGrants,
 } from "../db/schema.js";
 import { pairingPayload } from "@rome/api-types/approvals";
-import { createPairingAdmission, notifyPairingResolution } from "./pairing.js";
+import {
+  createPairingAdmission,
+  createPairingInteractionAdmission,
+  notifyPairingResolution,
+} from "./pairing.js";
 import { eq } from "drizzle-orm";
 import { STRANGER_PERSON_ID } from "../constants.js";
 
@@ -655,5 +659,46 @@ describe("channel pairing approvals", () => {
       ),
     ).toBe(true);
     expect(send.mock.calls.some(([, , body]) => body.text?.includes(code))).toBe(false);
+  });
+});
+
+describe("interaction admission", () => {
+  const click = (senderId: string): ChannelInteraction => ({
+    channel: "feishu",
+    conversationId: "oc_chat" as ConversationId,
+    messageId: "om_card",
+    senderId,
+    action: { tag: "button", value: {} },
+    timestamp: new Date(),
+  });
+  const people = {
+    findByChannelUser: async (_service: string, id: string) =>
+      id === "ou_paired"
+        ? { id: "owner" }
+        : id === "ou_stranger"
+          ? { id: STRANGER_PERSON_ID }
+          : null,
+  } as unknown as PersonMappingRepository;
+  const admit = createPairingInteractionAdmission({ personMappingRepo: people });
+
+  it("admits a linked account and nobody else on a channel that pairs", async () => {
+    expect(await admit("conn", "feishu", click("ou_paired"))).toBe(true);
+    expect(await admit("conn", "feishu", click("ou_stranger"))).toBe(false);
+    expect(await admit("conn", "feishu", click("ou_unknown"))).toBe(false);
+  });
+
+  it("admits every account on a channel that does not pair", async () => {
+    expect(await admit("conn", "webchat", click("ou_unknown"))).toBe(true);
+  });
+
+  it("fails closed when the lookup fails", async () => {
+    const failing = createPairingInteractionAdmission({
+      personMappingRepo: {
+        findByChannelUser: async () => {
+          throw new Error("db down");
+        },
+      } as unknown as PersonMappingRepository,
+    });
+    expect(await failing("conn", "feishu", click("ou_paired"))).toBe(false);
   });
 });

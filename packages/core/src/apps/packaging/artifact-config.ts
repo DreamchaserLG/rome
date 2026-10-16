@@ -51,6 +51,7 @@ export const ActionConfigSchema = z
     requiresApproval: z.boolean().optional(),
     cancellable: z.boolean().optional(),
     webhook: z.boolean().optional(),
+    interactions: z.boolean().optional(),
     favorRequirement: FavorRequirementSchema.optional(),
   })
   .strict()
@@ -60,6 +61,13 @@ export const ActionConfigSchema = z
         code: z.ZodIssueCode.custom,
         path: ["webhook"],
         message: "webhook actions cannot require approval in v1",
+      });
+    }
+    if (config.interactions && config.requiresApproval) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["interactions"],
+        message: "interaction actions cannot require approval in v1",
       });
     }
     if (config.favorRequirement && config.requiresApproval) {

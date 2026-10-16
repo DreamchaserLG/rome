@@ -135,6 +135,14 @@ export interface ActionConfig {
   requiresApproval?: boolean;
   cancellable?: boolean;
   webhook?: boolean;
+  /**
+   * Runs when a person acts on a card control that names this action, such as
+   * a button on a Feishu card sent with a `feishu_card` part. The action
+   * receives `{ interaction }` ({@link ChannelInteractionActionInput}), and
+   * its context's `channelContext.channelUserId` is the person who acted. An
+   * action without it never runs from a card.
+   */
+  interactions?: boolean;
   favorRequirement?: FavorRequirementConfig;
 }
 
@@ -1575,7 +1583,25 @@ export type MessagePart =
       type: "interaction_result";
       toolUseId: string;
       output: Record<string, unknown>;
+    }
+  | {
+      /**
+       * A Feishu/Lark interactive card, as the platform's card JSON. The
+       * Feishu channel sends it as a card in place of `text`, which stays the
+       * fallback for channels that cannot render one. A control whose `value`
+       * carries `romeAction` runs that action when clicked, if the action
+       * declares `interactions: true` ({@link CARD_ACTION_KEY}).
+       */
+      type: "feishu_card";
+      card: Record<string, unknown>;
     };
+
+/**
+ * The key in a card control's `value` naming the action a click runs. The
+ * rest of `value` reaches the action unchanged, as
+ * `interaction.action.value`.
+ */
+export const CARD_ACTION_KEY = "romeAction";
 
 /** The proposed routine, as snapshotted from the agent's `propose_routine`
  * tool call. `name`/`trigger`/`actionName`/`args` are the create payload;
@@ -1840,9 +1866,10 @@ export interface ChannelSend {
 }
 
 /**
- * What a subscriber hears from a channel. One kind today; a new kind (an
- * interaction, an edit) joins this union so it passes the same admission as a
- * message, and a handler switching on `kind` keeps compiling.
+ * What a subscriber hears from a channel. One kind today; a new kind (an edit)
+ * joins this union so it passes the same admission as a message, and a handler
+ * switching on `kind` keeps compiling. Interactions arrive on their own port
+ * ({@link ChannelInteractions}), so a message subscriber never hears one.
  *
  * `ref` addresses the event's conversation for the APIs that take a
  * {@link ConversationRef} (conversation settings, stop), resolved by the
@@ -1888,7 +1915,91 @@ export interface ChannelInbound {
   /** Materializes a message's attachments, or null when the channel cannot
    *  now. A consumer without it uses the attachments as delivered. */
   readonly media: ChannelInboundMedia | null;
+  /** People acting on what Rome sent, such as clicking a card button. Absent
+   *  or null on a channel that has no interactive messages. */
+  readonly interactions?: ChannelInteractions | null;
 }
+
+/**
+ * A person acting on a message Rome sent: a click on a card button, a choice
+ * in a card's select, a submitted card form. It names the message acted on and
+ * the person who acted, as the channel addresses them.
+ */
+export interface ChannelInteraction {
+  /** The channel's name, as every stored row and link spells it. */
+  channel: string;
+  conversationId: ConversationId;
+  /** Provider id of the message acted on (the card). */
+  messageId: string;
+  /** Who acted, as the channel addresses them (a Feishu open_id). */
+  senderId: string;
+  senderDisplayName?: string;
+  action: {
+    /** The control's kind, as the platform names it ("button", "select_static"). */
+    tag: string;
+    /** The control's `name`, when it has one. */
+    name?: string;
+    /** The control's `value`, as the card set it. */
+    value: unknown;
+    /** The option chosen in a select. */
+    option?: string;
+    /** The fields of a submitted form, by field name. */
+    formValue?: Record<string, unknown>;
+  };
+  timestamp: Date;
+  /** Provider-native event, an opaque pass-through for the same provider. */
+  raw?: unknown;
+}
+
+export type InboundInteractionEvent = {
+  kind: "interaction";
+  interaction: ChannelInteraction;
+  ref: ConversationRef;
+};
+
+/**
+ * Hearing interactions on a channel, under the same rules as
+ * {@link ChannelInbound} messages: admitted only (an account the guardian has
+ * not approved never reaches a subscriber, and an interaction creates no
+ * pairing request), live and at most once, fanned out and ordered per
+ * conversation, and outliving a reconnect.
+ */
+export interface ChannelInteractions {
+  subscribe(handler: (event: InboundInteractionEvent) => Promise<void>): () => void;
+}
+
+/**
+ * What an action declaring `interactions: true` receives when a person acts on
+ * a card control naming it. The same fields as {@link ChannelInteraction},
+ * with the time as an ISO string and no provider event.
+ */
+export interface ChannelInteractionActionInput {
+  interaction: Omit<ChannelInteraction, "conversationId" | "timestamp" | "raw"> & {
+    connectionId: string;
+    conversationId: string;
+    timestamp: string;
+  };
+}
+
+/** Validates {@link ChannelInteractionActionInput}, for an action's `schema`. */
+export const channelInteractionActionInputSchema = z.object({
+  interaction: z.object({
+    channel: z.string(),
+    connectionId: z.string(),
+    conversationId: z.string(),
+    messageId: z.string(),
+    senderId: z.string(),
+    senderDisplayName: z.string().optional(),
+    action: z.object({
+      tag: z.string(),
+      name: z.string().optional(),
+      value: z.unknown(),
+      option: z.string().optional(),
+      formValue: z.record(z.string(), z.unknown()).optional(),
+    }),
+    timestamp: z.string(),
+  }),
+});
 
 /**
  * A channel as an app reaches one: its name, as every stored row spells it,

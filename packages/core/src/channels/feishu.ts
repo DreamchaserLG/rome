@@ -13,6 +13,7 @@ import type { OutgoingMessage } from "./types.js";
 import { createLogger } from "../logger.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type {
+  ChannelInteraction,
   ChannelMessage,
   ConversationDescriptor,
   ConversationId,
@@ -118,6 +119,9 @@ export type CreateLarkChannel = (config: FeishuConfig) => LarkChannel;
 export class FeishuAdapter {
   private channel: LarkChannel;
   private handler?: (msg: ChannelMessage) => Promise<void>;
+  private readonly interactionHandlers = new Set<
+    (interaction: ChannelInteraction) => Promise<void>
+  >();
   private readonly connectionId?: string;
   private readonly conversationSettings?: ConversationSettingsControl & {
     observe?(descriptor: ConversationDescriptor): void;
@@ -190,7 +194,16 @@ export class FeishuAdapter {
     log.info("feishu adapter stopped");
   }
 
+  /**
+   * Sends `message` to a chat (`oc_…`) or, given an account's open_id
+   * (`ou_…`), to that account's private chat with the bot. A `feishu_card`
+   * part is sent as an interactive card in place of the text, so a message
+   * carrying cards sends one Feishu message per card and the text only where
+   * no card is given.
+   */
   async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
+    const cards = feishuCards(message);
+    if (cards.length > 0) return this.sendCards(conversationId, cards, message.replyToMessageId);
     if (!message.text) return { conversationId };
     const threadId: string = conversationId;
 
@@ -223,8 +236,51 @@ export class FeishuAdapter {
     }
   }
 
+  private async sendCards(
+    conversationId: ConversationId,
+    cards: Array<Record<string, unknown>>,
+    replyToMessageId: string | undefined,
+  ): Promise<MessageReceipt> {
+    const threadId: string = conversationId;
+    const opts = replyToMessageId
+      ? {
+          replyTo: replyToMessageId,
+          replyInThread: (await this.getChannelConfig(threadId)).autoThread ?? true,
+        }
+      : undefined;
+    const parts: Array<{ messageId: string; kind: string }> = [];
+    try {
+      for (const card of cards) {
+        const sent = await this.channel.send(threadId, { card }, opts);
+        if (sent?.messageId) parts.push({ messageId: sent.messageId, kind: "card" });
+      }
+    } catch (err) {
+      log.error("failed to send card", {
+        threadId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+    log.info("card sent", { threadId, cards: cards.length });
+    const messageId = parts[0]?.messageId;
+    return {
+      conversationId,
+      ...(messageId ? { messageId } : {}),
+      ...(parts.length > 1 ? { parts } : {}),
+    };
+  }
+
   onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
     this.handler = handler;
+  }
+
+  /** Hears every card interaction that is not Rome's own group-settings card,
+   *  until the returned callback runs. */
+  onInteraction(handler: (interaction: ChannelInteraction) => Promise<void>): () => void {
+    this.interactionHandlers.add(handler);
+    return () => {
+      this.interactionHandlers.delete(handler);
+    };
   }
 
   async addProcessingReaction(messageId: string): Promise<string | null> {
@@ -330,6 +386,19 @@ export class FeishuAdapter {
     const value = evt.action.value;
     if (isFeishuGroupConfigAction(value)) {
       await this.handleGroupConfigAction(evt);
+      return;
+    }
+    if (this.interactionHandlers.size === 0) return;
+    // Feishu waits on the callback for a few seconds and re-delivers it
+    // otherwise, so the handlers run after it returns.
+    const interaction = toChannelInteraction(evt);
+    for (const handler of this.interactionHandlers) {
+      handler(interaction).catch((err) => {
+        log.error("card interaction handler error", {
+          messageId: evt.messageId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     }
   }
 
@@ -775,6 +844,44 @@ function formatGroupConfigConfirmation(cfg: FeishuChannelConfig): string {
     `Reply trigger: ${(cfg.requireMention ?? true) ? "@ only" : "Every message"}`,
     `Reply placement: ${(cfg.autoThread ?? true) ? "Thread" : "Inline"}`,
   ].join("\n");
+}
+
+/** The cards a message carries, in order. */
+function feishuCards(message: OutgoingMessage): Array<Record<string, unknown>> {
+  return (message.parts ?? []).flatMap((part) =>
+    part.type === "feishu_card" && isRecord(part.card) ? [part.card] : [],
+  );
+}
+
+/** A card callback as the channel's interaction record. */
+export function toChannelInteraction(evt: CardActionEvent): ChannelInteraction {
+  const formValue = extractFormValue(evt.raw);
+  return {
+    channel: "feishu",
+    conversationId: evt.chatId as ConversationId,
+    messageId: evt.messageId,
+    senderId: evt.operator.openId,
+    ...(evt.operator.name ? { senderDisplayName: evt.operator.name } : {}),
+    action: {
+      tag: evt.action.tag,
+      ...(evt.action.name ? { name: evt.action.name } : {}),
+      value: evt.action.value,
+      ...(evt.action.option ? { option: evt.action.option } : {}),
+      ...(formValue ? { formValue } : {}),
+    },
+    timestamp: new Date(),
+    raw: evt.raw ?? evt,
+  };
+}
+
+/** A submitted form's fields, which Feishu carries on the raw callback's
+ *  action as `form_value`. */
+function extractFormValue(raw: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(raw)) return undefined;
+  const event = isRecord(raw.event) ? raw.event : raw;
+  const action = isRecord(event.action) ? event.action : undefined;
+  const form = action?.form_value;
+  return isRecord(form) ? form : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

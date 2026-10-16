@@ -16,6 +16,9 @@ import type {
   ConversationId,
   InboundEvent,
   ChannelDirectMessaging,
+  ChannelInteraction,
+  ChannelInteractions,
+  InboundInteractionEvent,
   MessageReceipt,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
@@ -23,7 +26,14 @@ import type { Connection, TalkFeatureName, Talker } from "../connections/types.j
 import { historyWindowHours } from "../connections/integrations/talk-features.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { createLogger } from "../logger.js";
-import { type Admission, OrderedAdmission, type OrderedAdmissionOptions } from "./admission.js";
+import { KeyedMutex } from "../lib/keyed-mutex.js";
+import {
+  ADMISSION_TIMEOUT_MS,
+  type Admission,
+  type InteractionAdmission,
+  OrderedAdmission,
+  type OrderedAdmissionOptions,
+} from "./admission.js";
 import { ChannelNotConnected, type ChannelDirectory, type ChannelSend } from "./channel.js";
 import { ConversationBuffers } from "./conversation-buffer.js";
 import { MAX_QUERY_LIMIT, queryLimit, type Messages } from "./messages.js";
@@ -39,6 +49,9 @@ export interface ConnectionPortsDeps {
    *  message, which is what gives these ports rule R1. Absent, every message
    *  is admitted. */
   admit?: Admission;
+  /** The same for an interaction, such as a card click. Absent, every
+   *  interaction is admitted. */
+  admitInteraction?: InteractionAdmission;
   admission?: OrderedAdmissionOptions;
   /** The channel a Connection backs. Absent, every Connection backs the
    *  channel named after its service. */
@@ -385,10 +398,13 @@ function connectionInbound(backing: Backing): ChannelInbound {
     if (detach) attached.set(connection.id, detach);
   };
 
+  const interactions = connectionInteractions(backing);
+
   // Fires now for each Connection already unlocked, then at every unlock.
   deps.registry.onUnlocked("talk", (connection) => {
     if (connection.service === backing.service && channelOf(connection) === channel) {
       attach(connection);
+      interactions.attach(connection);
     }
   });
 
@@ -412,6 +428,101 @@ function connectionInbound(backing: Backing): ChannelInbound {
           callTalker(connection, (talker) => talker.inboundMedia?.materialize(message)),
       };
       return media;
+    },
+    interactions: interactions.port,
+  };
+}
+
+/**
+ * The interactions a channel's Connections hear, under the rules messages
+ * keep: admitted first, one at a time per conversation in arrival order, fanned
+ * out to every subscription, and heard again from each new epoch's talker. A
+ * talker that offers no interactions delivers none.
+ */
+function connectionInteractions(backing: Backing): {
+  port: ChannelInteractions;
+  attach(connection: Connection): void;
+} {
+  const { deps, channel } = backing;
+  const subscriptions = new Set<ConversationBuffers<InboundInteractionEvent>>();
+  const attached = new Map<string, () => void>();
+  const admissions = new KeyedMutex();
+  const timeoutMs = deps.admission?.admissionTimeoutMs ?? ADMISSION_TIMEOUT_MS;
+
+  const admitted = async (
+    connection: Connection,
+    interaction: ChannelInteraction,
+  ): Promise<boolean> => {
+    const admit = deps.admitInteraction;
+    if (!admit) return true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<false>((resolve) => {
+      timer = setTimeout(() => {
+        log.warn("interaction admission timed out; interaction not admitted", {
+          connectionId: connection.id,
+          conversationId: interaction.conversationId,
+          messageId: interaction.messageId,
+          timeoutMs,
+        });
+        resolve(false);
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([admit(connection.id, connection.service, interaction), timedOut]);
+    } catch (err) {
+      log.warn("interaction admission failed; interaction not admitted", {
+        connectionId: connection.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const dispatchFrom =
+    (connection: Connection) =>
+    async (interaction: ChannelInteraction): Promise<void> => {
+      // A Connection id is a UUID, so the first colon ends it.
+      const conversation = `${connection.id}:${interaction.conversationId}`;
+      await admissions.runExclusive(conversation, async () => {
+        if (!(await admitted(connection, interaction))) return;
+        const event: InboundInteractionEvent = {
+          kind: "interaction",
+          interaction: interaction.channel === channel ? interaction : { ...interaction, channel },
+          ref: { connectionId: connection.id, conversationId: interaction.conversationId },
+        };
+        for (const buffers of subscriptions) buffers.push(conversation, event);
+      });
+    };
+
+  return {
+    port: {
+      subscribe(handler) {
+        const subscription = new ConversationBuffers<InboundInteractionEvent>(handler, {
+          log,
+          describe: (event) => ({ channel, messageId: event.interaction.messageId }),
+        });
+        subscriptions.add(subscription);
+        return () => {
+          subscriptions.delete(subscription);
+          subscription.close();
+        };
+      },
+    },
+    attach(connection) {
+      attached.get(connection.id)?.();
+      attached.delete(connection.id);
+      const live = new Set(connectionsOf(backing).map((each) => each.id));
+      for (const [id, detach] of attached) {
+        if (live.has(id)) continue;
+        detach();
+        attached.delete(id);
+      }
+      const detach = connection.withTalker((talker) =>
+        talker.interactions?.hear(dispatchFrom(connection)),
+      );
+      if (detach) attached.set(connection.id, detach);
     },
   };
 }

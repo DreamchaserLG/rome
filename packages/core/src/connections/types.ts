@@ -12,6 +12,7 @@ import type {
   ChannelActivity,
   ChannelDirectMessaging,
   ChannelInboundMedia,
+  ChannelInteraction,
 } from "@rome-os/app-runtime";
 import type { CredentialRejected, Disconnected } from "./errors.js";
 
@@ -47,12 +48,22 @@ export interface TalkDirectory {
   }): Promise<{ conversations: ConversationDescriptor[]; nextCursor?: string }>;
 }
 
+/**
+ * People acting on what a Connection sent, such as clicking a card button. A
+ * talker hears them on its own transport and hands each to every handler
+ * until the handler's unsubscribe runs or the talker stops.
+ */
+export interface TalkInteractions {
+  hear(handler: (interaction: ChannelInteraction) => Promise<void>): () => void;
+}
+
 export interface TalkFeatureMap {
   history: TalkHistory;
   inboundMedia: ChannelInboundMedia;
   activity: ChannelActivity;
   directory: TalkDirectory;
   directMessaging: ChannelDirectMessaging;
+  interactions: TalkInteractions;
 }
 
 export type TalkFeatureName = keyof TalkFeatureMap;
