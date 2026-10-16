@@ -14,6 +14,7 @@ import {
   connectionPorts,
   LIVE_DEFAULT_WINDOW_MS,
   LIVE_READ_TTL_MS,
+  recordedChannelOf,
   type ConnectionPortsDeps,
 } from "./connection-ports.js";
 import { testMessagesQueryContract } from "./messages-contract.js";
@@ -21,7 +22,7 @@ import { ChannelNotConnected } from "./channel.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { makePasteTalk } from "../connections/test-fixtures.js";
-import { createTestDb } from "../test/helpers.js";
+import { createTestDb, serviceChannelOf } from "../test/helpers.js";
 
 // A channel with no store answers `query` through its Connection's history.
 // That history reads a window rounded out to whole hours, as the adapters do,
@@ -90,6 +91,7 @@ testMessagesQueryContract("connection-backed messages", () => {
       onUnlocked: () => {},
       registeredServices: () => ["telegram_user"],
     },
+    channelOf: () => "telegram_user",
   } as unknown as ConnectionPortsDeps;
   const messages = connectionPorts(deps, "telegram_user")?.messages;
   if (!messages) throw new Error("a talker with history backs the channel's messages");
@@ -124,6 +126,7 @@ describe("connection-backed messages", () => {
         onUnlocked: () => {},
         registeredServices: () => ["telegram_user"],
       },
+      channelOf: () => "telegram_user",
     } as unknown as ConnectionPortsDeps;
     const messages = connectionPorts(deps, "telegram_user")?.messages;
 
@@ -156,6 +159,7 @@ describe("connection-backed messages, across conversations", () => {
         onUnlocked: () => {},
         registeredServices: () => ["telegram_user"],
       },
+      channelOf: () => "telegram_user",
     } as unknown as ConnectionPortsDeps;
     const messages = connectionPorts(deps, "telegram_user")?.messages;
 
@@ -203,6 +207,7 @@ describe("connection-backed messages, shared reads", () => {
         onUnlocked: () => {},
         registeredServices: () => ["telegram_user"],
       },
+      channelOf: () => "telegram_user",
     } as unknown as ConnectionPortsDeps;
     const messages = connectionPorts(deps, "telegram_user")?.messages;
     if (!messages) throw new Error("a talker with history backs the channel's messages");
@@ -324,7 +329,8 @@ describe("connection-backed send, across epochs", () => {
     };
     await registry.importCredential(connection.id, "bot", fx.validCredential());
     offerDirect("first");
-    const direct = connectionPorts({ registry }, "fake-telegram")?.send?.direct;
+    const direct = connectionPorts({ registry, channelOf: serviceChannelOf }, "fake-telegram")?.send
+      ?.direct;
     if (!direct) throw new Error("the talker offers direct messaging");
     await expect(direct.conversationFor("7")).resolves.toBe("first");
 
@@ -413,6 +419,7 @@ describe("connection-backed interactions", () => {
         onUnlocked: (_cap: string, fire: (c: typeof connection) => void) => fire(connection),
         registeredServices: () => ["feishu"],
       },
+      channelOf: serviceChannelOf,
       ...(admitInteraction ? { admitInteraction } : {}),
     } as unknown as ConnectionPortsDeps;
     const interactions = connectionPorts(deps, "feishu")?.inbound?.interactions;
@@ -467,5 +474,35 @@ describe("connection-backed interactions", () => {
     await deliver(interaction("ou_alice"));
     await new Promise((resolve) => setImmediate(resolve));
     expect(heard).toEqual([]);
+  });
+});
+
+describe("a Connection with no channel record", () => {
+  it("backs no channel, not even its service's first", async () => {
+    const { db } = createTestDb();
+    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+    const fx = makePasteTalk();
+    registry.register(fx.descriptor);
+    // The service's only Connection, so nothing else could back the channel.
+    const unrecorded = await registry.connect("fake-telegram");
+    const deps: ConnectionPortsDeps = {
+      registry,
+      channelOf: recordedChannelOf({ idOf: () => null }, () => true),
+    };
+    const ports = connectionPorts(deps, "fake-telegram")!;
+    const heard: string[] = [];
+    ports.inbound!.subscribe(async (event) => {
+      heard.push(event.ref.connectionId);
+    });
+    await registry.importCredential(unrecorded.id, "bot", fx.validCredential());
+    const talker = fx.talkerFactory.instances.at(-1)!;
+
+    talker.state.deliver!({ ...said("m1", "dm-1", 0), channel: "fake-telegram" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(heard).toEqual([]);
+    await expect(ports.send!.send("dm-1" as ConversationId, { text: "hi" })).rejects.toBeInstanceOf(
+      ChannelNotConnected,
+    );
+    expect(talker.state.sends).toHaveLength(0);
   });
 });

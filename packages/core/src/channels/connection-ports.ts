@@ -25,6 +25,7 @@ import type {
 import type { Connection, TalkFeatureName, Talker } from "../connections/types.js";
 import { historyWindowHours } from "../connections/integrations/talk-features.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
+import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createLogger } from "../logger.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import {
@@ -40,6 +41,10 @@ import { MAX_QUERY_LIMIT, queryLimit, type Messages } from "./messages.js";
 
 const log = createLogger("channel-ports");
 
+/** Talk Connections already reported as unlocking with no channel record, so
+ *  each is reported once, not once per port of its service. */
+const reportedUnrecorded = new Set<string>();
+
 export interface ConnectionPortsDeps {
   registry: Pick<
     ConnectionRegistry,
@@ -53,13 +58,30 @@ export interface ConnectionPortsDeps {
    *  interaction is admitted. */
   admitInteraction?: InteractionAdmission;
   admission?: OrderedAdmissionOptions;
-  /** The channel a Connection backs. Absent, every Connection backs the
-   *  channel named after its service. */
-  channelOf?: ChannelOf;
+  /** Names the channel each Connection backs. A Connection it answers null
+   *  for backs no port. */
+  channelOf: ChannelOf;
 }
 
-/** The name of the channel a Connection backs. */
-export type ChannelOf = (connection: Pick<Connection, "id" | "service">) => string;
+/** The name of the channel a Connection backs, or null when it backs none.
+ *  A null matches no channel, so such a Connection backs no port. */
+export type ChannelOf = (connection: Pick<Connection, "id" | "service">) => string | null;
+
+/**
+ * The channel each Connection backs, as `records` holds it. A Connection of a
+ * service with a Talk that has no record backs no channel, rather than its
+ * service's first one: it has none while `registry.remove` evicts it after
+ * vacating its row, and taking the first channel then would merge it with the
+ * Connection that backs that one. A Connection of a service without a Talk
+ * backs no recorded channel, and answers its service's name.
+ */
+export function recordedChannelOf(
+  records: Pick<ChannelRecordsRepository, "idOf">,
+  talks: (service: string) => boolean,
+): ChannelOf {
+  return (connection) =>
+    records.idOf(connection.id) ?? (talks(connection.service) ? null : connection.service);
+}
 
 export interface ConnectionPorts {
   send: ChannelSend | null;
@@ -105,13 +127,7 @@ interface Backing {
 /** The Connections backing the channel now, in registry order. */
 function connectionsOf(backing: Backing): Connection[] {
   const { deps, service, channel } = backing;
-  const channelOf = channelOfIn(backing);
-  return deps.registry.find(service).filter((connection) => channelOf(connection) === channel);
-}
-
-/** Without a `channelOf`, every Connection of the service backs the one channel. */
-function channelOfIn({ deps, service }: Backing): ChannelOf {
-  return deps.channelOf ?? (() => service);
+  return deps.registry.find(service).filter((connection) => deps.channelOf(connection) === channel);
 }
 
 /**
@@ -346,7 +362,6 @@ function isAnswerable(message: ChannelMessage): boolean {
 
 function connectionInbound(backing: Backing): ChannelInbound {
   const { deps, channel } = backing;
-  const channelOf = channelOfIn(backing);
   // One buffer set per subscription, so two subscriptions of one handler stay
   // two, and each subscription's conversations wait only on themselves (R4).
   const subscriptions = new Set<ConversationBuffers<InboundEvent>>();
@@ -402,9 +417,20 @@ function connectionInbound(backing: Backing): ChannelInbound {
 
   // Fires now for each Connection already unlocked, then at every unlock.
   deps.registry.onUnlocked("talk", (connection) => {
-    if (connection.service === backing.service && channelOf(connection) === channel) {
+    if (connection.service !== backing.service) return;
+    const named = deps.channelOf(connection);
+    if (named === channel) {
       attach(connection);
       interactions.attach(connection);
+    }
+    // A record is claimed before a Talk Connection first unlocks, so a missing
+    // one is a wiring fault, and this Connection's messages go unheard.
+    if (named === null && !reportedUnrecorded.has(connection.id)) {
+      reportedUnrecorded.add(connection.id);
+      log.warn("channel_ports.unrecorded_connection", {
+        connectionId: connection.id,
+        service: connection.service,
+      });
     }
   });
 

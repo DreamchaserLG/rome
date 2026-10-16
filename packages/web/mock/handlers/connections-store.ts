@@ -28,13 +28,22 @@ export const connections: { connections: ApiConnection[] } = {
       },
       connect: null,
       setups: {},
+      channel: null,
+      linkedAgent: null,
+      severalAccounts: false,
     },
     ...[
-      { service: "email", label: "Email", grant: "inbox", email: "guardian@example.com" },
-      { service: "wechat", label: "WeChat", grant: "account", email: null },
-      { service: "feishu", label: "Feishu", grant: "bot", email: null },
+      {
+        service: "email",
+        label: "Email",
+        grant: "inbox",
+        email: "guardian@example.com",
+        severalAccounts: false,
+      },
+      { service: "wechat", label: "WeChat", grant: "account", email: null, severalAccounts: false },
+      { service: "feishu", label: "Feishu", grant: "bot", email: null, severalAccounts: true },
     ].map(
-      ({ service, label, grant, email }): ApiConnection => ({
+      ({ service, label, grant, email, severalAccounts }): ApiConnection => ({
         id: `${service}-demo`,
         service,
         label: `${label} · Rome Demo`,
@@ -49,6 +58,9 @@ export const connections: { connections: ApiConnection[] } = {
         },
         connect: null,
         setups: {},
+        channel: service,
+        linkedAgent: null,
+        severalAccounts,
       }),
     ),
     {
@@ -66,6 +78,9 @@ export const connections: { connections: ApiConnection[] } = {
       },
       connect: null,
       setups: {},
+      channel: "discord",
+      linkedAgent: null,
+      severalAccounts: true,
     },
     {
       id: "telegram-1",
@@ -82,6 +97,9 @@ export const connections: { connections: ApiConnection[] } = {
       },
       connect: null,
       setups: {},
+      channel: "telegram",
+      linkedAgent: null,
+      severalAccounts: true,
     },
     {
       // The channel behind the People page's WhatsApp section: the address-book
@@ -102,6 +120,9 @@ export const connections: { connections: ApiConnection[] } = {
       },
       connect: null,
       setups: {},
+      channel: "whatsapp",
+      linkedAgent: null,
+      severalAccounts: false,
     },
     {
       id: "linkedin-1",
@@ -118,6 +139,9 @@ export const connections: { connections: ApiConnection[] } = {
       },
       connect: null,
       setups: {},
+      channel: "linkedin",
+      linkedAgent: null,
+      severalAccounts: false,
     },
   ],
 };
