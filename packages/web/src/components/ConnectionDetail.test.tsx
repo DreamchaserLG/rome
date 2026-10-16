@@ -9,6 +9,18 @@ import { ConnectionDetailBody } from "@/components/ConnectionDetail";
 import { buildConnectionCards, type ConnectionCard } from "@/lib/connection-cards";
 import type { ApiConnection, ConnectHint, GrantDisplay, GrantState } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
+import { toast } from "sonner";
+
+rs.mock("sonner", () => ({
+  toast: Object.assign(
+    rs.fn(() => "toast-id"),
+    {
+      success: rs.fn(),
+      error: rs.fn(),
+      dismiss: rs.fn(),
+    },
+  ),
+}));
 
 /** A later account's channel id, opaque as core mints it. */
 const SECOND_FEISHU = "c7d1a0e2-5b3f-4e8a-9c61-2f0b7d4e8a13";
@@ -464,7 +476,7 @@ describe("ConnectionDetailBody — accounts", () => {
     await user.click(screen.getByRole("button", { name: "Add another account" }));
 
     await waitFor(() =>
-      expect(onFlash).toHaveBeenCalledWith("Account added. Find it in the Connections list."),
+      expect(toast).toHaveBeenCalledWith("Account added. Find it in the Connections list."),
     );
     expect(onFlash).not.toHaveBeenCalledWith("Could not add an account");
   });
@@ -486,7 +498,7 @@ describe("ConnectionDetailBody — accounts", () => {
     await user.click(screen.getByRole("button", { name: "Add another account" }));
 
     await waitFor(() =>
-      expect(onFlash).toHaveBeenCalledWith("Account added. Find it in the Connections list."),
+      expect(toast).toHaveBeenCalledWith("Account added. Find it in the Connections list."),
     );
     expect(onOpenAccount).not.toHaveBeenCalled();
   });

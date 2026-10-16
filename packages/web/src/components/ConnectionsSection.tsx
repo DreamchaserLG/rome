@@ -74,13 +74,15 @@ export function ConnectionsSection({
   // A freshly added account has no card until the list refetches, so refetch
   // first and point the dialog at it only once its card exists. Otherwise the
   // dialog would close, then reopen by itself when a later poll lists it.
-  // A dialog the guardian closed during the add stays closed.
+  // A dialog the guardian closed, or moved to another card, during the add
+  // stays where they left it.
   const openAccount = async (route: string) => {
+    const from = selectedRouteRef.current;
     const fresh = await onRefresh(true);
     if (!fresh || !buildConnectionCards(fresh, composio).some((card) => card.route === route)) {
       throw new Error(`Account ${route} is not listed yet.`);
     }
-    if (selectedRouteRef.current !== null) select(route);
+    if (from !== null && selectedRouteRef.current === from) select(route);
   };
 
   return (

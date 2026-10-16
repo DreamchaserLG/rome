@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { type ApiConnection, createConnection } from "@/lib/connections-api";
 import { type ConnectionCard, connectionRoute } from "@/lib/connection-cards";
@@ -70,7 +71,9 @@ function AddAccountButton({
         if (!connection.channel) throw new Error("The new account has no channel.");
         await onOpenAccount(connectionRoute(connection));
       } catch {
-        onFlash(t("connections.accounts.addedNotShown"));
+        // Not an error: the account exists. The Settings tab's `onFlash`
+        // shows errors, so this one goes out as a plain toast.
+        toast(t("connections.accounts.addedNotShown"));
       }
     } finally {
       setAdding(false);
