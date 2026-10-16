@@ -71,7 +71,7 @@
     "shared_one": "{{bots}} is in this chat too. Each agent sees what the chat app delivers to its own account here, which may not include the other agents' replies.",
     "shared_other": "{{bots}} are in this chat too. Each agent sees what the chat app delivers to its own account here, which may not include the other agents' replies.",
     "settings": "Chat settings: answers when @mentioned · replies in thread",
-    "override": "Which agent answers: the linked agent. A group can still pick another agent from its settings in the chat app."
+    "override": "Which agent answers: the linked agent. A group's own agent choice in the chat app doesn't override it."
   },
   "activity": {
     "description": "What was said to and by {{agent}} across its chats, newest first.",
