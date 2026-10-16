@@ -1256,15 +1256,19 @@ async function main() {
       });
       return;
     }
-    // A hook built outside this repo may return no promise.
-    Promise.resolve()
-      .then(() => hook.addChannels?.(added))
-      .catch((error: unknown) => {
-        log.error("channel-message hook did not subscribe to a later channel", {
-          channel: channel.name,
-          error: error instanceof Error ? error.message : String(error),
-        });
+    // Subscribe before the new talker starts. A hook built outside this repo
+    // may throw synchronously or return no promise.
+    const failed = (error: unknown) => {
+      log.error("channel-message hook did not subscribe to a later channel", {
+        channel: channel.name,
+        error: error instanceof Error ? error.message : String(error),
       });
+    };
+    try {
+      Promise.resolve(hook.addChannels(added)).catch(failed);
+    } catch (error) {
+      failed(error);
+    }
   });
 
   // Hydrate connection/grant state without starting provider transports, so
