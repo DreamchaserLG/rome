@@ -1369,6 +1369,7 @@ export const handlers = [
     const body = (await request.json()) as {
       ref: { connectionId: string; conversationId: string };
       set: PartialConversationSettings;
+      clear?: string[];
     };
     const found = conversationSettings.items.find(
       (candidate) =>
@@ -1378,6 +1379,12 @@ export const handlers = [
     if (!found) return HttpResponse.json({ error: "Unknown conversation" }, { status: 404 });
     found.snapshot.effective = mergeSettings(found.snapshot.effective, body.set);
     found.snapshot.overrides = mergeSettings(found.snapshot.overrides, body.set);
+    // Clearing the agent choice is the only clear the dashboard sends; without
+    // one the conversation routes to no agent of its own.
+    if (body.clear?.includes("routing.agentName")) {
+      delete found.snapshot.overrides.routing?.agentName;
+      found.snapshot.effective.routing.agentName = null;
+    }
     found.snapshot.updatedAt = new Date().toISOString();
     found.snapshot.updatedBy = { kind: "guardian", displayName: identity.displayName ?? undefined };
     return HttpResponse.json(found.snapshot);

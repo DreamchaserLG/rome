@@ -158,6 +158,22 @@ export function ChannelsSettingsPage() {
     [connections],
   );
 
+  // A linkable account's linked agent answers each conversation on it that has
+  // no agent of its own.
+  const linkedAgents = useMemo(
+    () =>
+      new Map(
+        connections.flatMap((connection) =>
+          connection.id !== null &&
+          LINKABLE_SERVICES.has(connection.service) &&
+          typeof connection.linkedAgent === "string"
+            ? [[connection.id, connection.linkedAgent]]
+            : [],
+        ),
+      ),
+    [connections],
+  );
+
   // Stable identity: every card takes this as a dependency, so an inline
   // function here would change on each render and churn their save closures.
   const handleSaved = useCallback((snapshot: ConversationSettingsSnapshot) => {
@@ -270,6 +286,7 @@ export function ChannelsSettingsPage() {
                 item={item}
                 agentNames={agentNames}
                 silentAccount={silentAccounts.get(item.snapshot.conversation.ref.connectionId)}
+                linkedAgent={linkedAgents.get(item.snapshot.conversation.ref.connectionId)}
                 onSaved={handleSaved}
               />
             ))}
@@ -295,6 +312,7 @@ function ConversationRow({
   item,
   agentNames,
   silentAccount,
+  linkedAgent,
   onSaved,
 }: {
   item: ConversationSettingsListItem;
@@ -302,6 +320,9 @@ function ConversationRow({
   /** Set when the conversation's account stays silent: the page that links
    *  its agent. */
   silentAccount: string | undefined;
+  /** The agent linked to the conversation's account, which answers while the
+   *  conversation has no agent of its own. */
+  linkedAgent: string | undefined;
   onSaved: (snapshot: ConversationSettingsSnapshot) => void;
 }) {
   const { t } = useTranslation("settings");
@@ -321,6 +342,11 @@ function ConversationRow({
     structuredClone(snapshot.effective),
   );
   const [saving, setSaving] = useState(false);
+  // Whether the conversation follows its account's linked agent. Effective
+  // settings read the same for no choice and a pin to main, so this tracks the
+  // override itself.
+  const [followsLink, setFollowsLink] = useState(!agentOverridden);
+  useEffect(() => setFollowsLink(!agentOverridden), [agentOverridden]);
   const routingOptions = Array.from(
     new Set(
       ["main", ...agentNames, ...(draft.routing.agentName ? [draft.routing.agentName] : [])].map(
@@ -470,6 +496,53 @@ function ConversationRow({
       mounted.current = false;
     };
   }, []);
+
+  /**
+   * Moving onto or off the linked agent changes whether an override exists,
+   * which the effective-value diff in `flush` cannot see, so it saves at once.
+   */
+  function changeLink(choice: string) {
+    const follow = choice === FOLLOW_LINK;
+    setFollowsLink(follow);
+    // This save supersedes a debounced agent edit still waiting to flush.
+    dirty.current.delete("routing.agentName");
+    if (dirty.current.size === 0) window.clearTimeout(flushTimer.current);
+    const previous = settingValue(projected.current, "routing.agentName");
+    if (!follow) {
+      const next = structuredClone(draftRef.current);
+      setSettingValue(next, "routing.agentName", choice);
+      setSettingValue(projected.current, "routing.agentName", choice);
+      applyDraft(next);
+    }
+    const body = follow
+      ? { ref: conversation.ref, set: {}, clear: ["routing.agentName"] }
+      : { ref: conversation.ref, set: { routing: { agentName: choice } }, clear: [] };
+    setSaving(true);
+    inFlight.current = inFlight.current
+      .then(() =>
+        api<ConversationSettingsSnapshot>("/api/conversation-settings", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      )
+      .then((next) => {
+        if (mounted.current) onSaved(next);
+      })
+      .catch((err) => {
+        setSettingValue(projected.current, "routing.agentName", previous);
+        if (mounted.current) {
+          setFollowsLink(!follow);
+          const restored = structuredClone(draftRef.current);
+          setSettingValue(restored, "routing.agentName", previous);
+          applyDraft(restored);
+        }
+        toast.error(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (mounted.current) setSaving(false);
+      });
+  }
 
   /**
    * Every control writes through here: the draft updates immediately so the UI
@@ -630,18 +703,31 @@ function ConversationRow({
             controlId={agentFieldId}
           >
             <Select
-              value={draft.routing.agentName ?? "main"}
-              onValueChange={(name) => change("routing.agentName", name)}
+              value={linkedAgent && followsLink ? FOLLOW_LINK : (draft.routing.agentName ?? "main")}
+              onValueChange={(name) =>
+                linkedAgent && (followsLink || name === FOLLOW_LINK)
+                  ? changeLink(name)
+                  : change("routing.agentName", name)
+              }
             >
               <SelectTrigger id={agentFieldId} className={CONTROL_WIDTH}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                {linkedAgent && (
+                  <SelectItem value={FOLLOW_LINK}>
+                    {t("channels.conversationSettings.linkedAgent", {
+                      agent: overriddenAgentLabel(linkedAgent),
+                    })}
+                  </SelectItem>
+                )}
                 {routingOptions.map((name) => (
                   <SelectItem key={name} value={name}>
-                    {name === "main"
-                      ? t("channels.conversationSettings.mainAgent")
-                      : agentLabel(name)}
+                    {name !== "main"
+                      ? agentLabel(name)
+                      : linkedAgent
+                        ? "main"
+                        : t("channels.conversationSettings.mainAgent")}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -664,6 +750,9 @@ function agentLabel(name: string): string {
     .filter((part): part is string => Boolean(part && part !== "core"))
     .join(" · ");
 }
+
+/** The agent picker's value for "no agent of its own", which follows the link. */
+const FOLLOW_LINK = "@linked";
 
 /** Every control in the right-hand column lands on the same width. */
 const CONTROL_WIDTH = "w-full sm:w-52";
