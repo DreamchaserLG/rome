@@ -372,6 +372,43 @@ describe("ChannelsSettingsPage", () => {
     await waitFor(() => expect(picker.textContent).toBe("agent · sales (linked agent)"));
   });
 
+  it("restores the linked agent when moving off it fails", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url === "/api/connections") {
+        return ok({
+          connections: [
+            {
+              id: "discord-1",
+              service: "discord",
+              label: "Discord · Rome",
+              grants: {},
+              display: {},
+              capabilities: { talk: { state: "unlocked" } },
+              connect: null,
+              linkedAgent: "sales:agent",
+            },
+          ],
+        });
+      }
+      if (url === "/api/agents") return ok({ agents: [{ name: "core:main" }] });
+      if (url.startsWith("/api/conversation-settings?")) {
+        return ok({ items: [item({ id: "engineering", name: "engineering" })] });
+      }
+      if (init?.method === "PATCH") throw new Error("network down");
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+    }) as typeof fetch);
+
+    renderPage();
+    const user = userEvent.setup();
+    const picker = within(await findCard()).getByLabelText(/Agent/);
+    await choose(user, picker, "main");
+    await waitFor(() => expect(picker.textContent).toBe("agent · sales (linked agent)"));
+  });
+
   it("creates no override when an edit is undone before the debounce elapses", async () => {
     const { patchBodies } = mockApi();
     renderPage();

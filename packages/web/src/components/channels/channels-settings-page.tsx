@@ -503,20 +503,23 @@ function ConversationRow({
    */
   function changeLink(choice: string) {
     const follow = choice === FOLLOW_LINK;
+    // A cleared choice reads as no agent, like the default.
+    const value = follow ? null : choice;
     setFollowsLink(follow);
     // This save supersedes a debounced agent edit still waiting to flush.
     dirty.current.delete("routing.agentName");
     if (dirty.current.size === 0) window.clearTimeout(flushTimer.current);
     const previous = settingValue(projected.current, "routing.agentName");
-    if (!follow) {
-      const next = structuredClone(draftRef.current);
-      setSettingValue(next, "routing.agentName", choice);
-      setSettingValue(projected.current, "routing.agentName", choice);
-      applyDraft(next);
-    }
+    const next = structuredClone(draftRef.current);
+    setSettingValue(next, "routing.agentName", value);
+    setSettingValue(projected.current, "routing.agentName", value);
+    applyDraft(next);
     const body = follow
       ? { ref: conversation.ref, set: {}, clear: ["routing.agentName"] }
       : { ref: conversation.ref, set: { routing: { agentName: choice } }, clear: [] };
+    // Counted with `flush`'s batches, so an earlier batch's response does not
+    // resync `projected` over this one.
+    queued.current += 1;
     setSaving(true);
     inFlight.current = inFlight.current
       .then(() =>
@@ -526,18 +529,30 @@ function ConversationRow({
           body: JSON.stringify(body),
         }),
       )
-      .then((next) => {
-        if (mounted.current) onSaved(next);
+      .then((saved) => {
+        queued.current -= 1;
+        if (queued.current === 0) projected.current = structuredClone(saved.effective);
+        if (mounted.current) onSaved(saved);
       })
       .catch((err) => {
-        setSettingValue(projected.current, "routing.agentName", previous);
-        if (mounted.current) {
-          setFollowsLink(!follow);
-          const restored = structuredClone(draftRef.current);
-          setSettingValue(restored, "routing.agentName", previous);
-          applyDraft(restored);
+        queued.current -= 1;
+        // An agent edit made since supersedes this one; rolling back would
+        // make it read as a no-op and drop it.
+        if (!dirty.current.has("routing.agentName")) {
+          setSettingValue(projected.current, "routing.agentName", previous);
+          if (mounted.current) {
+            setFollowsLink(!follow);
+            const restored = structuredClone(draftRef.current);
+            setSettingValue(restored, "routing.agentName", previous);
+            applyDraft(restored);
+          }
         }
-        toast.error(err instanceof Error ? err.message : String(err));
+        toast.error(err instanceof Error ? err.message : String(err), {
+          action: {
+            label: t("channels.conversationSettings.retry"),
+            onClick: () => changeLink(choice),
+          },
+        });
       })
       .finally(() => {
         if (mounted.current) setSaving(false);
