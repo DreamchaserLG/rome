@@ -353,8 +353,8 @@ function fakeQr(seed: string): string {
 
 /**
  * An agent has one account per app. Linking it to `keep` takes it off any other
- * account on that app, which in phase 1 answers as main until another agent is
- * linked. main itself is the phase 1 fallback, so it is never taken off.
+ * account on that app, which stays silent until another agent is
+ * linked. The mock never takes main off its Rome account.
  */
 function unlinkOthers(agent: string, platform: ChatPlatform, keep: string, at: string) {
   if (agent === "main") return;
@@ -365,7 +365,7 @@ function unlinkOthers(agent: string, platform: ChatPlatform, keep: string, at: s
       if (c.botIds.includes(other.id)) {
         c.entries = [
           ...c.entries,
-          ev(at, `${other.name} is no longer linked to ${agent}, so main answers for now`),
+          ev(at, `${other.name} is no longer linked to ${agent}, so it stays silent for now`),
         ];
       }
     }

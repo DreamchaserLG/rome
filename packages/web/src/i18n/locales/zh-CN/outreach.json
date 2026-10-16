@@ -39,7 +39,7 @@
     "waiting": "等待扫码",
     "token": "机器人令牌",
     "connect": "连接",
-    "replaces": "{{agent}} 在{{app}}已经有 {{bot}}。一个智能体在每个应用里只有一个账号，所以 {{bot}} 会失去关联，在你关联其他智能体之前由 main 回答。"
+    "replaces": "{{agent}} 在{{app}}已经有 {{bot}}。一个智能体在每个应用里只有一个账号，所以 {{bot}} 会失去关联，在你关联其他智能体之前保持沉默。"
   },
   "agent": {
     "missing": "没有这个智能体"
@@ -94,7 +94,7 @@
     "move": "更改智能体",
     "cancel": "取消",
     "removeBot": "移除账号",
-    "moveReplaces": "{{to}} 在{{app}}已经有 {{previous}}。一个智能体在每个应用里只有一个账号，所以 {{previous}} 会失去关联，在你关联其他智能体之前由 main 回答。"
+    "moveReplaces": "{{to}} 在{{app}}已经有 {{previous}}。一个智能体在每个应用里只有一个账号，所以 {{previous}} 会失去关联，在你关联其他智能体之前保持沉默。"
   },
   "choose": {
     "title": "给 {{agent}} 开一个账号",

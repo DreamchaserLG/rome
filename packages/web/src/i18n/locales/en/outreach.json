@@ -39,7 +39,7 @@
     "waiting": "Waiting for the scan",
     "token": "Bot token",
     "connect": "Connect",
-    "replaces": "{{agent}} already has {{bot}} on {{app}}. An agent has one account per app, so {{bot}} loses its link, and main answers there until you link another agent."
+    "replaces": "{{agent}} already has {{bot}} on {{app}}. An agent has one account per app, so {{bot}} loses its link and stays silent until you link another agent."
   },
   "agent": {
     "missing": "No such agent"
@@ -94,7 +94,7 @@
     "move": "Change agent",
     "cancel": "Cancel",
     "removeBot": "Remove account",
-    "moveReplaces": "{{to}} already has {{previous}} on {{app}}. An agent has one account per app, so {{previous}} loses its link, and main answers there until you link another agent."
+    "moveReplaces": "{{to}} already has {{previous}} on {{app}}. An agent has one account per app, so {{previous}} loses its link and stays silent until you link another agent."
   },
   "choose": {
     "title": "Give {{agent}} an account",
