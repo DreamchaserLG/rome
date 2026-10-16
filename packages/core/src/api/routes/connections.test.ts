@@ -418,7 +418,7 @@ describe("POST /connections", () => {
   const telegram = makePasteTalk();
   function telegramRegistry(): ConnectionRegistry {
     const registry = new ConnectionRegistry({ ledger: makeLedger() });
-    registry.register({ ...telegram.descriptor, service: "telegram" });
+    registry.register({ ...telegram.descriptor, service: "telegram", severalAccounts: true });
     return registry;
   }
   const addAccount = (registry: ConnectionRegistry) =>

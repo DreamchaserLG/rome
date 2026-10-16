@@ -207,6 +207,7 @@ export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): Conne
 
   return {
     service: "telegram",
+    severalAccounts: true,
     reviveProfile: (_grant, record) => reviveTelegramProfile(record),
     auth: {
       bot: botScheme,

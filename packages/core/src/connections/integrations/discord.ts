@@ -232,6 +232,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
 
   return {
     service: "discord",
+    severalAccounts: true,
     reviveProfile: (_grant, record) => reviveDiscordProfile(record),
     auth: {
       bot: botScheme,

@@ -26,7 +26,6 @@ import type {
   GrantState,
 } from "../../connections/types.js";
 import type { SetupManager } from "../../connections/setup/manager.js";
-import { SEVERAL_ACCOUNT_SERVICES } from "@rome/api-types/several-accounts";
 import {
   ChannelRecordsRepository,
   type ChannelRecord,
@@ -156,7 +155,7 @@ function buildConnectionView(
     connect: connectHint(conn.service),
     setups: activeSetups(manager, conn.id, Object.keys(grants)),
     channel: channel?.id ?? null,
-    severalAccounts: SEVERAL_ACCOUNT_SERVICES.has(conn.service),
+    severalAccounts: registry.getDescriptor(conn.service)?.severalAccounts === true,
   };
 }
 
@@ -237,7 +236,7 @@ function placeholderView(
     connect: connectHint(service),
     setups: activeSetups(manager, service, grantNames),
     channel: null,
-    severalAccounts: SEVERAL_ACCOUNT_SERVICES.has(service),
+    severalAccounts: descriptor.severalAccounts === true,
   };
 }
 
@@ -364,7 +363,7 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
       .json<{ service?: unknown }>()
       .catch(() => ({}) as { service?: unknown });
     const service = typeof body.service === "string" ? body.service : "";
-    if (!SEVERAL_ACCOUNT_SERVICES.has(service) || !registry.isRegistered(service)) {
+    if (registry.getDescriptor(service)?.severalAccounts !== true) {
       return c.json({ error: `"${service}" does not offer another account.` }, 400);
     }
     const { connection: conn, minted } = await registry.connectUnusedOrAnother(service);

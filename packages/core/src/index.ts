@@ -1219,7 +1219,9 @@ async function main() {
     }
   }
   // The hook subscribes to every channel that can receive, and a channel's
-  // subscription follows whatever backs it, so no unlock needs the hook again.
+  // subscription follows whatever backs it. Only a channel added later, when a
+  // new account first unlocks Talk, reaches the hook again, through
+  // `addChannels`.
   await messageHook.register();
   // App-keys refreshes recreate this hook: it is instantiated once and held by
   // the channels' subscriptions, so an env value captured in its module graph
