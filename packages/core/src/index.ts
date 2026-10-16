@@ -1249,12 +1249,22 @@ async function main() {
     if (!channel) return;
     const added = withInboundSpans([channel], "channel-message");
     hookChannels.push(...added);
-    messageHook.addChannels?.(added).catch((error: unknown) => {
-      log.error("channel-message hook did not subscribe to a later channel", {
+    const hook = messageHook;
+    if (!hook.addChannels) {
+      log.warn("channel-message hook hears a later channel only from its next register", {
         channel: channel.name,
-        error: error instanceof Error ? error.message : String(error),
       });
-    });
+      return;
+    }
+    // A hook built outside this repo may return no promise.
+    Promise.resolve()
+      .then(() => hook.addChannels?.(added))
+      .catch((error: unknown) => {
+        log.error("channel-message hook did not subscribe to a later channel", {
+          channel: channel.name,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
   });
 
   // Hydrate connection/grant state without starting provider transports, so
