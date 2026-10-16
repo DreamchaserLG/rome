@@ -430,7 +430,7 @@ describe("PersonDetailPage paired accounts", () => {
       ).toBe(true),
     );
     expect(
-      await within(section).findByText(/doesn't recognise you on any chat platform/),
+      await within(section).findByText(/does not recognise you on any chat platform/),
     ).toBeTruthy();
   });
 

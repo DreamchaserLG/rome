@@ -192,7 +192,7 @@
   "paired": {
     "description": "Rome treats messages from these accounts as you, with guardian permissions, on every Rome bot on that platform.",
     "unpair": "Unpair",
-    "empty": "Rome doesn't recognise you on any chat platform yet.",
+    "empty": "Rome does not recognise you on any chat platform yet.",
     "howToPair": "To be recognised on another platform, message any of Rome's bots there. The request shows up in People.",
     "confirmTitle": "Stop recognising you on {{channel}}?",
     "confirmBody": "Messages from {{account}} will get the policy for other people. Rome's agents stay on {{channel}}; this changes only who Rome thinks you are. You can pair again by messaging any of Rome's bots there."
