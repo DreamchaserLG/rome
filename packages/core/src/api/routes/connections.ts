@@ -86,8 +86,8 @@ interface ConnectionView {
    *  setup (if any), so a reopened dashboard re-attaches to it instead of
    *  starting a fresh one. Empty when no setup is in progress. */
   setups: Record<GrantName, string>;
-  /** The channel this Connection backs, shown as an account. Null for a
-   *  placeholder and for a service with no Talk. */
+  /** The id of the channel this Connection backs, for grouping; opaque and not
+   *  for display. Null for a placeholder and for a service with no Talk. */
   channel: string | null;
   /** Whether the guardian can add another account of this service. */
   severalAccounts: boolean;
@@ -380,6 +380,9 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     if (registry.getDescriptor(service)?.severalAccounts !== true) {
       return c.json({ error: `"${service}" does not offer another account.` }, 400);
     }
+    // TODO: refuse a conferral whose bot is already another Connection of the
+    // service, so one token never runs two pollers. It lands before the
+    // dashboard offers adding an account.
     const { connection: conn, minted } = await registry.connectUnusedOrAnother(service);
     c.header("Cache-Control", "no-store");
     return c.json(

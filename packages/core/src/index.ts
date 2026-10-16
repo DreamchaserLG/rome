@@ -1252,12 +1252,14 @@ async function main() {
     const added = withInboundSpans([channel], "channel-message");
     hookChannels.push(...added);
     const hook = messageHook;
-    if (!hook.addChannels) {
-      log.warn("channel-message hook hears a later channel only from its next register", {
-        channel: channel.name,
-      });
-      return;
-    }
+    // A hook without `addChannels` re-registers, as the app-keys reloader
+    // does, and its register() reads the grown channel list.
+    const subscribe = hook.addChannels
+      ? () => hook.addChannels?.(added)
+      : () => {
+          hook.unregister?.();
+          return hook.register();
+        };
     // Subscribe before the new talker starts. A hook built outside this repo
     // may throw synchronously or return no promise.
     const failed = (error: unknown) => {
@@ -1267,7 +1269,7 @@ async function main() {
       });
     };
     try {
-      Promise.resolve(hook.addChannels(added)).catch(failed);
+      Promise.resolve(subscribe()).catch(failed);
     } catch (error) {
       failed(error);
     }
