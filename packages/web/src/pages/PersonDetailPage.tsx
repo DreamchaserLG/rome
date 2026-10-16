@@ -113,6 +113,8 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
     );
   }
 
+  const isGuardian = normalizeBondLevel(person.bondLevel) === "guardian";
+
   return (
     // The page fills the content column so the conversation can take whatever
     // the header leaves, and the composer's floor reaches the viewport's foot.
@@ -141,7 +143,9 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
             <p className="text-aux text-muted-foreground">
               {t("row.messageCount", { count: person.messageCount })}
             </p>
-            <div className="mt-2 flex flex-wrap gap-2">
+            {/* The guardian's accounts are listed under Paired accounts, with
+                what can be done to each, so the header does not repeat them. */}
+            <div className="mt-2 flex flex-wrap gap-2" hidden={isGuardian}>
               {person.accounts.length === 0 ? (
                 <span className="text-aux text-subtle-foreground">{t("detail.noAccounts")}</span>
               ) : (
@@ -169,7 +173,7 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
           />
         </div>
 
-        {normalizeBondLevel(person.bondLevel) === "guardian" && <PairedAccounts person={person} />}
+        {isGuardian && <PairedAccounts person={person} />}
 
         <PersonConversation key={person.id} person={person} />
       </PageBody>

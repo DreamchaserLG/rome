@@ -355,7 +355,8 @@ export interface PeopleGroup {
  * entered on purpose rather than padding the list somebody scrolls to look a
  * contact up in.
  *
- * A search still reaches every one of them, held-back positions included: a
+ * A search still reaches every one of them but the guardian, whose own row is
+ * pinned above the view; held-back positions are included: a
  * roster that filtered the address book would answer "no such contact" for
  * someone the mirror has. Empty groups are dropped rather than rendered as
  * headings with nothing under them.
@@ -365,7 +366,9 @@ export function directoryGroups(
   options: { filter: PeopleFilter; search: string },
 ): PeopleGroup[] {
   const searching = options.search.trim() !== "";
-  const matching = searchRows(rows, options.search);
+  // The guardian is pinned above both views, so neither lists them again, a
+  // search included.
+  const matching = searchRows(rows, options.search).filter((row) => !isRowFixed(row));
 
   return GROUP_ORDER.map((level) => ({
     level,

@@ -233,14 +233,13 @@ describe("directoryGroups", () => {
     expect(groupsOf({ filter: "stranger", search: "" })).toEqual([["stranger", ["Prize"]]]);
   });
 
-  it("leaves the guardian to a search rather than a chip", () => {
-    // No chip selects the guardian, and no chip carries them along either.
+  it("never lists the guardian, whose row is pinned above the view", () => {
     expect(groupsOf({ filter: "inner-circle", search: "" }).map(([level]) => level)).not.toContain(
       "guardian",
     );
-    // By name: "guardian" would also match the level, and the level is not
-    // what a search reads.
-    expect(groupsOf({ filter: "all", search: "mock" })).toEqual([["guardian", ["Mock Guardian"]]]);
+    // A search reaches every other position, but not this one: the guardian is
+    // already on screen in the pinned row.
+    expect(groupsOf({ filter: "all", search: "mock" })).toEqual([]);
   });
 
   it("reaches the address book through a search, whatever chip is lit", () => {
