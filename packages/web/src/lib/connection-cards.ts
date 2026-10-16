@@ -187,8 +187,8 @@ function toCard(connection: ApiConnection): ConnectionCard {
   return {
     route: connection.channel || connection.service,
     service: connection.service,
-    // A later account's label is set once its place among its service's
-    // accounts is known (`labelLaterAccounts`).
+    // Several accounts of one service are told apart by name once the whole
+    // list is known (`labelAccounts`).
     label: serviceLabel(connection.service),
     kind: OAUTH_SERVICES.has(connection.service) ? "oauth" : "channel",
     alwaysOn,
@@ -305,7 +305,7 @@ export function buildConnectionCards(
     }
     return compareAccounts(a, b);
   });
-  labelLaterAccounts(sorted);
+  labelAccounts(sorted);
   return sorted;
 }
 
@@ -316,18 +316,16 @@ function compareAccounts(a: ConnectionCard, b: ConnectionCard): number {
   return 0;
 }
 
-/** Labels each later account "Feishu · <identity>", or "Feishu 2" by its place
- *  among the service's accounts until it has an identity. A channel id never
- *  reaches a label. Takes the cards in display order. */
-function labelLaterAccounts(cards: ConnectionCard[]): void {
-  const seen = new Map<string, number>();
+/** When a service has several accounts, labels each one "Feishu · <bot name>"
+ *  so the cards tell them apart. An account without a name yet (one whose
+ *  setup has not run) keeps the plain service label, and a channel id never
+ *  reaches a label. A service with one account keeps the plain label. */
+function labelAccounts(cards: ConnectionCard[]): void {
+  const perService = new Map<string, number>();
+  for (const card of cards) perService.set(card.service, (perService.get(card.service) ?? 0) + 1);
   for (const card of cards) {
-    const place = (seen.get(card.service) ?? 0) + 1;
-    seen.set(card.service, place);
-    if (card.route === card.service) continue;
+    if ((perService.get(card.service) ?? 0) < 2) continue;
     const identity = card.slots.find((slot) => slot.key !== "session")?.identity;
-    card.label = identity
-      ? `${serviceLabel(card.service)} · ${identity}`
-      : `${serviceLabel(card.service)} ${place}`;
+    if (identity) card.label = `${serviceLabel(card.service)} · ${identity}`;
   }
 }

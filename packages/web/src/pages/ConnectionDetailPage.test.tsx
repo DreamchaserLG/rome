@@ -359,7 +359,7 @@ describe("ConnectionDetailPage — several accounts", () => {
       expect(locations).toContain(`/settings/connections/${SECOND_FEISHU}`);
     });
     expect(posts).toEqual([{ service: "feishu" }]);
-    expect(await screen.findByText("Feishu 2")).toBeTruthy();
+    expect(await screen.findByText("Not connected")).toBeTruthy();
   });
 
   it("stays on the account when the refetched list lacks the new one", async () => {

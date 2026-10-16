@@ -336,7 +336,11 @@ describe("ConnectionsSection — several accounts", () => {
   });
 
   it("moves the dialog to a new account once the refreshed list has it", async () => {
-    const second = feishu({ id: "conn-feishu-2", channel: SECOND_FEISHU });
+    const second = feishu({
+      id: "conn-feishu-2",
+      channel: SECOND_FEISHU,
+      display: { app: grantDisplay({ displayName: "Sales Bot" }) },
+    });
     rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       if (String(input) === "/api/connections" && init?.method === "POST") {
         return new Response(JSON.stringify({ connection: second }), { status: 201 });
@@ -353,7 +357,7 @@ describe("ConnectionsSection — several accounts", () => {
     // The parent re-renders with the refreshed list, as SettingsTabPage does.
     view.rerender(sectionWith([feishu(), second], onRefresh));
     await waitFor(() =>
-      expect(within(screen.getByRole("dialog")).getByText("Feishu 2")).toBeTruthy(),
+      expect(within(screen.getByRole("dialog")).getByText("Feishu · Sales Bot")).toBeTruthy(),
     );
   });
 

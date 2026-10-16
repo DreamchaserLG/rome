@@ -408,13 +408,29 @@ describe("buildConnectionCards — several accounts per service", () => {
     expect(second.severalAccounts).toBe(true);
   });
 
-  it("labels a later account by its place until it has an identity, never by its id", () => {
+  it("names every account by its bot once a service has several, never by its id", () => {
     const cards = buildConnectionCards([
-      conn({ service: "feishu", channel: "feishu", grants: { app: "authorized" } }),
+      conn({
+        service: "feishu",
+        channel: "feishu",
+        grants: { app: "authorized" },
+        display: { app: display({ displayName: "Support Bot" }) },
+      }),
       conn({ service: "feishu", id: "conn-2", channel: SECOND, grants: { app: "unauthorized" } }),
-      conn({ service: "feishu", id: "conn-3", channel: THIRD, grants: { app: "unauthorized" } }),
     ]);
-    expect(cards.map((card) => card.label)).toEqual(["Feishu", "Feishu 2", "Feishu 3"]);
+    expect(cards.map((card) => card.label)).toEqual(["Feishu · Support Bot", "Feishu"]);
+  });
+
+  it("keeps the plain label for a service with one account", () => {
+    const cards = buildConnectionCards([
+      conn({
+        service: "feishu",
+        channel: "feishu",
+        grants: { app: "authorized" },
+        display: { app: display({ displayName: "Support Bot" }) },
+      }),
+    ]);
+    expect(cards[0].label).toBe("Feishu");
   });
 
   it("puts the first account first and keeps the server's order for the rest", () => {
