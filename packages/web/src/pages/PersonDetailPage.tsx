@@ -15,6 +15,7 @@ import { PEOPLE_VIEW_PATH, personPath } from "./people/people-model";
 import { levelLabelKey } from "./people/rows";
 import { accountHandle } from "./people/send-model";
 import { usePerson } from "./people/use-roster";
+import { PairedAccounts } from "./people/you";
 
 /**
  * One person's page: the dossier.
@@ -167,6 +168,8 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
             }
           />
         </div>
+
+        {normalizeBondLevel(person.bondLevel) === "guardian" && <PairedAccounts person={person} />}
 
         <PersonConversation key={person.id} person={person} />
       </PageBody>

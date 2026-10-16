@@ -289,6 +289,15 @@ function mockApi(
         if (body?.bondLevel) person.bondLevel = body.bondLevel;
         return json(person);
       }
+      if (method === "DELETE" && path.includes("/accounts/")) {
+        const before = person.accounts.length;
+        person.accounts = person.accounts.filter(
+          (account) => !path.endsWith(`/accounts/${account.channel}/${account.channelUserId}`),
+        );
+        return person.accounts.length < before
+          ? json(person)
+          : json({ error: "Unknown account" }, 404);
+      }
       return json({ error: "Unknown route" }, 404);
     }
 
@@ -371,6 +380,68 @@ function BrowserBack() {
     </button>
   );
 }
+
+/** You, recognised on Telegram, with the dashboard's own chat beside it. */
+const GUARDIAN: PersonResource = {
+  id: "me",
+  displayName: "Zhangfan Dong",
+  bondLevel: "guardian",
+  accounts: [
+    { channel: "webchat", channelUserId: "wc-1", displayName: "wc-1", send: "yes", latestAt: null },
+    {
+      channel: "telegram",
+      channelUserId: "5512094",
+      displayName: "alex_k",
+      send: "yes",
+      latestAt: null,
+    },
+  ],
+  messageCount: 0,
+  latest: null,
+  memoryPath: null,
+};
+
+describe("PersonDetailPage paired accounts", () => {
+  it("lists the guardian's chat accounts, and not the dashboard's own chat", async () => {
+    mockApi({ person: GUARDIAN, entries: [] });
+    renderPage("me");
+
+    const section = await screen.findByRole("region", { name: "Paired accounts" });
+    expect(within(section).getByText("Telegram · alex_k")).toBeTruthy();
+    expect(within(section).getAllByRole("button", { name: "Unpair" })).toHaveLength(1);
+  });
+
+  it("unpairs only after a confirm, and the list follows the server", async () => {
+    const calls = mockApi({ person: GUARDIAN, entries: [] });
+    renderPage("me");
+
+    const section = await screen.findByRole("region", { name: "Paired accounts" });
+    await userEvent.click(within(section).getByRole("button", { name: "Unpair" }));
+    const dialog = await screen.findByRole("dialog", { name: "Stop recognising you on Telegram?" });
+    expect(calls.some((call) => call.method === "DELETE")).toBe(false);
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Unpair" }));
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (call) =>
+            call.method === "DELETE" && call.url === "/api/people/me/accounts/telegram/5512094",
+        ),
+      ).toBe(true),
+    );
+    expect(
+      await within(section).findByText(/doesn't recognise you on any chat platform/),
+    ).toBeTruthy();
+  });
+
+  it("shows no paired accounts on anyone else's page", async () => {
+    mockApi();
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    expect(screen.queryByRole("region", { name: "Paired accounts" })).toBeNull();
+  });
+});
 
 describe("PersonDetailPage", () => {
   it("reads the person and their history from the two routes that own them", async () => {

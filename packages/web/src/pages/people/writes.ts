@@ -157,6 +157,20 @@ export function linkAccount(
   );
 }
 
+/** `DELETE /api/people/:id/accounts/:channel/:channelUserId`. Refuses with a
+ *  404 for an account this person does not hold, whoever else holds it. */
+export function unlinkAccount(
+  personId: string,
+  account: AccountRef,
+  t: TFunction<"people">,
+): Promise<WriteOutcome<PersonResource>> {
+  return send(
+    `/api/people/${encodeURIComponent(personId)}/accounts/${accountPath(account)}`,
+    { method: "DELETE" },
+    t,
+  );
+}
+
 /** `POST /api/accounts/:channel/:channelUserId/dismiss`. Dismissal is a state
  *  the account is in, not a merge into a sentinel, so {@link restoreAccount} is
  *  the whole way back. */

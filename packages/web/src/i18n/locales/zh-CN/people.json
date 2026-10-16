@@ -182,5 +182,19 @@
   "transfer": {
     "title": "移动这个账号？",
     "description": "{{account}} 目前解析到 {{owner}}。移动后其上的所有消息都会重新归属，{{owner}} 仍保留其余账号。"
+  },
+  "you": {
+    "label": "你",
+    "recognisedOn": "已识别的平台",
+    "notRecognised": "尚未在任何聊天平台上识别你",
+    "pairedAccounts": "已配对账号"
+  },
+  "paired": {
+    "description": "Rome 会把来自这些账号的消息视为你本人，在该平台的每个 Rome bot 上都拥有管理权限。",
+    "unpair": "取消配对",
+    "empty": "Rome 尚未在任何聊天平台上识别你。",
+    "howToPair": "要在其他平台上被识别，请在那里给任意一个 Rome bot 发消息。请求会出现在「联系人」中。",
+    "confirmTitle": "不再在 {{channel}} 上识别你？",
+    "confirmBody": "来自 {{account}} 的消息将按其他人的策略处理。Rome 的智能体仍留在 {{channel}}，这只改变 Rome 认为谁是你。你可以在那里给任意一个 Rome bot 发消息来重新配对。"
   }
 }

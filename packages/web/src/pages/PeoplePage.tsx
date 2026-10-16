@@ -30,6 +30,7 @@ import {
   type RowLevel,
 } from "./people/people-model";
 import { usePeopleRoster } from "./people/use-roster";
+import { GuardianRow } from "./people/you";
 
 /**
  * The People page: an activity stream and a roster, over two reads.
@@ -211,6 +212,10 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
         {/* Above both views and outside the roster read: a request expires in
             minutes, so it must not wait behind a search, a chip or a page. */}
         <PendingPairingApprovals />
+
+        {/* You, pinned above the controls: neither a chip nor a term narrows
+            who you are, and the Directory's Guardian group stays out of All. */}
+        <GuardianRow />
 
         <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
           <Input

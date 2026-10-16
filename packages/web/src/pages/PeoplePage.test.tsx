@@ -481,6 +481,15 @@ async function showDirectory(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("radio", { name: "Directory" }));
 }
 
+/** The guardian's name is on the screen once, in the row pinned above the
+ *  view, and never as a row of the list itself. */
+async function expectGuardianOnlyPinned() {
+  await screen.findByRole("region", { name: "You" });
+  const [shown, ...again] = screen.getAllByText("Zhangfan Dong");
+  expect(again).toHaveLength(0);
+  expect(shown?.closest("section[aria-label='You']")).toBeTruthy();
+}
+
 describe("PeoplePage stream", () => {
   it("opens on the stream, and reaches a waiting sender through its chip", async () => {
     mockApi({ people: [GUARDIAN, FRIEND], accounts: [UNKNOWN_SENDER] });
@@ -502,7 +511,7 @@ describe("PeoplePage stream", () => {
 
     await screen.findByText("Wei Chen");
     expect(screen.queryByText("Nadia Petrova")).toBeNull();
-    expect(screen.queryByText("Zhangfan Dong")).toBeNull();
+    await expectGuardianOnlyPinned();
   });
 
   it("holds both unplaced ends out of All — each chip is their way in", async () => {
@@ -602,7 +611,7 @@ describe("PeoplePage directory", () => {
     // answers "who does Rome know", not "who said something". The guardian and
     // the accounts nobody has placed answer other questions, so neither pads it.
     expect(await screen.findByText("Nadia Petrova")).toBeTruthy();
-    expect(screen.queryByText("Zhangfan Dong")).toBeNull();
+    await expectGuardianOnlyPinned();
     expect(screen.queryByText("Jonas Tan")).toBeNull();
 
     await user.click(chip(/^Unknown/));
@@ -1048,6 +1057,46 @@ describe("PeoplePage pairing requests", () => {
     const section = await screen.findByRole("region", { name: "Pairing requests" });
     expect(within(section).getAllByRole("button", { name: "Approve" })).toHaveLength(1);
     expect(within(section).getByText("Telegram")).toBeTruthy();
+  });
+});
+
+describe("PeoplePage pins your row", () => {
+  const PAIRED_GUARDIAN: PersonResource = {
+    ...GUARDIAN,
+    accounts: [
+      ...GUARDIAN.accounts,
+      { channel: "telegram", channelUserId: "5512094", displayName: "alex_k" },
+    ],
+  } as PersonResource;
+
+  it.each([
+    ["latest", "/people/latest"],
+    ["directory", "/people/directory"],
+  ])("above the %s view, with the platforms Rome recognises you on", async (_view, entry) => {
+    mockApi({ people: [PAIRED_GUARDIAN, FRIEND] });
+    renderPage(entry);
+
+    const row = await screen.findByRole("region", { name: "You" });
+    expect(within(row).getByText("Zhangfan Dong")).toBeTruthy();
+    expect(within(row).getByText("Telegram")).toBeTruthy();
+    // The dashboard's own chat is how you sign in, not a platform you paired.
+    expect(within(row).queryByText("Webchat")).toBeNull();
+  });
+
+  it("stays whatever the chip", async () => {
+    mockApi({ people: [PAIRED_GUARDIAN, FRIEND] });
+    renderPage("/people/latest?level=acquaintance");
+
+    expect(await screen.findByRole("region", { name: "You" })).toBeTruthy();
+  });
+
+  it("opens your page from Paired accounts", async () => {
+    mockApi({ people: [PAIRED_GUARDIAN, FRIEND] });
+    renderPage("/people/latest");
+
+    const row = await screen.findByRole("region", { name: "You" });
+    await userEvent.click(within(row).getByRole("button", { name: "Paired accounts" }));
+    expect(await screen.findByText("person page")).toBeTruthy();
   });
 });
 

@@ -18,6 +18,7 @@ import {
   restoreAccount,
   retrySend,
   sendMessage,
+  unlinkAccount,
   updatePerson,
   type AccountRef,
   type WriteOutcome,
@@ -37,10 +38,8 @@ import {
 // standing for as long as the read takes, which reads as a write that did
 // nothing.
 //
-// One method per gesture the page has, which is fewer than the contract's verbs:
-// unlink is `./writes.ts`'s and stays there until a gesture asks for it. This
-// module is policy about settling, and there is nothing to settle for a write
-// nobody makes.
+// One method per gesture the page has. This module is policy about settling,
+// and there is nothing to settle for a write nobody makes.
 
 export interface PeopleWrites {
   /** Create a person for an account nobody has placed, in one request. */
@@ -60,6 +59,9 @@ export interface PeopleWrites {
   /** `into` absorbs `from`, and `from` is gone. */
   merge(into: string, from: string): Promise<WriteOutcome<PersonResource>>;
   setBond(personId: string, bondLevel: AssignableBondLevel): Promise<WriteOutcome<PersonResource>>;
+  /** Take an account off a person. On the guardian it is Unpair: that account
+   *  gets the policy for other people from then on. */
+  unlink(personId: string, account: AccountRef): Promise<WriteOutcome<PersonResource>>;
   /**
    * Say something to one of a person's accounts. The account is named, always —
    * the caller shows which one it picked and the request carries it.
@@ -155,6 +157,7 @@ export function usePeopleWrites(): PeopleWrites {
       restore: (account) => settling(() => restoreAccount(ref(account), t)),
       merge: (into, from) => settling(() => mergePeople(into, from, t)),
       setBond: (personId, bondLevel) => settling(() => updatePerson(personId, { bondLevel }, t)),
+      unlink: (personId, account) => settling(() => unlinkAccount(personId, ref(account), t)),
       say: (personId, account, text, options) =>
         settling(async () => {
           const outcome = await sendMessage(personId, { ...ref(account), text, id: options.id }, t);

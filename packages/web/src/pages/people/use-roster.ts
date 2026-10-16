@@ -268,6 +268,25 @@ export function usePerson(id: string | undefined) {
 }
 
 /**
+ * The guardian: the one person the People page pins above both views, whatever
+ * the chip, the term or the page. Its own read rather than a row picked out of
+ * the roster, because the roster is narrowed by all three and the guardian is
+ * not. Null on an instance that has no guardian person yet.
+ */
+export function useGuardian() {
+  const { t } = useTranslation("people");
+  const fallback = t("errors.loadFailedFallback");
+  return useQuery<PersonResource | null>({
+    queryKey: [PEOPLE_KEY, "guardian"],
+    refetchInterval: ROSTER_POLL_MS,
+    queryFn: async ({ signal }) => {
+      const list = await fetchJson<PeopleList>("/api/people?level=guardian", { signal, fallback });
+      return list.people[0] ?? null;
+    },
+  });
+}
+
+/**
  * One person's history across every account they hold, newest first.
  *
  * One request rather than one per channel: which stores a history is merged

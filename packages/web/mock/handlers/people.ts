@@ -144,7 +144,12 @@ export const persons: PersonFixture[] = [
     id: "mock-guardian",
     displayName: "Mock Guardian",
     bondLevel: "guardian",
-    channelMappings: [],
+    // Paired on two platforms, so People's own row and the guardian's page
+    // have paired accounts to show and to unpair.
+    channelMappings: [
+      { channel: "feishu", channelUserId: "ou_7f3a9e21c4d8b0" },
+      { channel: "discord", channelUserId: "412088731955" },
+    ],
   },
   {
     id: "ray-oster",
