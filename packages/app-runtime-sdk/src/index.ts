@@ -1911,6 +1911,8 @@ export interface ChannelMessageHookDeps {
   actionEngine: ActionEngineLike;
   conversationSettings: ConversationSettingsControl;
   chatStop: ChatStopHandler;
+  /** A live array: the host appends a channel added later, such as a second
+   *  bot, in place. Read it at each `register()` rather than keep a copy. */
   channels: readonly Channel[];
 }
 

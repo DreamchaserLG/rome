@@ -106,6 +106,8 @@ async function execute(
   try {
     // A service may hold several Discord bots; the CLI acts as the first one
     // that can act, so an unfinished later account never hides a live one.
+    // TODO: act as the bot the turn arrived on. The request carries no
+    // Connection yet, so with two bots a turn on the second acts as the first.
     const bots = deps.connectionRegistry?.find("discord") ?? [];
     const act = (bots.find((bot) => bot.isUnlocked("act")) ?? bots[0])?.act;
     if (!act || !act.operations().some((operation) => operation.name === "discord.api.request")) {

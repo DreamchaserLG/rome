@@ -15,6 +15,7 @@ import { tokenPaste } from "../../connections/schemes.js";
 import { makeGatedWatch, makePasteTalk, makeTwoGrant } from "../../connections/test-fixtures.js";
 import type { Credential, ProfileRecord } from "../../connections/types.js";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
+import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import { createTestDb } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
@@ -440,6 +441,36 @@ describe("POST /connections", () => {
     expect(connection).toMatchObject({ service: "telegram", severalAccounts: true });
     expect(connection.id).not.toBe(first.id);
     expect(registry.find("telegram")).toHaveLength(2);
+  });
+
+  it("reports each account's channel: the service name first, an opaque id after", async () => {
+    const { db, close } = createTestDb();
+    openDbs.push(close);
+    const records = new ChannelRecordsRepository(db);
+    const registry = new ConnectionRegistry({
+      ledger: new DrizzleGrantLedger(db),
+      onMint: (tx, record) => {
+        records.claim(tx, record, record.createdAt);
+      },
+    });
+    registry.register({ ...telegram.descriptor, service: "telegram", severalAccounts: true });
+    const first = await registry.connect("telegram");
+    await registry.importCredential(first.id, "bot", telegram.validCredential());
+    const app = makeApp(registry, undefined, { db });
+
+    const added = await app.request("/connections", {
+      method: "POST",
+      headers: { ...SAME_ORIGIN, "content-type": "application/json" },
+      body: JSON.stringify({ service: "telegram" }),
+    });
+    const { connection } = await added.json();
+    const { connections } = await (await app.request("/connections")).json();
+
+    const channelOf = (id: string) =>
+      connections.find((each: { id: string }) => each.id === id)?.channel;
+    expect(channelOf(first.id)).toBe("telegram");
+    expect(channelOf(connection.id)).toBe(records.idOf(connection.id));
+    expect(channelOf(connection.id)).not.toBe("telegram");
   });
 
   it("hands back an account whose setup never finished instead of minting", async () => {
