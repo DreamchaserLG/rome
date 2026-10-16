@@ -7,9 +7,9 @@ import {
   SectionDescription,
 } from "@rome-os/ui/page";
 import { ListCollection } from "@rome-os/ui/layout-list";
-import { PairingApprovals } from "./PairingApproval";
 import { useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
+import { Trans, useTranslation } from "react-i18next";
 import { CircleAlert, RefreshCw, Unplug } from "lucide-react";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { AppKeysRow } from "@/components/connections/app-keys-row";
@@ -87,7 +87,18 @@ export function ConnectionsSection({
 
   return (
     <Measure className="space-y-6">
-      <PairingApprovals />
+      {/* Pairing is about who you are, not what Rome can reach, so its requests
+          and your paired accounts live in People. This line is where a
+          guardian who looks for them here finds the way. */}
+      <p className="rounded-8 border border-dashed border-border px-4 py-3 text-ui text-muted-foreground">
+        <Trans
+          t={t}
+          i18nKey="connections.pairingMoved"
+          components={{
+            people: <Link to="/people" className="text-primary underline underline-offset-4" />,
+          }}
+        />
+      </p>
       <Section>
         <SectionHeader>
           <SectionHeading>

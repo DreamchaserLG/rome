@@ -180,12 +180,13 @@ describe("ConnectionsSection — list of rows", () => {
     expect(emailRow.querySelector("svg.lucide-mail")).toBeTruthy();
   });
 
-  it("opens services in dialogs and links to pairing history and app keys", () => {
+  it("opens services in dialogs and points pairing to People", () => {
     renderSection([...minimalConnections(), oauth("github")]);
 
+    expect(screen.queryByRole("region", { name: "Pairing requests" })).toBeNull();
     const links = screen.queryAllByRole("link");
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
-      "/activity",
+      "/people",
       "/settings/connections/app-keys",
     ]);
     expect(screen.getByRole("button", { name: "Open GitHub" })).toBeTruthy();

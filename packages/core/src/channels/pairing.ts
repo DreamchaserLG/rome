@@ -109,7 +109,7 @@ export function createPairingAdmission(deps: {
         }
         if (result.outcome === "invalid_code" && "notify" in result && result.notify) {
           reply(
-            "The code was not accepted. Check the pending request in Settings → Connections or Activity. After five failed attempts, ask the guardian to approve it there.",
+            "The code was not accepted. Check the pending request in People. After five failed attempts, ask the guardian to approve it there.",
           );
         }
         return false;

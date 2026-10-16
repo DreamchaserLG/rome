@@ -53,6 +53,7 @@
     "errorTitle": "Connections couldn't be loaded",
     "emptyTitle": "No connections available",
     "loadFailedFallback": "Failed to load connections.",
+    "pairingMoved": "Pairing requests and your paired accounts are in <people>People</people>.",
     "accounts": {
       "add": "Add another account",
       "addFailed": "Could not add an account",

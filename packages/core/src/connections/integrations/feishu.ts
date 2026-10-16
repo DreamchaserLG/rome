@@ -318,7 +318,7 @@ export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
       summary: {
         title: "Feishu connected",
         body: [
-          `App ${pending.appId} is live. Send the bot a private message, then approve your account in Settings → Connections or Activity.`,
+          `App ${pending.appId} is live. Send the bot a private message, then approve the request in People.`,
         ],
       },
     };

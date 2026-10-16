@@ -207,7 +207,7 @@ export function makeDiscordSetup(deps: {
       summary: {
         title: "Discord connected",
         body: [
-          `@${identity.botUsername} is live. Send it a private message, then approve your account in Settings → Connections or Activity.`,
+          `@${identity.botUsername} is live. Send it a private message, then approve the request in People.`,
         ],
       },
     };

@@ -179,7 +179,7 @@ export function makeTelegramSetup(deps: {
       summary: {
         title: "Telegram connected",
         body: [
-          `${identity.botUsername || "Your bot"} is live. Send it a private message, then approve your account in Settings → Connections or Activity.`,
+          `${identity.botUsername || "Your bot"} is live. Send it a private message, then approve the request in People.`,
         ],
       },
     };
