@@ -8,7 +8,7 @@ import {
 } from "@rome-os/ui/page";
 import { ListCollection } from "@rome-os/ui/layout-list";
 import { PairingApprovals } from "./PairingApproval";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CircleAlert, RefreshCw, Unplug } from "lucide-react";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
@@ -63,17 +63,24 @@ export function ConnectionsSection({
   // Which row's detail dialog is open (null = closed). Track the route, not
   // the card object, so a refresh mid-dialog re-derives the LIVE card.
   const [selectedRoute, setSelectedRoute] = useState<string | null>(null);
+  // Mirrors `selectedRoute` for code that resumes after an await.
+  const selectedRouteRef = useRef<string | null>(null);
+  const select = (route: string | null) => {
+    selectedRouteRef.current = route;
+    setSelectedRoute(route);
+  };
   const selected = cards.find((card) => card.route === selectedRoute) ?? null;
 
   // A freshly added account has no card until the list refetches, so refetch
   // first and point the dialog at it only once its card exists. Otherwise the
   // dialog would close, then reopen by itself when a later poll lists it.
+  // A dialog the guardian closed during the add stays closed.
   const openAccount = async (route: string) => {
     const fresh = await onRefresh(true);
     if (!fresh || !buildConnectionCards(fresh, composio).some((card) => card.route === route)) {
       throw new Error(`Account ${route} is not listed yet.`);
     }
-    setSelectedRoute(route);
+    if (selectedRouteRef.current !== null) select(route);
   };
 
   return (
@@ -134,7 +141,7 @@ export function ConnectionsSection({
                 variant="outline"
                 size="default"
                 align="between"
-                onClick={() => setSelectedRoute(card.route)}
+                onClick={() => select(card.route)}
                 className="h-auto w-full bg-surface py-3 text-left hover:bg-accent"
                 aria-label={`Open ${card.label}`}
               >
@@ -152,7 +159,7 @@ export function ConnectionsSection({
         <ConnectionDetailDialog
           card={selected}
           composio={composio}
-          onClose={() => setSelectedRoute(null)}
+          onClose={() => select(null)}
           onRefresh={() => void onRefresh()}
           onFlash={onFlash}
           onOpenAccount={openAccount}

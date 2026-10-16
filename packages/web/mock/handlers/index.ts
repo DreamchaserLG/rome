@@ -1238,6 +1238,14 @@ export const handlers = [
         { status: 400 },
       );
     }
+    // Like core, hand back an account that never received a grant before
+    // minting another.
+    const unfinished = connections.connections.find(
+      (candidate) =>
+        candidate.service === service &&
+        Object.values(candidate.grants).every((state) => state === "unauthorized"),
+    );
+    if (unfinished) return HttpResponse.json({ connection: unfinished }, { status: 200 });
     const channel = crypto.randomUUID();
     const grantNames = Object.keys(first.grants);
     const grants = Object.fromEntries(grantNames.map((grant) => [grant, "unauthorized" as const]));

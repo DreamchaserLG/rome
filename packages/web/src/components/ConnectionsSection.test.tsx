@@ -378,4 +378,34 @@ describe("ConnectionsSection — several accounts", () => {
     await waitFor(() => expect(onRefresh).toHaveBeenCalledWith(true));
     expect(within(screen.getByRole("dialog")).getByText("Feishu")).toBeTruthy();
   });
+
+  it("leaves the dialog closed when the guardian closed it during the add", async () => {
+    const second = feishu({ id: "conn-feishu-2", channel: SECOND_FEISHU });
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input) === "/api/connections" && init?.method === "POST") {
+        return new Response(JSON.stringify({ connection: second }), { status: 201 });
+      }
+      if (String(input) === "/api/approvals") return new Response("[]", { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    let finishRefresh: (list: ApiConnection[]) => void = () => {};
+    const onRefresh = rs.fn(
+      () =>
+        new Promise<ApiConnection[] | null>((resolve) => {
+          finishRefresh = resolve;
+        }),
+    );
+    const view = renderSection([feishu()], null, onRefresh);
+    fireEvent.click(screen.getByRole("button", { name: "Open Feishu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add another account" }));
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledWith(true));
+
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    finishRefresh([feishu(), second]);
+    view.rerender(sectionWith([feishu(), second], onRefresh));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
 });

@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { type ApiConnection, createConnection } from "@/lib/connections-api";
-import type { ConnectionCard } from "@/lib/connection-cards";
+import { type ConnectionCard, connectionRoute } from "@/lib/connection-cards";
 
 /**
  * Account controls on a channel card: "Add another account" for services that
@@ -65,7 +65,10 @@ function AddAccountButton({
       // The account exists from here on, so a failure to open it must not read
       // as a failed add: a retry would create another one.
       try {
-        await onOpenAccount(connection.channel || connection.service);
+        // Without a channel the route would be the service, which opens the
+        // first account instead of the new one.
+        if (!connection.channel) throw new Error("The new account has no channel.");
+        await onOpenAccount(connectionRoute(connection));
       } catch {
         onFlash(t("connections.accounts.addedNotShown"));
       }

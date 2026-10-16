@@ -168,6 +168,12 @@ function runtimeDegradation(connection: ApiConnection): CapabilityDegradation | 
   return null;
 }
 
+/** The card route an account opens at: its channel id, else its service for a
+ *  placeholder or a core that predates accounts. */
+export function connectionRoute(connection: ApiConnection): string {
+  return connection.channel || connection.service;
+}
+
 function toCard(connection: ApiConnection): ConnectionCard {
   const alwaysOn = connection.service === "webchat";
   const slots = alwaysOn
@@ -185,7 +191,7 @@ function toCard(connection: ApiConnection): ConnectionCard {
       ]
     : toSlots(connection);
   return {
-    route: connection.channel || connection.service,
+    route: connectionRoute(connection),
     service: connection.service,
     // Several accounts of one service are told apart by name once the whole
     // list is known (`labelAccounts`).

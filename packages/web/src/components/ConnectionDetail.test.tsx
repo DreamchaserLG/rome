@@ -469,6 +469,28 @@ describe("ConnectionDetailBody — accounts", () => {
     expect(onFlash).not.toHaveBeenCalledWith("Could not add an account");
   });
 
+  it("does not open the first account when the new one comes back without a channel", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input) === "/api/connections" && init?.method === "POST") {
+        return new Response(JSON.stringify({ connection: feishu({ channel: null }) }), {
+          status: 201,
+        });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    const onFlash = rs.fn();
+    const onOpenAccount = rs.fn();
+    renderAccountBody(cardFor([feishu()], "feishu"), { onFlash, onOpenAccount });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Add another account" }));
+
+    await waitFor(() =>
+      expect(onFlash).toHaveBeenCalledWith("Account added. Find it in the Connections list."),
+    );
+    expect(onOpenAccount).not.toHaveBeenCalled();
+  });
+
   it("reports a failed add with the localized fallback", async () => {
     rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       if (String(input) === "/api/connections" && init?.method === "POST") {
