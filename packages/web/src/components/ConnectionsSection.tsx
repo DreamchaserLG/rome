@@ -51,8 +51,10 @@ export function ConnectionsSection({
   composio: ComposioCliStatus | null;
   loading: boolean;
   error: string | null;
-  /** Re-fetch `/api/connections` + the Composio status, after a load error or a ceremony. */
-  onRefresh: () => void | Promise<void>;
+  /** Re-fetch `/api/connections` + the Composio status, after a load error or a
+   *  ceremony. Resolves to the fresh list, or null when the fetch failed. A
+   *  background refresh keeps the list on screen while it loads. */
+  onRefresh: (backgroundRefresh?: boolean) => Promise<ApiConnection[] | null>;
   onFlash: (message: string) => void;
 }) {
   const { t } = useTranslation("settings");
@@ -64,9 +66,13 @@ export function ConnectionsSection({
   const selected = cards.find((card) => card.route === selectedRoute) ?? null;
 
   // A freshly added account has no card until the list refetches, so refetch
-  // first and then point the dialog at it.
+  // first and point the dialog at it only once its card exists. Otherwise the
+  // dialog would close, then reopen by itself when a later poll lists it.
   const openAccount = async (route: string) => {
-    await onRefresh();
+    const fresh = await onRefresh(true);
+    if (!fresh || !buildConnectionCards(fresh, composio).some((card) => card.route === route)) {
+      throw new Error(`Account ${route} is not listed yet.`);
+    }
     setSelectedRoute(route);
   };
 

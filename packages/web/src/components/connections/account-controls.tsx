@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { createConnection } from "@/lib/connections-api";
+import { type ApiConnection, createConnection } from "@/lib/connections-api";
 import type { ConnectionCard } from "@/lib/connection-cards";
 
 /**
@@ -27,20 +27,15 @@ export function AccountControls({
 }: {
   card: ConnectionCard;
   onFlash: (message: string) => void;
-  /** Open another account's card by its route. Without it, the add button is hidden. */
+  /** Open another account's card by its route. Rejects when the account is
+   *  not listed yet. Without it, the add button is hidden. */
   onOpenAccount?: (route: string) => void | Promise<void>;
 }) {
   const connected = talkConnected(card);
   // A second account only makes sense next to a first one that exists.
-  const showAdd = card.severalAccounts && connected && onOpenAccount !== undefined;
-  if (!showAdd) return null;
-
+  if (!card.severalAccounts || !connected || !onOpenAccount) return null;
   return (
-    <div className="space-y-4">
-      {showAdd && onOpenAccount && (
-        <AddAccountButton service={card.service} onFlash={onFlash} onOpenAccount={onOpenAccount} />
-      )}
-    </div>
+    <AddAccountButton service={card.service} onFlash={onFlash} onOpenAccount={onOpenAccount} />
   );
 }
 
@@ -59,10 +54,21 @@ function AddAccountButton({
   const add = async () => {
     setAdding(true);
     try {
-      const connection = await createConnection(service);
-      await onOpenAccount(connection.channel || connection.service);
-    } catch (error) {
-      onFlash(errorMessage(error, t("connections.accounts.addFailed")));
+      const fallback = t("connections.accounts.addFailed");
+      let connection: ApiConnection;
+      try {
+        connection = await createConnection(service, fallback);
+      } catch (error) {
+        onFlash(errorMessage(error, fallback));
+        return;
+      }
+      // The account exists from here on, so a failure to open it must not read
+      // as a failed add: a retry would create another one.
+      try {
+        await onOpenAccount(connection.channel || connection.service);
+      } catch {
+        onFlash(t("connections.accounts.addedNotShown"));
+      }
     } finally {
       setAdding(false);
     }

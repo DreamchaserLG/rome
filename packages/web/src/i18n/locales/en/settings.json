@@ -55,7 +55,8 @@
     "loadFailedFallback": "Failed to load connections.",
     "accounts": {
       "add": "Add another account",
-      "addFailed": "Could not add an account"
+      "addFailed": "Could not add an account",
+      "addedNotShown": "Account added. Find it in the Connections list."
     },
     "headings": {
       "connected": "This connection lets your agent",

@@ -93,12 +93,13 @@ export async function revokeConnectionGrant(
 }
 
 /** Mint a fresh, unauthorized Connection for a service that offers several
- *  accounts. The dashboard then runs the ordinary setup against its id. */
-export async function createConnection(service: string): Promise<ApiConnection> {
+ *  accounts. The dashboard then runs the ordinary setup against its id.
+ *  `fallback` is the error message when the server gives none. */
+export async function createConnection(service: string, fallback: string): Promise<ApiConnection> {
   const payload = await fetchJson<{ connection: ApiConnection }>("/api/connections", {
     method: "POST",
     json: { service },
-    fallback: "Failed to add an account.",
+    fallback,
   });
   return payload.connection;
 }

@@ -55,7 +55,8 @@
     "loadFailedFallback": "加载连接失败。",
     "accounts": {
       "add": "添加另一个账号",
-      "addFailed": "无法添加账号"
+      "addFailed": "无法添加账号",
+      "addedNotShown": "账号已添加，可在连接列表中找到。"
     },
     "headings": {
       "connected": "这个连接让你的 agent 能",

@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "@/i18n";
@@ -111,6 +111,9 @@ function composioStatus(overrides: Partial<ComposioCliStatus> = {}): ComposioCli
 function renderSection(
   connections: ApiConnection[] = minimalConnections(),
   composio: ComposioCliStatus | null = null,
+  onRefresh: (backgroundRefresh?: boolean) => Promise<ApiConnection[] | null> = rs.fn(
+    async () => null,
+  ),
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -121,11 +124,32 @@ function renderSection(
           composio={composio}
           loading={false}
           error={null}
-          onRefresh={rs.fn()}
+          onRefresh={onRefresh}
           onFlash={rs.fn()}
         />
       </MemoryRouter>
     </QueryClientProvider>,
+  );
+}
+
+function sectionWith(
+  connections: ApiConnection[],
+  onRefresh: (backgroundRefresh?: boolean) => Promise<ApiConnection[] | null>,
+) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return (
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <ConnectionsSection
+          connections={connections}
+          composio={null}
+          loading={false}
+          error={null}
+          onRefresh={onRefresh}
+          onFlash={rs.fn()}
+        />
+      </MemoryRouter>
+    </QueryClientProvider>
   );
 }
 
@@ -309,5 +333,45 @@ describe("ConnectionsSection — several accounts", () => {
 
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText("Feishu · Sales Bot")).toBeTruthy();
+  });
+
+  it("moves the dialog to a new account once the refreshed list has it", async () => {
+    const second = feishu({ id: "conn-feishu-2", channel: SECOND_FEISHU });
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input) === "/api/connections" && init?.method === "POST") {
+        return new Response(JSON.stringify({ connection: second }), { status: 201 });
+      }
+      if (String(input) === "/api/approvals") return new Response("[]", { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    const onRefresh = rs.fn(async () => [feishu(), second]);
+    const view = renderSection([feishu()], null, onRefresh);
+    fireEvent.click(screen.getByRole("button", { name: "Open Feishu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add another account" }));
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledWith(true));
+    // The parent re-renders with the refreshed list, as SettingsTabPage does.
+    view.rerender(sectionWith([feishu(), second], onRefresh));
+    await waitFor(() =>
+      expect(within(screen.getByRole("dialog")).getByText("Feishu 2")).toBeTruthy(),
+    );
+  });
+
+  it("keeps the dialog on the current account when the new one is not listed yet", async () => {
+    const second = feishu({ id: "conn-feishu-2", channel: SECOND_FEISHU });
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input) === "/api/connections" && init?.method === "POST") {
+        return new Response(JSON.stringify({ connection: second }), { status: 201 });
+      }
+      if (String(input) === "/api/approvals") return new Response("[]", { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    const onRefresh = rs.fn(async () => [feishu()]);
+    renderSection([feishu()], null, onRefresh);
+    fireEvent.click(screen.getByRole("button", { name: "Open Feishu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add another account" }));
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledWith(true));
+    expect(within(screen.getByRole("dialog")).getByText("Feishu")).toBeTruthy();
   });
 });
