@@ -1379,10 +1379,15 @@ export const handlers = [
     if (!found) return HttpResponse.json({ error: "Unknown conversation" }, { status: 404 });
     found.snapshot.effective = mergeSettings(found.snapshot.effective, body.set);
     found.snapshot.overrides = mergeSettings(found.snapshot.overrides, body.set);
-    // Clearing the agent choice is the only clear the dashboard sends; without
-    // one the conversation routes to no agent of its own.
+    // Core stores a pin to main as null, and clearing the agent choice (the
+    // only clear the dashboard sends) leaves the conversation with none.
+    const agentName = body.set.routing?.agentName;
+    if (agentName === "main" || agentName === MAIN_AGENT_ID) {
+      found.snapshot.overrides.routing = { ...found.snapshot.overrides.routing, agentName: null };
+      found.snapshot.effective.routing.agentName = null;
+    }
     if (body.clear?.includes("routing.agentName")) {
-      delete found.snapshot.overrides.routing?.agentName;
+      delete found.snapshot.overrides.routing;
       found.snapshot.effective.routing.agentName = null;
     }
     found.snapshot.updatedAt = new Date().toISOString();

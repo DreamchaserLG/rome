@@ -342,11 +342,17 @@ function ConversationRow({
     structuredClone(snapshot.effective),
   );
   const [saving, setSaving] = useState(false);
-  // Whether the conversation follows its account's linked agent. Effective
-  // settings read the same for no choice and a pin to main, so this tracks the
-  // override itself.
-  const [followsLink, setFollowsLink] = useState(!agentOverridden);
-  useEffect(() => setFollowsLink(!agentOverridden), [agentOverridden]);
+  // Whether the conversation follows its account's linked agent, kept beside
+  // the draft: effective settings read the same for no choice and a pin to
+  // main, so only the override tells them apart. `projectedFollow` is to
+  // `followsLink` what `projected` is to the draft.
+  const [followsLink, setFollowsLinkState] = useState(!agentOverridden);
+  const followRef = useRef(!agentOverridden);
+  const projectedFollow = useRef(!agentOverridden);
+  const setFollowsLink = useCallback((follow: boolean) => {
+    followRef.current = follow;
+    setFollowsLinkState(follow);
+  }, []);
   const routingOptions = Array.from(
     new Set(
       ["main", ...agentNames, ...(draft.routing.agentName ? [draft.routing.agentName] : [])].map(
@@ -399,17 +405,25 @@ function ConversationRow({
     // no way to undo — so diff against projected state and drop no-ops.
     const sent: Array<[ConversationSettingField, unknown, unknown]> = [];
     const set: PartialConversationSettings = {};
+    const clear: ConversationSettingField[] = [];
     const ahead = structuredClone(projected.current);
+    // Only a linked account has a link to follow.
+    const follow = linkedAgent !== undefined && followRef.current;
+    const previousFollow = linkedAgent !== undefined && projectedFollow.current;
     for (const field of fields) {
       const value = settingValue(draftRef.current, field);
       const previous = settingValue(projected.current, field);
-      if (settingValuesEqual(value, previous)) continue;
-      setPartialSettingValue(set, field, value);
+      const linkChanged = field === "routing.agentName" && follow !== previousFollow;
+      if (settingValuesEqual(value, previous) && !linkChanged) continue;
+      if (field === "routing.agentName" && follow) clear.push(field);
+      else setPartialSettingValue(set, field, value);
       setSettingValue(ahead, field, value);
       sent.push([field, value, previous]);
     }
     if (sent.length === 0) return inFlight.current;
     projected.current = ahead;
+    const sentLink = sent.some(([field]) => field === "routing.agentName");
+    if (sentLink) projectedFollow.current = follow;
     queued.current += 1;
 
     setSaving(true);
@@ -418,7 +432,7 @@ function ConversationRow({
         api<ConversationSettingsSnapshot>("/api/conversation-settings", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ref: conversation.ref, set, clear: [] }),
+          body: JSON.stringify({ ref: conversation.ref, set, clear }),
         }),
       )
       .then((next) => {
@@ -426,7 +440,10 @@ function ConversationRow({
         // Only the last outstanding batch may adopt the response as the whole
         // projected state — an earlier one's response predates batches already
         // enqueued behind it.
-        if (queued.current === 0) projected.current = structuredClone(next.effective);
+        if (queued.current === 0) {
+          projected.current = structuredClone(next.effective);
+          projectedFollow.current = !overridesAgent(next);
+        }
         if (!mounted.current) return;
         onSaved(next);
         // An edit queued while this was in flight leaves the draft ahead of the
@@ -446,6 +463,10 @@ function ConversationRow({
           if (dirty.current.has(field)) continue;
           setSettingValue(rolledBack, field, previous);
           setSettingValue(restored, field, previous);
+          if (field === "routing.agentName") {
+            projectedFollow.current = previousFollow;
+            if (mounted.current) setFollowsLink(previousFollow);
+          }
         }
         projected.current = rolledBack;
         if (mounted.current) applyDraft(restored);
@@ -459,6 +480,7 @@ function ConversationRow({
                 setSettingValue(next, field, value);
                 dirty.current.add(field);
               }
+              if (sentLink) setFollowsLink(follow);
               applyDraft(next);
               flushRef.current();
             },
@@ -469,7 +491,7 @@ function ConversationRow({
         if (mounted.current) setSaving(false);
       });
     return inFlight.current;
-  }, [applyDraft, conversation.ref, onSaved, t]);
+  }, [applyDraft, conversation.ref, linkedAgent, onSaved, setFollowsLink, t]);
 
   // Lets the retry action and the unmount cleanup reach the current flush
   // without taking it as a dependency — see the unmount effect below.
@@ -484,7 +506,9 @@ function ConversationRow({
     if (dirty.current.size > 0 || queued.current > 0) return;
     projected.current = structuredClone(snapshot.effective);
     applyDraft(structuredClone(snapshot.effective));
-  }, [snapshot, applyDraft]);
+    projectedFollow.current = !overridesAgent(snapshot);
+    setFollowsLink(projectedFollow.current);
+  }, [snapshot, applyDraft, setFollowsLink]);
 
   // Leaving the page mid-debounce must not silently discard the edit. Empty
   // deps on purpose: keyed on `flush` this would re-run on every parent render
@@ -496,68 +520,6 @@ function ConversationRow({
       mounted.current = false;
     };
   }, []);
-
-  /**
-   * Moving onto or off the linked agent changes whether an override exists,
-   * which the effective-value diff in `flush` cannot see, so it saves at once.
-   */
-  function changeLink(choice: string) {
-    const follow = choice === FOLLOW_LINK;
-    // A cleared choice reads as no agent, like the default.
-    const value = follow ? null : choice;
-    setFollowsLink(follow);
-    // This save supersedes a debounced agent edit still waiting to flush.
-    dirty.current.delete("routing.agentName");
-    if (dirty.current.size === 0) window.clearTimeout(flushTimer.current);
-    const previous = settingValue(projected.current, "routing.agentName");
-    const next = structuredClone(draftRef.current);
-    setSettingValue(next, "routing.agentName", value);
-    setSettingValue(projected.current, "routing.agentName", value);
-    applyDraft(next);
-    const body = follow
-      ? { ref: conversation.ref, set: {}, clear: ["routing.agentName"] }
-      : { ref: conversation.ref, set: { routing: { agentName: choice } }, clear: [] };
-    // Counted with `flush`'s batches, so an earlier batch's response does not
-    // resync `projected` over this one.
-    queued.current += 1;
-    setSaving(true);
-    inFlight.current = inFlight.current
-      .then(() =>
-        api<ConversationSettingsSnapshot>("/api/conversation-settings", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        }),
-      )
-      .then((saved) => {
-        queued.current -= 1;
-        if (queued.current === 0) projected.current = structuredClone(saved.effective);
-        if (mounted.current) onSaved(saved);
-      })
-      .catch((err) => {
-        queued.current -= 1;
-        // An agent edit made since supersedes this one; rolling back would
-        // make it read as a no-op and drop it.
-        if (!dirty.current.has("routing.agentName")) {
-          setSettingValue(projected.current, "routing.agentName", previous);
-          if (mounted.current) {
-            setFollowsLink(!follow);
-            const restored = structuredClone(draftRef.current);
-            setSettingValue(restored, "routing.agentName", previous);
-            applyDraft(restored);
-          }
-        }
-        toast.error(err instanceof Error ? err.message : String(err), {
-          action: {
-            label: t("channels.conversationSettings.retry"),
-            onClick: () => changeLink(choice),
-          },
-        });
-      })
-      .finally(() => {
-        if (mounted.current) setSaving(false);
-      });
-  }
 
   /**
    * Every control writes through here: the draft updates immediately so the UI
@@ -719,11 +681,10 @@ function ConversationRow({
           >
             <Select
               value={linkedAgent && followsLink ? FOLLOW_LINK : (draft.routing.agentName ?? "main")}
-              onValueChange={(name) =>
-                linkedAgent && (followsLink || name === FOLLOW_LINK)
-                  ? changeLink(name)
-                  : change("routing.agentName", name)
-              }
+              onValueChange={(name) => {
+                if (linkedAgent) setFollowsLink(name === FOLLOW_LINK);
+                change("routing.agentName", name === FOLLOW_LINK ? null : name);
+              }}
             >
               <SelectTrigger id={agentFieldId} className={CONTROL_WIDTH}>
                 <SelectValue />
@@ -764,6 +725,11 @@ function agentLabel(name: string): string {
   return [artifactLocalName(name), artifactOwnerId(name)]
     .filter((part): part is string => Boolean(part && part !== "core"))
     .join(" · ");
+}
+
+/** Whether the conversation has an agent choice of its own, a main pin included. */
+function overridesAgent(snapshot: ConversationSettingsSnapshot): boolean {
+  return settingSource(snapshot, "routing.agentName") === "overridden";
 }
 
 /** The agent picker's value for "no agent of its own", which follows the link. */
