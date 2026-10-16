@@ -43,7 +43,6 @@ import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
-import { SEVERAL_ACCOUNT_SERVICES } from "@rome/api-types/several-accounts";
 import { connections } from "./connections-store";
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
 import { memoryFileHandlers } from "./memory-files";
@@ -1230,20 +1229,22 @@ export const handlers = [
   http.post("/api/connections", async ({ request }) => {
     const body = (await request.json()) as { service?: string };
     const service = body.service ?? "";
-    if (!SEVERAL_ACCOUNT_SERVICES.has(service)) {
+    // Core decides this per service and reports it as `severalAccounts`, so
+    // the mock reads it off the service's first connection.
+    const first = connections.connections.find((candidate) => candidate.service === service);
+    if (!first?.severalAccounts) {
       return HttpResponse.json(
         { error: `${service || "This service"} does not offer several accounts.` },
         { status: 400 },
       );
     }
-    const first = connections.connections.find((candidate) => candidate.service === service);
     const channel = crypto.randomUUID();
-    const grantNames = Object.keys(first?.grants ?? {});
+    const grantNames = Object.keys(first.grants);
     const grants = Object.fromEntries(grantNames.map((grant) => [grant, "unauthorized" as const]));
     const connection: ApiConnection = {
       id: `${channel}-mock`,
       service,
-      label: first?.label.split(" · ")[0] ?? service,
+      label: first.label.split(" · ")[0] ?? service,
       grants,
       display: Object.fromEntries(grantNames.map((grant) => [grant, null])),
       capabilities: {

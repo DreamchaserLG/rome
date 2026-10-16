@@ -1,4 +1,3 @@
-import { SEVERAL_ACCOUNT_SERVICES } from "@rome/api-types/several-accounts";
 import type { ApiConnection } from "@/lib/connections-api";
 
 // The connection ledger. In its own module because two surfaces read it and one
@@ -33,11 +32,17 @@ export const connections: { connections: ApiConnection[] } = {
       severalAccounts: false,
     },
     ...[
-      { service: "email", label: "Email", grant: "inbox", email: "guardian@example.com" },
-      { service: "wechat", label: "WeChat", grant: "account", email: null },
-      { service: "feishu", label: "Feishu", grant: "bot", email: null },
+      {
+        service: "email",
+        label: "Email",
+        grant: "inbox",
+        email: "guardian@example.com",
+        severalAccounts: false,
+      },
+      { service: "wechat", label: "WeChat", grant: "account", email: null, severalAccounts: false },
+      { service: "feishu", label: "Feishu", grant: "bot", email: null, severalAccounts: true },
     ].map(
-      ({ service, label, grant, email }): ApiConnection => ({
+      ({ service, label, grant, email, severalAccounts }): ApiConnection => ({
         id: `${service}-demo`,
         service,
         label: `${label} · Rome Demo`,
@@ -53,7 +58,7 @@ export const connections: { connections: ApiConnection[] } = {
         connect: null,
         setups: {},
         channel: service,
-        severalAccounts: SEVERAL_ACCOUNT_SERVICES.has(service),
+        severalAccounts,
       }),
     ),
     {
