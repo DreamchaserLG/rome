@@ -689,11 +689,11 @@ describe("channel pairing approvals", () => {
   };
 
   it.each([
-    ["an agent other than main", linked("helper:scout"), true, false],
-    ["an agent other than main that is not loaded", linked("helper:scout", false), false, false],
-    ["main", linked("core:main"), false, true],
-    ["no agent", null, false, true],
-  ] as const)("on a channel linked to %s, admits an unknown sender or pairs it", async (_label, link, admitted, pairs) => {
+    ["an agent other than main", linked("helper:scout"), true, 1, false],
+    ["an agent other than main that is not loaded", linked("helper:scout", false), false, 0, false],
+    ["main", linked("core:main"), false, 1, true],
+    ["no agent", null, false, 1, true],
+  ] as const)("on a channel linked to %s, admits an unknown sender or pairs it", async (_label, link, admitted, requests, guided) => {
     seedConnection("telegram");
     const send = rs.fn<Send>(async () => ({
       messageId: "sent",
@@ -710,9 +710,85 @@ describe("channel pairing approvals", () => {
     });
     expect(await admit("connection", "telegram", hello)).toBe(admitted);
     expect(linkOf).toHaveBeenCalledWith("connection");
-    expect(await repo.findPending()).toHaveLength(pairs ? 1 : 0);
-    expect(send).toHaveBeenCalledTimes(pairs ? 1 : 0);
+    const pending = await repo.findPending();
+    expect(pending).toHaveLength(requests);
+    if (requests) expect(pairingPayload(pending[0])?.conversationId).toBe("dm");
+    expect(send).toHaveBeenCalledTimes(guided ? 1 : 0);
     expect(await people.findByChannelUser("telegram", "123")).toBeNull();
+  });
+
+  it("pairs a guardian on a channel linked to an agent other than main through the request a private message records", async () => {
+    seedConnection("telegram");
+    const send = rs.fn<Send>(async () => ({
+      messageId: "sent",
+      conversationId: "dm" as ConversationId,
+    }));
+    const people = new PersonMappingRepository(testDb.db, identityServiceOf);
+    const admit = createPairingAdmission({
+      linkOf: () => linked("helper:scout"),
+      talkGrants,
+      approvalsRepo: repo,
+      personMappingRepo: people,
+      registry: registryOf(send),
+    });
+    expect(await admit("connection", "telegram", hello)).toBe(true);
+    expect(await admit("connection", "telegram", { ...hello, messageId: "two" })).toBe(true);
+    const pending = await repo.findPending();
+    expect(pending).toHaveLength(1);
+    expect(send).not.toHaveBeenCalled();
+    const code = (await repo.pairingCode(pending[0].id))!;
+    expect(await admit("connection", "telegram", { ...hello, text: code })).toBe(false);
+    expect((await people.findByChannelUser("telegram", "123"))?.id).toBe("owner");
+    expect(await admit("connection", "telegram", { ...hello, messageId: "three" })).toBe(true);
+    expect(await repo.findPending()).toHaveLength(0);
+  });
+
+  it("records no pairing request for a known sender on a channel linked to an agent other than main", async () => {
+    seedConnection("telegram");
+    const people = new PersonMappingRepository(testDb.db, identityServiceOf);
+    await people.addChannelMapping("owner", "telegram", "123", "Owner");
+    const send = rs.fn<Send>();
+    const admit = createPairingAdmission({
+      linkOf: () => linked("helper:scout"),
+      talkGrants,
+      approvalsRepo: repo,
+      personMappingRepo: people,
+      registry: registryOf(send),
+    });
+    expect(await admit("connection", "telegram", hello)).toBe(true);
+    expect(await repo.findPending()).toHaveLength(0);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("drops a group pairing code on a channel linked to an agent other than main without guidance", async () => {
+    seedConnection("telegram");
+    const send = rs.fn<Send>(async () => ({
+      messageId: "sent",
+      conversationId: "dm" as ConversationId,
+    }));
+    const request = repo.requestAuthorizedPairing(
+      { ...identity, connectionId: "connection", channelUserId: "123" },
+      ["bot"],
+    )!;
+    const code = (await repo.pairingCode(request.approval.id))!;
+    const admit = createPairingAdmission({
+      linkOf: () => linked("helper:scout"),
+      talkGrants,
+      approvalsRepo: repo,
+      personMappingRepo: new PersonMappingRepository(testDb.db, identityServiceOf),
+      registry: registryOf(send),
+    });
+    expect(
+      await admit("connection", "telegram", {
+        ...hello,
+        text: code,
+        thread: { kind: "group" },
+        senderId: "456",
+      }),
+    ).toBe(false);
+    expect(await repo.findPending()).toHaveLength(1);
+    expect((await repo.findById(request.approval.id))?.status).toBe("pending");
+    expect(send).not.toHaveBeenCalled();
   });
 
   it.each([

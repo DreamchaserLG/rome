@@ -53,8 +53,10 @@ export function createPairingAdmission(deps: {
   registry: Pick<ConnectionRegistry, "get">;
   /** The agent stored as the link of the channel a Connection backs, and
    *  whether it is loaded, or null for no link. A channel linked to an agent
-   *  other than main pairs no one. It admits every sender while its agent is
-   *  loaded and none while it is not, and redeems pairing codes either way. */
+   *  other than main sends no pairing guidance. It admits every sender while
+   *  its agent is loaded and none while it is not, and redeems pairing codes
+   *  either way. A private message there from an unknown sender also records
+   *  a pairing request for the guardian to approve. */
   linkOf: (connectionId: string) => { agent: string; loaded: boolean } | null;
 }): Admission {
   return async (connectionId, service, message) => {
@@ -77,8 +79,17 @@ export function createPairingAdmission(deps: {
     };
     const guidance = `🔗 Pair ${pairingAccount(service, message.senderId, message.senderDisplayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nLearn more in the [Pairing Guide](https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}).`;
     try {
+      const link = deps.linkOf(connectionId);
+      // A bot linked to an agent other than main admits unknown senders as
+      // strangers, so it never sends pairing guidance, which invites anyone
+      // to pair. An account pairs there only through a request the guardian
+      // approves, or whose code the guardian hands out.
+      const agentBot = link !== null && !isCoreMainAgentId(link.agent);
       if (isPairingCodeMessage(message.text)) {
         if (message.thread?.kind !== "dm") {
+          // A group request there would carry no guidance, and it supersedes
+          // the sender's pending request on another Connection.
+          if (agentBot) return false;
           const request = deps.approvalsRepo.requestAuthorizedPairing(
             {
               channel: pairingChannel,
@@ -120,32 +131,48 @@ export function createPairingAdmission(deps: {
         }
         return false;
       }
-      // Pairing grants a guardian's authority, so only a bot that acts for the
-      // guardians pairs. An admitted sender stays unpaired, a stranger to Rome.
       const addressed =
         message.thread?.kind === "dm" ||
         ["mention", "reply", "bot_thread"].includes(message.addressing ?? "ambient");
-      const link = deps.linkOf(connectionId);
-      if (link && !isCoreMainAgentId(link.agent) && link.loaded && addressed) return true;
       const person = await deps.personMappingRepo.findByChannelUser(service, message.senderId);
-      if (link && !isCoreMainAgentId(link.agent)) {
+      const known = !!person && person.id !== STRANGER_PERSON_ID;
+      const requestPairing = () =>
+        deps.approvalsRepo.requestAuthorizedPairing(
+          {
+            channel: pairingChannel,
+            connectionId,
+            channelUserId: message.senderId,
+            displayName: message.senderDisplayName ?? message.senderId,
+            username: message.senderUsername,
+            ...(message.thread?.kind === "dm" ? { conversationId: message.conversationId } : {}),
+          },
+          deps.talkGrants(service),
+        );
+      if (agentBot) {
+        if (!link.loaded) return false;
         // Unaddressed group chatter still needs a sender Rome knows, so a
         // stranger cannot start a turn with every message in a busy group.
-        return link.loaded && !!person && person.id !== STRANGER_PERSON_ID;
+        if (!addressed) return known;
+        if (!known && message.thread?.kind === "dm") {
+          // The request lets a guardian on this bot pair from the dashboard.
+          // A failure to record it must not turn the stranger away.
+          try {
+            const request = requestPairing();
+            if (request) {
+              log.info("pairing request recorded", {
+                approvalId: request.approval.id,
+                connectionId,
+              });
+            }
+          } catch {
+            log.error("pairing request failed", { connectionId, senderId: message.senderId });
+          }
+        }
+        return true;
       }
-      if (person && person.id !== STRANGER_PERSON_ID) return true;
+      if (known) return true;
       if (!addressed) return false;
-      const request = deps.approvalsRepo.requestAuthorizedPairing(
-        {
-          channel: pairingChannel,
-          connectionId,
-          channelUserId: message.senderId,
-          displayName: message.senderDisplayName ?? message.senderId,
-          username: message.senderUsername,
-          ...(message.thread?.kind === "dm" ? { conversationId: message.conversationId } : {}),
-        },
-        deps.talkGrants(service),
-      );
+      const request = requestPairing();
       if (request?.guide) {
         reply(guidance);
         log.info("pairing guidance sent", { approvalId: request.approval.id, connectionId });

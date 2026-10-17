@@ -708,11 +708,15 @@ export function createMessageHandlerAction(
             : undefined;
         const replyTo = parseMessageReplyReference(args.replyTo);
         const replyToPlatformMessageId = replyTo?.messageId;
-        // A bot linked to an agent other than main pairs no one, so its agent
-        // answers every sender it admits, each at their own bond level. A
-        // stranger stays a stranger, and the envoy still checks the reply.
+        // A bot linked to an agent other than main answers every sender who
+        // addresses it, each at their own bond level. A stranger stays a
+        // stranger, and the envoy still checks the reply. Ambient group
+        // messages take reply settings and the sentinel, as on any bot.
         const agentBot = answeringAgent !== undefined && answeringAgent !== "main";
-        const answersEveryone = agentBot && targetAgent !== "main";
+        const addressed =
+          threadType === "private" ||
+          ["mention", "reply", "bot_thread"].includes(String(args.addressing ?? "ambient"));
+        const answersEveryone = agentBot && targetAgent !== "main" && addressed;
         // That bot admitted the sender unpaired, so a group pinned to main
         // there ignores a stranger whatever the reply settings say.
         const unpairedToMain =
@@ -766,7 +770,12 @@ export function createMessageHandlerAction(
           (await settings.get<string[]>("trustedBondLevels")) ?? DEFAULT_TRUSTED_BOND_LEVELS;
 
         const trusted = isTrustedBondLevel(bondLevel, trustedLevels);
-        const triggersTargetAgent = trusted || answersEveryone || policy.action === "allow";
+        // Answering everyone replaces only the default rule. A policy the
+        // guardian set for the sender, thread or channel still applies.
+        const triggersTargetAgent =
+          trusted ||
+          policy.action === "allow" ||
+          (answersEveryone && policy.matchedScope === "default");
         const stored = await conversations.addMessage({
           sessionId: conversation.id,
           role: triggersTargetAgent ? "user" : "notification",

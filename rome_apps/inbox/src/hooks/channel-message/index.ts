@@ -228,6 +228,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           attachments,
           messageId: message.messageId,
           replyTo: message.replyTo,
+          addressing: message.addressing,
           ...agents,
         },
         {

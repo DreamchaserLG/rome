@@ -14,19 +14,21 @@ const DEFAULT_TRUSTED_LEVELS = ["guardian"];
 const DEFAULT_ALLOW: PolicyRule = { action: "allow" };
 const DEFAULT_SENTINEL_REVIEW: PolicyRule = { action: "sentinel_review" };
 
-function recordPolicyDecision(context: PolicyContext, rule: PolicyRule, scope: MatchedScope): void {
+/** The rule `evaluate` applies, with the scope of the policy it came from. */
+export type PolicyDecision = PolicyRule & { matchedScope: MatchedScope };
+
+function decide(context: PolicyContext, rule: PolicyRule, scope: MatchedScope): PolicyDecision {
   // Emit as a span event on whatever parent span is active (typically
   // `action:message_handler`). Using an event rather than a dedicated span
   // keeps the decision inline with the surrounding action's timeline while
   // still being queryable via ClickHouse's span_events column.
-  const span = trace.getActiveSpan();
-  if (!span) return;
-  span.addEvent("policy.decision", {
+  trace.getActiveSpan()?.addEvent("policy.decision", {
     "policy.decision": rule.action,
     "policy.matched_scope": scope,
     "policy.channel": context.channel,
     "policy.bond_level": context.bondLevel,
   });
+  return { ...rule, matchedScope: scope };
 }
 
 export class PolicyEngine {
@@ -40,8 +42,9 @@ export class PolicyEngine {
    * Evaluate policies from most specific to most general.
    * Order: sender_specific → thread → sender tier → channel → global.
    * First matching policy wins. If none match, apply default based on trust.
+   * The decision names the scope that matched, `default` for none.
    */
-  async evaluate(context: PolicyContext): Promise<PolicyRule> {
+  async evaluate(context: PolicyContext): Promise<PolicyDecision> {
     const allPolicies = await this.policiesRepo.findAll();
 
     const senderSpecific: Policy[] = [];
@@ -75,8 +78,7 @@ export class PolicyEngine {
         const scope = policy.scope as Extract<PolicyScope, { type: "sender_specific" }>;
         if (scope.personId === context.sender.id && policy.rules.length > 0) {
           const rule = policy.rules[0];
-          recordPolicyDecision(context, rule, "sender_specific");
-          return rule;
+          return decide(context, rule, "sender_specific");
         }
       }
     }
@@ -90,8 +92,7 @@ export class PolicyEngine {
         ) {
           if (policy.rules.length > 0) {
             const rule = policy.rules[0];
-            recordPolicyDecision(context, rule, "thread");
-            return rule;
+            return decide(context, rule, "thread");
           }
         }
       }
@@ -101,8 +102,7 @@ export class PolicyEngine {
       const scope = policy.scope as Extract<PolicyScope, { type: "sender" }>;
       if (scope.bondLevel === context.bondLevel && policy.rules.length > 0) {
         const rule = policy.rules[0];
-        recordPolicyDecision(context, rule, "sender_tier");
-        return rule;
+        return decide(context, rule, "sender_tier");
       }
     }
 
@@ -117,8 +117,7 @@ export class PolicyEngine {
         const scope = policy.scope as Extract<PolicyScope, { type: "channel" }>;
         if (scope.channel === name && policy.rules.length > 0) {
           const rule = policy.rules[0];
-          recordPolicyDecision(context, rule, "channel");
-          return rule;
+          return decide(context, rule, "channel");
         }
       }
     }
@@ -126,8 +125,7 @@ export class PolicyEngine {
     for (const policy of global) {
       if (policy.rules.length > 0) {
         const rule = policy.rules[0];
-        recordPolicyDecision(context, rule, "global");
-        return rule;
+        return decide(context, rule, "global");
       }
     }
 
@@ -136,7 +134,6 @@ export class PolicyEngine {
     const rule = trustedLevels.includes(context.bondLevel)
       ? DEFAULT_ALLOW
       : DEFAULT_SENTINEL_REVIEW;
-    recordPolicyDecision(context, rule, "default");
-    return rule;
+    return decide(context, rule, "default");
   }
 }
