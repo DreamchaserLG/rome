@@ -1280,6 +1280,34 @@ describe("linked agent", () => {
     expect(agentRunner.calls).toHaveLength(0);
   });
 
+  it("triages a stranger in a group routed to an agent other than the linked one", async () => {
+    const { deps, agentRunner, conversations } = createMessageHandlerDeps({
+      knownAgents: ["main", "sentinel", "envoy", "sales:agent", "pm:assistant"],
+      settings: { replyToBondLevels: ["guardian", "other"] },
+      agentResponses: [[{ type: "result", content: "IGNORE" }]],
+    });
+    (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
+      action: "sentinel_review",
+      matchedScope: "default",
+    });
+    conversations.ensureChannelConversation.mockImplementation(async () => ({
+      id: "channel:feishu-2:group-1",
+      agentName: "pm:assistant",
+    }));
+    const action = createAction(actionConfig, deps);
+
+    const result = await action.execute(
+      inbound({
+        channelUserId: "stranger",
+        linkedAgentName: "sales:agent",
+        addressing: "mention",
+      }),
+    );
+
+    expect(result).toEqual({ status: "ok", data: { action: "sentinel_ignored" } });
+    expect(agentRunner.calls.map((call) => call.agentName)).toEqual(["sentinel"]);
+  });
+
   it("ignores a stranger in a group pinned to main on an account linked elsewhere", async () => {
     const { deps, agentRunner, conversations } = createMessageHandlerDeps({
       knownAgents: ["main", "sentinel", "envoy", "sales:agent"],

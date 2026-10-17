@@ -709,14 +709,15 @@ export function createMessageHandlerAction(
         const replyTo = parseMessageReplyReference(args.replyTo);
         const replyToPlatformMessageId = replyTo?.messageId;
         // A bot linked to an agent other than main answers every sender who
-        // addresses it, each at their own bond level. A stranger stays a
+        // addresses it, each at their own bond level, when that linked agent
+        // is the one answering. A stranger stays a
         // stranger, and the envoy still checks the reply. Ambient group
         // messages take reply settings and the sentinel, as on any bot.
         const agentBot = answeringAgent !== undefined && answeringAgent !== "main";
         const addressed =
           threadType === "private" ||
           ["mention", "reply", "bot_thread"].includes(String(args.addressing ?? "ambient"));
-        const answersEveryone = agentBot && targetAgent !== "main" && addressed;
+        const answersEveryone = agentBot && targetAgent === answeringAgent && addressed;
         // That bot admitted the sender unpaired, so a group pinned to main
         // there ignores a stranger whatever the reply settings say.
         const unpairedToMain =

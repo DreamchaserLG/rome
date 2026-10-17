@@ -1,5 +1,5 @@
 import { trace } from "@opentelemetry/api";
-import type { PolicyContext } from "@rome-os/app-runtime";
+import type { PolicyContext, PolicyMatchedScope } from "@rome-os/app-runtime";
 import type { Policy, PolicyRule, PolicyScope } from "../types.js";
 import type { PoliciesRepository } from "../db/repositories/policies.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
@@ -7,17 +7,19 @@ import type { ServiceOfChannel } from "../db/repositories/channel-records.js";
 
 export type { PolicyContext } from "@rome-os/app-runtime";
 
-type MatchedScope = "sender_specific" | "thread" | "sender_tier" | "channel" | "global" | "default";
-
 const DEFAULT_TRUSTED_LEVELS = ["guardian"];
 
 const DEFAULT_ALLOW: PolicyRule = { action: "allow" };
 const DEFAULT_SENTINEL_REVIEW: PolicyRule = { action: "sentinel_review" };
 
 /** The rule `evaluate` applies, with the scope of the policy it came from. */
-export type PolicyDecision = PolicyRule & { matchedScope: MatchedScope };
+export type PolicyDecision = PolicyRule & { matchedScope: PolicyMatchedScope };
 
-function decide(context: PolicyContext, rule: PolicyRule, scope: MatchedScope): PolicyDecision {
+function decide(
+  context: PolicyContext,
+  rule: PolicyRule,
+  scope: PolicyMatchedScope,
+): PolicyDecision {
   // Emit as a span event on whatever parent span is active (typically
   // `action:message_handler`). Using an event rather than a dedicated span
   // keeps the decision inline with the surrounding action's timeline while
