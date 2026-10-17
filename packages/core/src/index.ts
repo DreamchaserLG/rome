@@ -370,6 +370,12 @@ async function main() {
     talkGrants: (service) =>
       connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
     registry: connectionRegistry,
+    // Called per inbound message, which arrives only once Connections start,
+    // after the resolver below exists.
+    linkedAgentOf: (connectionId) => {
+      const channel = channelRecords.idOf(connectionId);
+      return channel === null ? undefined : linkedAgentOf(channel);
+    },
   });
   const linkAgentToGuardian = createAgentsGuardianLink({
     personMappingRepo,

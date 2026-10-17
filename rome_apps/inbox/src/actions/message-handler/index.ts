@@ -708,9 +708,14 @@ export function createMessageHandlerAction(
             : undefined;
         const replyTo = parseMessageReplyReference(args.replyTo);
         const replyToPlatformMessageId = replyTo?.messageId;
+        // A bot linked to an agent other than main pairs no one, so its agent
+        // answers every sender it admits, each at their own bond level. A
+        // stranger stays a stranger, and the envoy still checks the reply.
+        const answersEveryone =
+          answeringAgent !== undefined && answeringAgent !== "main" && targetAgent !== "main";
         const replyToLevels =
           (await settings.get<string[]>("replyToBondLevels")) ?? DEFAULT_REPLY_TO_BOND_LEVELS;
-        if (!canReplyToBondLevel(bondLevel, replyToLevels)) {
+        if (!answersEveryone && !canReplyToBondLevel(bondLevel, replyToLevels)) {
           const stored = await conversations.addMessage({
             sessionId: conversation.id,
             role: "notification",
@@ -754,7 +759,7 @@ export function createMessageHandlerAction(
           (await settings.get<string[]>("trustedBondLevels")) ?? DEFAULT_TRUSTED_BOND_LEVELS;
 
         const trusted = isTrustedBondLevel(bondLevel, trustedLevels);
-        const triggersTargetAgent = trusted || policy.action === "allow";
+        const triggersTargetAgent = trusted || answersEveryone || policy.action === "allow";
         const stored = await conversations.addMessage({
           sessionId: conversation.id,
           role: triggersTargetAgent ? "user" : "notification",

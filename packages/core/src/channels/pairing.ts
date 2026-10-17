@@ -8,6 +8,7 @@ import type { Admission } from "./admission.js";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import { isPairingCodeMessage } from "./pairing-code.js";
 import { sendThrough } from "./connection-ports.js";
+import { isCoreMainAgentId } from "../apps/artifact-id.js";
 
 const log = createLogger("channel-pairing");
 function pairingAccount(
@@ -50,12 +51,20 @@ export function createPairingAdmission(deps: {
   talkGrants: (service: string) => readonly string[];
   /** The Connections pairing replies go out on. */
   registry: Pick<ConnectionRegistry, "get">;
+  /** The agent linked to the channel a Connection backs, as `linkedAgentOf`
+   *  answers it. A channel linked to an agent other than main admits every
+   *  sender without pairing. */
+  linkedAgentOf: (connectionId: string) => string | null | undefined;
 }): Admission {
   return async (connectionId, service, message) => {
     const channel = pairingPayloadSchema.shape.channel.safeParse(service);
     if (!channel.success) return true;
     const pairingChannel = channel.data;
     if (service === "telegram" && !/^[1-9][0-9]*$/.test(message.senderId)) return false;
+    // Pairing grants a guardian's authority, so only a bot that acts for the
+    // guardians pairs. An admitted sender stays unpaired, a stranger to Rome.
+    const agent = deps.linkedAgentOf(connectionId);
+    if (agent && !isCoreMainAgentId(agent)) return true;
     // Replies go out in the background: the decision never depends on them,
     // and admission takes a conversation's messages one at a time, so a send
     // that hangs must not hold up the next message.
