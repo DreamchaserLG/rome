@@ -1170,6 +1170,31 @@ describe("linked agent", () => {
     }
   });
 
+  it("ignores a stranger in a group pinned to main on an account linked elsewhere", async () => {
+    const { deps, agentRunner, conversations } = createMessageHandlerDeps({
+      knownAgents: ["main", "sentinel", "envoy", "sales:agent"],
+      settings: { replyToBondLevels: ["guardian", "other"] },
+    });
+    const action = createAction(actionConfig, deps);
+
+    const result = await action.execute(
+      inbound({
+        channelUserId: "stranger",
+        routedAgentName: "core:main",
+        linkedAgentName: "sales:agent",
+      }),
+    );
+
+    expect(result).toEqual({
+      status: "ok",
+      data: { action: "ignored_by_reply_settings", bondLevel: "other" },
+    });
+    expect(agentRunner.calls).toHaveLength(0);
+    expect(conversations.addMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "notification" }),
+    );
+  });
+
   it("stays silent, storing nothing, when the linked agent is not loaded", async () => {
     const { deps, agentRunner, conversations } = guardianDeps(["main", "sentinel", "envoy"]);
     const action = createAction(actionConfig, deps);

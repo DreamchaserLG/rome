@@ -51,20 +51,17 @@ export function createPairingAdmission(deps: {
   talkGrants: (service: string) => readonly string[];
   /** The Connections pairing replies go out on. */
   registry: Pick<ConnectionRegistry, "get">;
-  /** The agent linked to the channel a Connection backs, as `linkedAgentOf`
-   *  answers it. A channel linked to an agent other than main admits every
-   *  sender without pairing. */
-  linkedAgentOf: (connectionId: string) => string | null | undefined;
+  /** The agent stored as the link of the channel a Connection backs, and
+   *  whether it is loaded, or null for no link. A channel linked to an agent
+   *  other than main pairs no one. It admits every sender while its agent is
+   *  loaded and none while it is not, and redeems pairing codes either way. */
+  linkOf: (connectionId: string) => { agent: string; loaded: boolean } | null;
 }): Admission {
   return async (connectionId, service, message) => {
     const channel = pairingPayloadSchema.shape.channel.safeParse(service);
     if (!channel.success) return true;
     const pairingChannel = channel.data;
     if (service === "telegram" && !/^[1-9][0-9]*$/.test(message.senderId)) return false;
-    // Pairing grants a guardian's authority, so only a bot that acts for the
-    // guardians pairs. An admitted sender stays unpaired, a stranger to Rome.
-    const agent = deps.linkedAgentOf(connectionId);
-    if (agent && !isCoreMainAgentId(agent)) return true;
     // Replies go out in the background: the decision never depends on them,
     // and admission takes a conversation's messages one at a time, so a send
     // that hangs must not hold up the next message.
@@ -123,6 +120,10 @@ export function createPairingAdmission(deps: {
         }
         return false;
       }
+      // Pairing grants a guardian's authority, so only a bot that acts for the
+      // guardians pairs. An admitted sender stays unpaired, a stranger to Rome.
+      const link = deps.linkOf(connectionId);
+      if (link && !isCoreMainAgentId(link.agent)) return link.loaded;
       const person = await deps.personMappingRepo.findByChannelUser(service, message.senderId);
       if (person && person.id !== STRANGER_PERSON_ID) return true;
       if (

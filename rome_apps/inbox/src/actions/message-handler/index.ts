@@ -711,11 +711,18 @@ export function createMessageHandlerAction(
         // A bot linked to an agent other than main pairs no one, so its agent
         // answers every sender it admits, each at their own bond level. A
         // stranger stays a stranger, and the envoy still checks the reply.
-        const answersEveryone =
-          answeringAgent !== undefined && answeringAgent !== "main" && targetAgent !== "main";
+        const agentBot = answeringAgent !== undefined && answeringAgent !== "main";
+        const answersEveryone = agentBot && targetAgent !== "main";
+        // That bot admitted the sender unpaired, so a group pinned to main
+        // there ignores a stranger whatever the reply settings say.
+        const unpairedToMain =
+          agentBot && targetAgent === "main" && (!person || person.id === deps.strangerPersonId);
         const replyToLevels =
           (await settings.get<string[]>("replyToBondLevels")) ?? DEFAULT_REPLY_TO_BOND_LEVELS;
-        if (!answersEveryone && !canReplyToBondLevel(bondLevel, replyToLevels)) {
+        if (
+          unpairedToMain ||
+          (!answersEveryone && !canReplyToBondLevel(bondLevel, replyToLevels))
+        ) {
           const stored = await conversations.addMessage({
             sessionId: conversation.id,
             role: "notification",

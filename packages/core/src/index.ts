@@ -370,11 +370,12 @@ async function main() {
     talkGrants: (service) =>
       connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
     registry: connectionRegistry,
-    // Called per inbound message, which arrives only once Connections start,
-    // after the resolver below exists.
-    linkedAgentOf: (connectionId) => {
-      const channel = channelRecords.idOf(connectionId);
-      return channel === null ? undefined : linkedAgentOf(channel);
+    // The stored link, not `linkedAgentOf`, which reads an unloaded agent as
+    // no link. Called per inbound message, which arrives only once
+    // Connections start, after the agent loader below exists.
+    linkOf: (connectionId) => {
+      const agent = channelRecords.byConnection(connectionId)?.agent;
+      return agent ? { agent, loaded: isCoreMainAgentId(agent) || agentLoader.has(agent) } : null;
     },
   });
   const linkAgentToGuardian = createAgentsGuardianLink({
