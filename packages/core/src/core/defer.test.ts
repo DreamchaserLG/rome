@@ -137,36 +137,25 @@ describe("runDefer", () => {
     expect(createRoutine).not.toHaveBeenCalled();
   });
 
-  it("refuses a turn started by anyone but the guardian", async () => {
+  it("refuses a stranger's turn and allows anyone else's", async () => {
     const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-1" });
-    for (const senderBondLevel of ["other", "inner-circle"]) {
-      await expect(
-        runDefer(
-          { name: "x", afterMinutes: 5 },
-          {
-            context: {
-              ...baseContext,
-              channelContext: { ...baseContext.channelContext!, senderBondLevel },
-            },
-            createRoutine,
-            now: NOW,
+    const run = (senderBondLevel: string) =>
+      runDefer(
+        { name: "x", afterMinutes: 5 },
+        {
+          context: {
+            ...baseContext,
+            channelContext: { ...baseContext.channelContext!, senderBondLevel },
           },
-        ),
-      ).rejects.toThrow(/guardian started/);
-    }
-    expect(createRoutine).not.toHaveBeenCalled();
-    await runDefer(
-      { name: "x", afterMinutes: 5 },
-      {
-        context: {
-          ...baseContext,
-          channelContext: { ...baseContext.channelContext!, senderBondLevel: "guardian" },
+          createRoutine,
+          now: NOW,
         },
-        createRoutine,
-        now: NOW,
-      },
-    );
-    expect(createRoutine).toHaveBeenCalledTimes(1);
+      );
+    await expect(run("other")).rejects.toThrow(/stranger's turn/);
+    expect(createRoutine).not.toHaveBeenCalled();
+    await run("inner-circle");
+    await run("guardian");
+    expect(createRoutine).toHaveBeenCalledTimes(2);
   });
 
   it("propagates a create_routine domain error", async () => {

@@ -140,11 +140,10 @@ export async function runDefer(input: DeferInput, deps: DeferDeps): Promise<Defe
   if (!channelContext?.channel || !channelContext?.threadId) {
     throw new Error("defer is only available inside an active conversation thread");
   }
-  // A woken turn replies without the envoy, so only the guardian's turns may
-  // schedule one. A turn with no sender bond level is not a channel message.
-  const sender = channelContext.senderBondLevel;
-  if (sender !== undefined && sender !== "guardian") {
-    throw new Error("defer is only available in a turn the guardian started");
+  // A woken turn replies without the envoy, so a stranger's turn may not
+  // schedule one.
+  if (channelContext.senderBondLevel === "other") {
+    throw new Error("defer is not available in a stranger's turn");
   }
 
   const fireAt = new Date(parsed.fireAtMs);
