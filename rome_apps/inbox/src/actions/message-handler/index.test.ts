@@ -1200,7 +1200,14 @@ describe("linked agent", () => {
   });
 
   it("holds a stranger's reply for approval unless the envoy's verdict opens with APPROVE", async () => {
-    for (const verdict of ["", "Looks fine to me.", "I cannot APPROVE this.", "APPROVE"]) {
+    for (const [verdict, sent] of [
+      ["", false],
+      ["Looks fine to me.", false],
+      ["I cannot APPROVE this.", false],
+      ["APPROVE", true],
+      ["**APPROVE**: safe", true],
+      ["Verdict: APPROVE", true],
+    ] as const) {
       const { deps, sentMessages } = createMessageHandlerDeps({
         knownAgents: ["main", "sentinel", "envoy", "sales:agent"],
         agentResponses: [
@@ -1222,7 +1229,6 @@ describe("linked agent", () => {
         }),
       );
 
-      const sent = verdict === "APPROVE";
       expect(result).toEqual({
         status: "ok",
         data: { action: sent ? "sent" : "pending_approval", response: "Hi." },
