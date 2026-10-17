@@ -54,8 +54,8 @@ export function createPairingAdmission(deps: {
   /** The agent stored as the link of the channel a Connection backs, and
    *  whether it is loaded, or null for no link. A channel linked to an agent
    *  other than main creates no pairing requests and sends no guidance. It
-   *  admits every sender while its agent is loaded and none while it is not,
-   *  and redeems pairing codes either way. */
+   *  admits every addressed sender while its agent is loaded and only known
+   *  senders while it is not, and redeems pairing codes either way. */
   linkOf: (connectionId: string) => { agent: string; loaded: boolean } | null;
 }): Admission {
   return async (connectionId, service, message) => {

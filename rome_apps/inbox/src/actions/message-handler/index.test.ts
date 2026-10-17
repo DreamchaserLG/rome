@@ -1199,6 +1199,38 @@ describe("linked agent", () => {
     expect(agentRunner.calls).toHaveLength(0);
   });
 
+  it("holds a stranger's reply for approval unless the envoy approves it outright", async () => {
+    for (const verdict of ["", "Looks fine to me.", "APPROVE"]) {
+      const { deps, sentMessages } = createMessageHandlerDeps({
+        knownAgents: ["main", "sentinel", "envoy", "sales:agent"],
+        agentResponses: [
+          [{ type: "result", content: "Hi." }],
+          [{ type: "result", content: verdict }],
+        ],
+      });
+      (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
+        action: "sentinel_review",
+        matchedScope: "default",
+      });
+      const action = createAction(actionConfig, deps);
+
+      const result = await action.execute(
+        inbound({
+          channelUserId: "stranger",
+          threadType: "private",
+          linkedAgentName: "sales:agent",
+        }),
+      );
+
+      const sent = verdict === "APPROVE";
+      expect(result).toEqual({
+        status: "ok",
+        data: { action: sent ? "sent" : "pending_approval", response: "Hi." },
+      });
+      expect(sentMessages).toHaveLength(sent ? 1 : 0);
+    }
+  });
+
   it("answers a stranger who addresses an agent other than main in a group", async () => {
     for (const [addressing, answered] of [
       ["mention", true],
