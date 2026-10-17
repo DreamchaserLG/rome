@@ -744,4 +744,27 @@ describe("channel pairing approvals", () => {
       true,
     );
   });
+
+  it.each([
+    ["mention", true],
+    ["ambient", false],
+  ] as const)("on a channel linked to an agent other than main, takes an unknown sender's %s group message: %s", async (addressing, admitted) => {
+    seedConnection("telegram");
+    const send = rs.fn<Send>(async () => ({
+      messageId: "sent",
+      conversationId: "dm" as ConversationId,
+    }));
+    const admit = createPairingAdmission({
+      linkOf: () => linked("helper:scout"),
+      talkGrants,
+      approvalsRepo: repo,
+      personMappingRepo: new PersonMappingRepository(testDb.db, identityServiceOf),
+      registry: registryOf(send),
+    });
+    expect(
+      await admit("connection", "telegram", { ...hello, thread: { kind: "group" }, addressing }),
+    ).toBe(admitted);
+    expect(await repo.findPending()).toHaveLength(0);
+    expect(send).not.toHaveBeenCalled();
+  });
 });

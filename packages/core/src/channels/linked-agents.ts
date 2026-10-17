@@ -10,6 +10,12 @@ import { createLogger } from "../logger.js";
 
 const log = createLogger("linked-agents");
 
+/** Whether a linked agent can answer: main always can, any other agent once it
+ *  is loaded. Admission and routing share it, so they agree on a live link. */
+export function isLinkedAgentLoaded(agent: string, agents: { has(name: string): boolean }) {
+  return isCoreMainAgentId(agent) || agents.has(agent);
+}
+
 /**
  * The hook's `linkedAgentOf`, reading the channel's record on each call, so a
  * relink, or a channel whose record lands after wiring, is right on the next
@@ -31,7 +37,7 @@ export function linkedAgentResolver(
     // no record answers for its own service.
     if (!LINKABLE_SERVICES.has(record?.service ?? channelName)) return undefined;
     const agent = record?.agent ?? null;
-    if (agent !== null && (isCoreMainAgentId(agent) || agents.has(agent))) {
+    if (agent !== null && isLinkedAgentLoaded(agent, agents)) {
       silent.delete(channelName);
       return agent;
     }

@@ -80,7 +80,7 @@ import { createAccountNames } from "./channels/account-names.js";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList, joinLaterChannel } from "./channels/channel-list.js";
 import { claimChannels } from "./channels/claim-channels.js";
-import { linkedAgentResolver } from "./channels/linked-agents.js";
+import { isLinkedAgentLoaded, linkedAgentResolver } from "./channels/linked-agents.js";
 import { recordedChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { sendApprovalCard } from "./actions/approval-card.js";
@@ -375,7 +375,7 @@ async function main() {
     // Connections start, after the agent loader below exists.
     linkOf: (connectionId) => {
       const agent = channelRecords.byConnection(connectionId)?.agent;
-      return agent ? { agent, loaded: isCoreMainAgentId(agent) || agentLoader.has(agent) } : null;
+      return agent ? { agent, loaded: isLinkedAgentLoaded(agent, agentLoader) } : null;
     },
   });
   const linkAgentToGuardian = createAgentsGuardianLink({

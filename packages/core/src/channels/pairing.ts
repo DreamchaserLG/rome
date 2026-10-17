@@ -122,15 +122,19 @@ export function createPairingAdmission(deps: {
       }
       // Pairing grants a guardian's authority, so only a bot that acts for the
       // guardians pairs. An admitted sender stays unpaired, a stranger to Rome.
+      const addressed =
+        message.thread?.kind === "dm" ||
+        ["mention", "reply", "bot_thread"].includes(message.addressing ?? "ambient");
       const link = deps.linkOf(connectionId);
-      if (link && !isCoreMainAgentId(link.agent)) return link.loaded;
+      if (link && !isCoreMainAgentId(link.agent) && link.loaded && addressed) return true;
       const person = await deps.personMappingRepo.findByChannelUser(service, message.senderId);
+      if (link && !isCoreMainAgentId(link.agent)) {
+        // Unaddressed group chatter still needs a sender Rome knows, so a
+        // stranger cannot start a turn with every message in a busy group.
+        return link.loaded && !!person && person.id !== STRANGER_PERSON_ID;
+      }
       if (person && person.id !== STRANGER_PERSON_ID) return true;
-      if (
-        message.thread?.kind !== "dm" &&
-        !["mention", "reply", "bot_thread"].includes(message.addressing ?? "ambient")
-      )
-        return false;
+      if (!addressed) return false;
       const request = deps.approvalsRepo.requestAuthorizedPairing(
         {
           channel: pairingChannel,
