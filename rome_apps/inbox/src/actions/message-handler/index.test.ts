@@ -991,6 +991,7 @@ describe("linked agent", () => {
     displayName: "Guardian",
     text: "hello",
     messageId: "msg-1",
+    pairsSenders: true,
     ...overrides,
   });
 
@@ -1171,6 +1172,33 @@ describe("linked agent", () => {
     }
   });
 
+  it("keeps reply settings for a stranger on an account that does not pair senders", async () => {
+    const { deps, agentRunner } = createMessageHandlerDeps({
+      knownAgents: ["main", "sentinel", "envoy", "sales:agent"],
+    });
+    (deps.policyEngine.evaluate as ReturnType<typeof rs.fn>).mockResolvedValue({
+      action: "sentinel_review",
+      matchedScope: "default",
+    });
+    const action = createAction(actionConfig, deps);
+
+    const result = await action.execute(
+      inbound({
+        channel: "telegram_user",
+        channelUserId: "stranger",
+        threadType: "private",
+        linkedAgentName: "sales:agent",
+        pairsSenders: false,
+      }),
+    );
+
+    expect(result).toEqual({
+      status: "ok",
+      data: { action: "ignored_by_reply_settings", bondLevel: "other" },
+    });
+    expect(agentRunner.calls).toHaveLength(0);
+  });
+
   it("answers a stranger who addresses an agent other than main in a group", async () => {
     for (const [addressing, answered] of [
       ["mention", true],
@@ -1331,6 +1359,24 @@ describe("linked agent", () => {
     expect(conversations.addMessage).toHaveBeenCalledWith(
       expect.objectContaining({ role: "notification" }),
     );
+  });
+
+  it("ignores a stranger on a bot that pairs senders once its link is main", async () => {
+    const { deps, agentRunner } = createMessageHandlerDeps({
+      knownAgents: ["main", "sentinel", "envoy", "sales:agent"],
+      settings: { replyToBondLevels: ["guardian", "other"] },
+    });
+    const action = createAction(actionConfig, deps);
+
+    const result = await action.execute(
+      inbound({ channelUserId: "stranger", threadType: "private", linkedAgentName: "core:main" }),
+    );
+
+    expect(result).toEqual({
+      status: "ok",
+      data: { action: "ignored_by_reply_settings", bondLevel: "other" },
+    });
+    expect(agentRunner.calls).toHaveLength(0);
   });
 
   it("stays silent, storing nothing, when the linked agent is not loaded", async () => {

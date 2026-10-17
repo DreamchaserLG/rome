@@ -717,13 +717,16 @@ describe("channel pairing approvals", () => {
     expect(await people.findByChannelUser("telegram", "123")).toBeNull();
   });
 
-  it("admits a known sender on a channel linked to an agent other than main", async () => {
+  it.each([
+    true,
+    false,
+  ])("admits a known sender on a channel linked to an agent other than main (loaded: %s)", async (loaded) => {
     seedConnection("telegram");
     const people = new PersonMappingRepository(testDb.db, identityServiceOf);
     await people.addChannelMapping("owner", "telegram", "123", "Owner");
     const send = rs.fn<Send>();
     const admit = createPairingAdmission({
-      linkOf: () => linked("helper:scout"),
+      linkOf: () => linked("helper:scout", loaded),
       talkGrants,
       approvalsRepo: repo,
       personMappingRepo: people,

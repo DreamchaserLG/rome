@@ -1,5 +1,9 @@
 import { trace } from "@opentelemetry/api";
-import type { PolicyContext, PolicyMatchedScope } from "@rome-os/app-runtime";
+import type {
+  PolicyContext,
+  PolicyDecision as SdkPolicyDecision,
+  PolicyMatchedScope,
+} from "@rome-os/app-runtime";
 import type { Policy, PolicyRule, PolicyScope } from "../types.js";
 import type { PoliciesRepository } from "../db/repositories/policies.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
@@ -12,8 +16,8 @@ const DEFAULT_TRUSTED_LEVELS = ["guardian"];
 const DEFAULT_ALLOW: PolicyRule = { action: "allow" };
 const DEFAULT_SENTINEL_REVIEW: PolicyRule = { action: "sentinel_review" };
 
-/** The rule `evaluate` applies, with the scope of the policy it came from. */
-export type PolicyDecision = PolicyRule & { matchedScope: PolicyMatchedScope };
+/** The SDK's decision, which this engine always reports a scope for. */
+type PolicyDecision = SdkPolicyDecision & { matchedScope: PolicyMatchedScope };
 
 function decide(
   context: PolicyContext,

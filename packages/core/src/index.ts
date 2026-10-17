@@ -80,6 +80,7 @@ import { createAccountNames } from "./channels/account-names.js";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList, joinLaterChannel } from "./channels/channel-list.js";
 import { claimChannels } from "./channels/claim-channels.js";
+import { PAIRING_CHANNELS } from "@rome/api-types/approvals";
 import { isLinkedAgentLoaded, linkedAgentResolver } from "./channels/linked-agents.js";
 import { recordedChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
@@ -1144,6 +1145,8 @@ async function main() {
   // Register every built-in descriptor now (before load()/import), threading the
   // runtime deps the factories need from here where the repos/adapters exist.
   const linkedAgentOf = linkedAgentResolver(channelRecords, agentLoader);
+  const pairsSenders = (channel: string) =>
+    (PAIRING_CHANNELS as readonly string[]).includes(serviceOfChannel(channel));
   const { RomeCloudMailProvider } = await import("./lib/rome-cloud-mail.js");
   const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
@@ -1221,6 +1224,7 @@ async function main() {
         chatStop,
         channels: hookChannels,
         linkedAgentOf,
+        pairsSenders,
       });
       if (loadedHook) {
         messageHook = loadedHook;
@@ -1261,6 +1265,7 @@ async function main() {
           chatStop,
           channels: hookChannels,
           linkedAgentOf,
+          pairsSenders,
         },
         getCurrent: () => messageHook,
         setCurrent: (hook) => {

@@ -84,6 +84,10 @@ export interface MessageHandlerInput {
    *  the conversation never stores it. When that agent is not loaded, nothing
    *  answers. Absent on an account that takes no link. */
   linkedAgentName?: string;
+  /** Whether the account pairs unknown senders before they reach an agent.
+   *  Only such an account, linked to an agent other than main, answers
+   *  senders it never paired. */
+  pairsSenders?: boolean;
 }
 
 export interface MessageHandlerOutput {

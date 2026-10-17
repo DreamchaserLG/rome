@@ -133,7 +133,9 @@ export function createPairingAdmission(deps: {
       const person = await deps.personMappingRepo.findByChannelUser(service, message.senderId);
       const known = !!person && person.id !== STRANGER_PERSON_ID;
       if (agentBot) {
-        if (!link.loaded) return false;
+        // A known sender still reaches the hook, which stays silent for an
+        // agent that is not loaded but lets `/stop` end a running turn.
+        if (!link.loaded) return known;
         // Unaddressed group chatter still needs a sender Rome knows, so a
         // stranger cannot start a turn with every message in a busy group.
         return addressed || known;

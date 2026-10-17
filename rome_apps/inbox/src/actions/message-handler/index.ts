@@ -713,15 +713,19 @@ export function createMessageHandlerAction(
         // is the one answering. A stranger stays a
         // stranger, and the envoy still checks the reply. Ambient group
         // messages take reply settings and the sentinel, as on any bot.
-        const agentBot = answeringAgent !== undefined && answeringAgent !== "main";
+        const agentBot =
+          args.pairsSenders === true && answeringAgent !== undefined && answeringAgent !== "main";
         const addressed =
           threadType === "private" ||
           ["mention", "reply", "bot_thread"].includes(String(args.addressing ?? "ambient"));
         const answersEveryone = agentBot && targetAgent === answeringAgent && addressed;
-        // That bot admitted the sender unpaired, so a group pinned to main
-        // there ignores a stranger whatever the reply settings say.
+        // A stranger on a bot that pairs senders was admitted unpaired, by a
+        // link to another agent. Main ignores them whatever the reply
+        // settings say, even when the link changed since admission.
         const unpairedToMain =
-          agentBot && targetAgent === "main" && (!person || person.id === deps.strangerPersonId);
+          args.pairsSenders === true &&
+          targetAgent === "main" &&
+          (!person || person.id === deps.strangerPersonId);
         const replyToLevels =
           (await settings.get<string[]>("replyToBondLevels")) ?? DEFAULT_REPLY_TO_BOND_LEVELS;
         if (

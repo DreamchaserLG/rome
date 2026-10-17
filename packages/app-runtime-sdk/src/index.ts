@@ -1927,6 +1927,10 @@ export interface ChannelMessageHookDeps {
    * as undefined for every channel.
    */
   linkedAgentOf?: (channelName: string) => string | null | undefined;
+  /** Whether the channel named `channelName` pairs unknown senders before
+   *  they reach an agent, as Telegram, Discord and Feishu bots do. Absent
+   *  reads as false. */
+  pairsSenders?: (channelName: string) => boolean;
 }
 
 export interface ChannelMessageHook {
