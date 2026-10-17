@@ -1,0 +1,48 @@
+cases:
+  - name: LINK-01 Link another agent to a Telegram account
+    tags:
+      - settings
+      - linked-agents
+    steps:
+      - app.open:
+          path: /settings/connections
+      - aiAct: >-
+          In the Connections list, click the Telegram connection row once. Stop as soon as its
+          connection-detail dialog is open.
+      - aiAssert: >-
+          A Telegram connection dialog shows "Connected", and its "Linked agent" field is set to
+          "main".
+      - aiAct: >-
+          Open the "Linked agent" select in the Telegram dialog, then stop with its choices open.
+      - aiAssert: >-
+          The open list offers "None. This account stays silent.", "main", "build", and
+          "sales:agent".
+      - aiAct: >-
+          Choose "build" from the open "Linked agent" list.
+      - aiAssert: >-
+          A notice says "build now answers on Telegram.", and the "Linked agent" field now shows
+          "build".
+  - name: LINK-02 A Discord group follows its account's linked agent
+    tags:
+      - story
+      - settings
+      - linked-agents
+    steps:
+      - app.open:
+          path: /settings/channels
+      - aiAct: >-
+          Scroll the "Rome / can you see active chats?" Discord group card until its "Routing"
+          section is visible, then stop.
+      - aiAssert: >-
+          The group's Routing section shows the Agent set to "main (linked agent)".
+      - aiAct: >-
+          Open the Connections tab of Settings and click the Discord connection row. In the
+          Discord dialog, change "Linked agent" from "main" to "build", then close the dialog.
+      - aiAssert: >-
+          The Connections list is visible with no dialog open, and Discord still shows
+          "Connected".
+      - aiAct: >-
+          Open the Channels tab of Settings and scroll the "Rome / can you see active chats?"
+          Discord group card until its "Routing" section is visible.
+      - aiAssert: >-
+          The group's Routing section now shows the Agent set to "build (linked agent)".
