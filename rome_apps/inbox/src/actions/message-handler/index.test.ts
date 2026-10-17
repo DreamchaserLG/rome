@@ -1199,8 +1199,8 @@ describe("linked agent", () => {
     expect(agentRunner.calls).toHaveLength(0);
   });
 
-  it("holds a stranger's reply for approval unless the envoy approves it outright", async () => {
-    for (const verdict of ["", "Looks fine to me.", "APPROVE"]) {
+  it("holds a stranger's reply for approval unless the envoy's verdict opens with APPROVE", async () => {
+    for (const verdict of ["", "Looks fine to me.", "I cannot APPROVE this.", "APPROVE"]) {
       const { deps, sentMessages } = createMessageHandlerDeps({
         knownAgents: ["main", "sentinel", "envoy", "sales:agent"],
         agentResponses: [

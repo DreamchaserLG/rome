@@ -237,7 +237,8 @@ async function envoyCheck(
   bondLevel: string,
   workingDir?: string,
 ): Promise<{ action: "approve" | "reject" | "require_approval"; reason?: string }> {
-  // A fence the sender cannot guess, so their text cannot close it.
+  // A fence the sender cannot guess, so neither their text nor a reply they
+  // steered can close it.
   const fence = `MSG-${randomUUID()}`;
   const prompt = [
     `Validate this outgoing message before it is sent.`,
@@ -248,8 +249,10 @@ async function envoyCheck(
     fence,
     `Bond level: ${bondLevel}`,
     ``,
-    `Proposed reply:`,
+    `Proposed reply, between the two ${fence} lines:`,
+    fence,
     outgoingText,
+    fence,
   ].join("\n");
 
   const envoyResult = await collectAgentResult(
@@ -279,9 +282,9 @@ async function envoyCheck(
   if (upper.includes("REJECT")) {
     return { action: "reject", reason: envoyOutput };
   }
-  // A stranger's reply goes out only on an explicit approval, since an empty
-  // or garbled verdict may come from text the stranger wrote.
-  if (bondLevel === "other" && !/\bAPPROVE\b/.test(upper)) {
+  // A stranger's reply goes out only on a verdict that opens with APPROVE,
+  // since a garbled or hedged one may come from text the stranger wrote.
+  if (bondLevel === "other" && !/^\s*APPROVE\b/.test(upper)) {
     return { action: "require_approval", reason: envoyOutput };
   }
   return { action: "approve", reason: envoyOutput };
