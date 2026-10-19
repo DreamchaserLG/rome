@@ -3,8 +3,13 @@ import path from "path";
 import { pathToFileURL } from "url";
 import { isQuitting } from "./lifecycle";
 import { ROME_CLOUD_ORIGIN, ROME_CLOUD_PRODUCTION_ORIGIN } from "./rome-cloud";
-import type { RuntimeManager } from "./runtime/manager";
-import { chooseStartupSurface, shouldAutoOpenLocalDashboard } from "./startup-surface";
+import type { ProviderKind } from "./runtime/provider";
+import type { Runtime } from "./runtime/runtime";
+import {
+  chooseStartupSurface,
+  shouldAutoOpenLocalDashboard,
+  shouldReturnToDashboard,
+} from "./startup-surface";
 
 const PRELOAD_PATH = path.join(__dirname, "..", "preload", "index.js");
 const SETTINGS_HTML = path.join(__dirname, "..", "..", "src", "renderer", "settings.html");
@@ -81,10 +86,31 @@ export function contentSecurityPolicy(cloudSources: string): string {
   );
 }
 
-async function loadStartupSurface(
-  win: BrowserWindow,
-  runtimeManager: RuntimeManager,
-): Promise<void> {
+/**
+ * What the main window does when a load fails.
+ *
+ * A hosted Rome's dashboard that does not load is reported, and the window
+ * shows the status page, which stays put until the user retries. The VM's
+ * dashboard keeps its own rule: on ERR_CONNECTION_REFUSED (-102) or
+ * ERR_INTERNET_DISCONNECTED (-106), try again after a pause, since the VM may
+ * be restarting while still reported ready; anything else is left alone.
+ * -3 is a load another navigation replaced, never a failure.
+ */
+export function loadFailureAction(failure: {
+  provider: ProviderKind;
+  errorCode: number;
+  isMainFrame: boolean;
+  onDashboard: boolean;
+}): "report" | "retry" | "ignore" {
+  if (failure.provider === "remote") {
+    return failure.isMainFrame && failure.errorCode !== -3 && failure.onDashboard
+      ? "report"
+      : "ignore";
+  }
+  return failure.errorCode === -102 || failure.errorCode === -106 ? "retry" : "ignore";
+}
+
+async function loadStartupSurface(win: BrowserWindow, runtimeManager: Runtime): Promise<void> {
   const startupSurface = chooseStartupSurface(
     runtimeManager.getDashboardUrl(),
     runtimeManager.isReady(),
@@ -112,7 +138,7 @@ export function shouldNavigateToLocalDashboard(
   return shouldAutoOpenLocalDashboard(currentUrl, ONBOARDING_URL, localDashboardUrl);
 }
 
-export async function createMainWindow(runtimeManager: RuntimeManager): Promise<BrowserWindow> {
+export async function createMainWindow(runtimeManager: Runtime): Promise<BrowserWindow> {
   const win = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -204,9 +230,20 @@ export async function createMainWindow(runtimeManager: RuntimeManager): Promise<
   await loadStartupSurface(win, runtimeManager);
 
   // Retry loading if the web server isn't ready
-  win.webContents.on("did-fail-load", (_event, errorCode, errorDescription) => {
-    if (errorCode === -102 || errorCode === -106) {
-      // ERR_CONNECTION_REFUSED or ERR_INTERNET_DISCONNECTED — retry after 2s
+  win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, url, isMainFrame) => {
+    const status = runtimeManager.getStatus();
+    const action = loadFailureAction({
+      provider: status.provider,
+      errorCode,
+      isMainFrame,
+      onDashboard: !shouldReturnToDashboard(url, runtimeManager.getDashboardUrl()),
+    });
+    if (action === "report") {
+      runtimeManager.reportLoadFailure?.(`${errorDescription} (${errorCode})`);
+      void loadStartupSurface(win, runtimeManager);
+      return;
+    }
+    if (action === "retry") {
       setTimeout(() => {
         if (!win.isDestroyed()) {
           void loadStartupSurface(win, runtimeManager);
