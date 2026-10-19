@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -1115,6 +1115,23 @@ describe("PeoplePage puts its controls in the address", () => {
     // through "we" and "w" to get there.
     await user.click(screen.getByTestId("back"));
     await waitFor(() => expect(address()).toBe("/people/latest"));
+  });
+
+  it("leaves the address alone while an input method is composing", async () => {
+    mockApi({ people: [GUARDIAN, FRIEND] });
+    renderPage();
+
+    await screen.findByText("Wei Chen");
+    const box = searchBox();
+    fireEvent.input(box, { target: { value: "shou" }, isComposing: true });
+    fireEvent.input(box, { target: { value: "shoushi" }, isComposing: true });
+    expect(box.value).toBe("shoushi");
+    expect(address()).toBe("/people/latest");
+
+    fireEvent.input(box, { target: { value: "收拾" }, isComposing: true });
+    fireEvent.compositionEnd(box);
+    await waitFor(() => expect(address()).toBe(`/people/latest?q=${encodeURIComponent("收拾")}`));
+    expect(box.value).toBe("收拾");
   });
 
   it("opens the box on the term its address names, and searches for it", async () => {

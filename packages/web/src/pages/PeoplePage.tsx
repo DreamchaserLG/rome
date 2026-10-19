@@ -5,6 +5,7 @@ import { CircleAlert, RefreshCw } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useComposedInput } from "@/hooks/use-composed-input";
 import { FilterChipGroup } from "@/components/ui/filter-chip-group";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { List } from "@/components/ui/list-row";
@@ -110,6 +111,8 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
       options,
     );
 
+  const searchInput = useComposedInput(search, (next) => go({ search: next }, { replace: true }));
+
   // The view picks the account read: the contacts list, or the recents surface.
   //
   // The chip rides the requests in the stream, where a level is the whole view:
@@ -210,8 +213,7 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
         <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
           <Input
             type="search"
-            value={search}
-            onChange={(e) => go({ search: e.target.value }, { replace: true })}
+            {...searchInput}
             placeholder={t("search.placeholder")}
             aria-label={t("search.label")}
             className="w-full sm:w-72"
