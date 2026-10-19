@@ -16,6 +16,26 @@ afterEach(async () => {
   for (const clean of cleanup.splice(0).reverse()) await clean();
 });
 
+/**
+ * Reserves a daemon port below the OS ephemeral ranges (Linux 32768+, macOS and Windows 49152+).
+ * A `listen(0)` port comes from that range, so after it is released any outbound connection or
+ * other test can take it before the daemon binds (EADDRINUSE). Ports here are only held by
+ * explicit binds, and the check below skips any that are taken.
+ */
+async function freePort() {
+  for (;;) {
+    const port = 20000 + Math.floor(Math.random() * 12000);
+    const server = createServer();
+    const bound = await new Promise<boolean>((resolve) => {
+      server.once("error", () => resolve(false));
+      server.listen(port, "127.0.0.1", () => resolve(true));
+    });
+    if (!bound) continue;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    return port;
+  }
+}
+
 async function listen(server: Server) {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   cleanup.push(async () => {
@@ -41,6 +61,7 @@ async function until(check: () => boolean) {
  */
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "rome-node-transfer-"));
+  const port = await freePort();
   cleanup.push(() =>
     rm(root, { recursive: true, force: true, maxRetries: 5 }).catch((error) => {
       // A stopped daemon can hold observe.db open a little longer, and Windows refuses to remove
@@ -124,7 +145,7 @@ async function fixture() {
   function spawnCli(args: string[], directory: string, cwd = root, input?: Buffer) {
     const child = spawn(process.execPath, [resolve("bin/rome-node.js"), ...args], {
       cwd,
-      env: { ...process.env, ROME_NODE_CONFIG_DIR: directory },
+      env: { ...process.env, ROME_NODE_CONFIG_DIR: directory, ROME_NODE_DAEMON_PORT: String(port) },
       stdio: "pipe",
       windowsHide: true,
     });
@@ -166,7 +187,7 @@ async function fixture() {
 
   const caller = join(root, "caller");
   await writePrivateJson(join(caller, "caller.json"), { cloudUrl, token: tokenFor("c") });
-  cleanup.push(() => stopDaemon(createNodeConfig({ directory: caller })));
+  cleanup.push(() => stopDaemon(createNodeConfig({ directory: caller, port })));
   const cli = async (args: string[], input?: Buffer) => {
     const run = spawnCli(args, caller, root, input);
     const code = await run.exited;
