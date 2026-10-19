@@ -9,9 +9,12 @@ import type {
   ConversationId,
   CurrentActionContext,
   MessageReplyReference,
+  ReplyDeliveryReport,
   RomeSessionRef,
   StreamAgentEvent,
 } from "@rome-os/app-runtime";
+import type { ReplyOutcome } from "../channels/delivery/reply.js";
+import type { ReplyStream, ReplyStreams } from "../channels/delivery/streams.js";
 import type {
   AgentSessionInit,
   AgentSessionKey,
@@ -49,6 +52,9 @@ export interface RunTurnRequest {
   input: AgentTurnInput;
   platformMessageId?: string;
   replyTo?: MessageReplyReference;
+  /** Deliver the reply into the thread as it is written, when reply streaming
+   *  is on and the channel can. See `RunParams.streamReply`. */
+  streamReply?: boolean;
   sessionId?: string;
   hookInvocationContext?: HookInvocationContext;
   actionContext?: CurrentActionContext;
@@ -88,6 +94,8 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     private turnStreams?: AgentTurnStreamRegistry,
     /** Root that worker-requested working dirs must stay inside. Defaults to the profile's projects root. */
     private projectsRoot?: string,
+    /** Streams replies into external channels while reply streaming is on. */
+    private replyStreams?: ReplyStreams,
   ) {}
 
   attach(rpc: IpcRpc, child: ChildProcess): void {
@@ -182,7 +190,18 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           sessionId: session.sessionId,
           turnId: handle.turnId,
         };
-        const workerWatch = interruptTurnOnWorkerDisconnect(rpc, session, handle, turnLogFields);
+        let reply: ReplyStream | null = null;
+        let replyStopped = false;
+        const workerWatch = interruptTurnOnWorkerDisconnect(
+          rpc,
+          session,
+          handle,
+          turnLogFields,
+          () => {
+            replyStopped = true;
+            reply?.stop();
+          },
+        );
         if (this.webchatRepo && conversation.promptPersisted && req.platformMessageId) {
           try {
             await this.webchatRepo.assignConversationMessageTurn(
@@ -195,6 +214,34 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             // turn's events and the worker never learns its turnId.
             workerWatch.interrupt("agent turn setup failed");
             throw err;
+          }
+        }
+
+        // A reply streams only when the caller asked, the setting is on and the
+        // channel can. Otherwise `reply` is null and the caller sends the reply.
+        // A reply that cannot open is the same: it must not fail the turn it
+        // would ride on, whose events nothing would then read.
+        const thread = req.init?.threadContext;
+        if (req.streamReply && thread?.channel && thread.threadId) {
+          try {
+            const opened = await this.replyStreams?.open({
+              channel: thread.channel,
+              conversationId: thread.threadId,
+              ...(req.platformMessageId ? { replyToMessageId: req.platformMessageId } : {}),
+              // The transcript leaves the answer to the reply, so the reply
+              // records it in the conversation the turn is recorded in.
+              romeSessionId,
+              turnId: handle.turnId,
+            });
+            // The worker may have gone away while the reply opened. Nobody is
+            // left to stream to, so the reply is dropped before it writes.
+            if (opened && replyStopped) opened.stop();
+            else reply = opened ?? null;
+          } catch (err) {
+            log.warn("reply stream could not open, the caller sends the reply", {
+              ...turnLogFields,
+              error: err instanceof Error ? err.message : String(err),
+            });
           }
         }
 
@@ -212,6 +259,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                 actionContext: req.actionContext,
                 persistTranscript: true,
                 persistUserTranscript: !conversation.promptPersisted,
+                persistAssistantTranscript: !reply,
               })
             : null;
 
@@ -222,6 +270,11 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           durationMs: Date.now() - requestStartedAt,
         });
 
+        let replySettled = false;
+        // A fault in the reply stream must never break the turn it rides on.
+        let replyBroken = false;
+        const { interrupt } = handle;
+
         const stream = ctx.openStream<StreamAgentEvent>(`agent.turn:${handle.turnId}`);
         // Drain the per-turn events into the IPC stream.
         void (async () => {
@@ -229,7 +282,6 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           try {
             for await (const msg of handle.events) {
               if (!liveStream && msg.type === "turn_start" && this.turnStreams) {
-                const thread = req.init?.threadContext;
                 try {
                   liveStream = this.turnStreams.register({
                     sessionId: msg.sessionId,
@@ -244,7 +296,15 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                         }
                       : {}),
                     ...(thread?.channelUserId ? { initiatorId: thread.channelUserId } : {}),
-                    interrupt: handle.interrupt,
+                    // Stop closes the reply before the provider, so nothing new
+                    // is written while the turn winds down.
+                    interrupt:
+                      reply && interrupt
+                        ? (reason) => {
+                            reply.stop();
+                            return interrupt(reason);
+                          }
+                        : interrupt,
                   });
                 } catch (err) {
                   log.warn("failed to register agent turn stream", {
@@ -260,6 +320,33 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                   source: "agent-session-bridge",
                 });
               }
+              if (reply && !replyBroken) {
+                try {
+                  reply.accept(msg);
+                } catch (err) {
+                  replyBroken = true;
+                  log.warn("reply stream failed, the run continues", {
+                    turnId: handle.turnId,
+                    error: err instanceof Error ? err.message : String(err),
+                  });
+                  reply.stop();
+                }
+              }
+              if (reply && msg.type === "turn_end") {
+                // The caller learns the reply's fate on the turn's last event,
+                // so it never sends a reply the platform already shows. The
+                // turn stays registered until then, so a Stop meanwhile stops
+                // the reply.
+                replySettled = true;
+                const replyDelivery = await settleReply(
+                  reply,
+                  replyBroken || msg.status === "interrupted",
+                  replyBroken,
+                  turnLogFields,
+                );
+                stream.send({ ...msg, replyDelivery });
+                continue;
+              }
               stream.send(msg);
             }
             stream.close();
@@ -271,6 +358,9 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             stream.close({ error: err instanceof Error ? err : new Error(String(err)) });
           } finally {
             workerWatch.release();
+            // A turn that ended without turn_end leaves no caller to report to:
+            // stop writing rather than finish a reply nobody settles.
+            if (reply && !replySettled) void settleReply(reply, true, replyBroken, turnLogFields);
             liveStream?.finish();
           }
         })();
@@ -322,14 +412,17 @@ interface TurnWorkerWatch {
 /**
  * Interrupts `handle`'s turn when `rpc` disconnects. A worker that already
  * disconnected still gets its turn interrupted, because `IpcRpc.onDisconnect`
- * runs a late subscriber on the next microtask. Never throws: an interrupt
- * that fails is logged.
+ * runs a late subscriber on the next microtask. `stopReply` runs first, so a
+ * streamed reply writes nothing more, even when the run has already ended and
+ * only the reply's writes remain. Never throws: an interrupt that fails is
+ * logged.
  */
 function interruptTurnOnWorkerDisconnect(
   rpc: IpcRpc,
   session: AgentSession,
   handle: AgentTurnHandle,
   logFields: Record<string, unknown>,
+  stopReply: () => void,
 ): TurnWorkerWatch {
   let watching = true;
   let offDisconnect: () => void = () => undefined;
@@ -338,6 +431,7 @@ function interruptTurnOnWorkerDisconnect(
     watching = false;
     offDisconnect();
     log.info("interrupting agent turn", { ...logFields, reason });
+    stopReply();
     void (async () => {
       try {
         await (handle.interrupt
@@ -360,4 +454,44 @@ function interruptTurnOnWorkerDisconnect(
     },
     interrupt,
   };
+}
+
+/**
+ * Settles `reply` and says what `turn_end` reports. A reply that cannot settle
+ * may show anything, so it is unknown and its caller does not send it again.
+ */
+async function settleReply(
+  reply: ReplyStream,
+  stopped: boolean,
+  broken: boolean,
+  logFields: Record<string, unknown>,
+): Promise<ReplyDeliveryReport> {
+  try {
+    return reportOf(await reply.settle(stopped), broken);
+  } catch (err) {
+    log.warn("reply stream could not settle", {
+      ...logFields,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { status: "unknown", messageIds: [] };
+  }
+}
+
+/**
+ * What `turn_end` reports. A reply stream that broke was stopped, which is not
+ * what happened to the user: they were shown whatever it wrote before it broke.
+ * Only a reply that certainly wrote nothing is safe to send again, so a create
+ * whose result is unknown keeps the reply unknown.
+ */
+function reportOf(outcome: ReplyOutcome, broken: boolean): ReplyDeliveryReport {
+  const messageIds = outcome.parts.flatMap((part) =>
+    part.receipt ? [part.receipt.messageId] : [],
+  );
+  const status =
+    !broken || outcome.status === "unknown"
+      ? outcome.status
+      : messageIds.length
+        ? "partial"
+        : "failed";
+  return { status, messageIds };
 }

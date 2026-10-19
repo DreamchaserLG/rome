@@ -134,6 +134,7 @@ interface SettingsData {
   enableModelSelector?: boolean;
   enableFable?: boolean;
   enableImpersonation?: boolean;
+  enableReplyStreaming?: boolean;
   showAiToolUsage?: boolean;
   tierModelMappings?: TierModelMappings;
 }
@@ -1021,6 +1022,7 @@ function AdvancedSection({
         </Section>
         <ComputerUseSection />
         <PresentationModeSection />
+        <ExperimentalFeaturesSection settings={settings} onSave={onSave} saving={saving} />
         <DeveloperSettingsSection settings={settings} onSave={onSave} saving={saving} />
         {showEasterEgg && <AdvancedEasterEggOverlay onClose={() => setShowEasterEgg(false)} />}
       </Section>
@@ -1538,6 +1540,48 @@ function ImpersonationAdvancedSection({
       onChange={toggle}
       disabled={saving}
     />
+  );
+}
+
+/** Features still being tried out, each off until a guardian switches it on.
+ *  Reply streaming is the first: with it off, Rome sends each reply whole. The
+ *  setting is `enableReplyStreaming`, read by the host on every reply. */
+function ExperimentalFeaturesSection({
+  settings,
+  onSave,
+  saving,
+}: {
+  settings: SettingsData;
+  onSave: (p: Record<string, unknown>) => Promise<void>;
+  saving: boolean;
+}) {
+  const { t } = useTranslation("settings");
+  const [replyStreaming, setReplyStreaming] = useState(settings.enableReplyStreaming ?? false);
+
+  function toggleReplyStreaming(next: boolean) {
+    setReplyStreaming(next);
+    void onSave({ enableReplyStreaming: next });
+  }
+
+  return (
+    <Section>
+      <SectionHeader>
+        <SectionHeading>
+          <SectionTitle>{t("advanced.experimental.title")}</SectionTitle>
+          <SectionDescription>{t("advanced.experimental.description")}</SectionDescription>
+        </SectionHeading>
+      </SectionHeader>
+      <FormRows>
+        <SettingsToggleRow
+          title={t("advanced.experimental.replyStreaming.title")}
+          description={t("advanced.experimental.replyStreaming.description")}
+          label={t("advanced.experimental.replyStreaming.toggleLabel")}
+          checked={replyStreaming}
+          onChange={toggleReplyStreaming}
+          disabled={saving}
+        />
+      </FormRows>
+    </Section>
   );
 }
 
