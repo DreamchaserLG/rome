@@ -6,6 +6,7 @@ import { useState } from "react";
 import { MemoryRouter, useLocation, useNavigationType } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { romeNewsConfig } from "@/config/quick-entries";
+import { loadNewChatDraft, saveNewChatDraft } from "@/lib/new-chat-draft-storage";
 import i18n from "@/i18n";
 import { ChatComponent, type ChatComponentProps, GREETING_ONLY_HOME_KEY } from "./ChatComponent";
 import * as chatModule from "./Chat" with { rstest: "importActual" };
@@ -73,7 +74,7 @@ function LocationProbe() {
   const location = useLocation();
   const navigationType = useNavigationType();
   return (
-    <output data-testid="chat-location">
+    <output data-testid="chat-location" data-state={JSON.stringify(location.state)}>
       {location.pathname}
       {location.search} {navigationType}
     </output>
@@ -95,6 +96,7 @@ afterEach(async () => {
   chatStub.enabled = false;
   romeNewsConfig.enabled = false;
   localStorage.clear();
+  sessionStorage.clear();
   rs.restoreAllMocks();
   rs.unstubAllGlobals();
   await i18n.changeLanguage("en");
@@ -133,8 +135,13 @@ function ChatHost({
   ...props
 }: Partial<ChatComponentProps>) {
   const [sessionId, setSessionId] = useState(initialSessionId);
+  const { state } = useLocation();
   return (
     <ChatComponent
+      initialDraftText={state?.draft}
+      initialSkillName={state?.skill}
+      initialProjectName={state?.projectPath}
+      initialAgentMention={state?.agentMention}
       {...props}
       sessionId={sessionId}
       onSessionCreated={(id) => {
@@ -151,11 +158,12 @@ function renderChatComponent(
     sessions: Array<Record<string, unknown>>;
     projects: Array<Record<string, unknown>>;
     newsFeed?: unknown;
-    createSession?: () => Response;
+    createSession?: () => Response | Promise<Response>;
+    postTurn?: () => Response;
     // Holds the session list back until it resolves.
     sessionsGate?: Promise<void>;
   },
-  initialEntry = "/chat",
+  initialEntry: string | { pathname: string; state: Record<string, unknown> } = "/chat",
 ) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -188,7 +196,9 @@ function renderChatComponent(
       return Response.json([]);
     }
     if (/\/api\/chat\/sessions\/[^/]+\/turns$/.test(url)) {
-      return init?.method === "POST" ? Response.json({ turnId: "turn-1" }) : Response.json([]);
+      return init?.method === "POST"
+        ? (homeData?.postTurn?.() ?? Response.json({ turnId: "turn-1" }))
+        : Response.json([]);
     }
     if (url === "/api/chat/projects") {
       return Response.json({
@@ -645,9 +655,145 @@ describe("ChatComponent first send", () => {
 
     expect(await screen.findByText("Chat limit reached")).toBeTruthy();
     expect(composer.value).toBe("Hello Rome");
+    expect(loadNewChatDraft()?.text).toBe("Hello Rome");
     expect(screen.getByRole("textbox")).toBe(composer);
     expect(screen.queryByTestId("message-list")).toBeNull();
     expect(onSessionCreated).not.toHaveBeenCalled();
     expect(fetchSpy.mock.calls.some(([url]) => String(url).endsWith("/turns"))).toBe(false);
+  });
+});
+
+describe("New chat draft boundaries", () => {
+  it("replaces explicit prefill fields and consumes history state", async () => {
+    saveNewChatDraft({
+      version: 1,
+      text: "saved",
+      projectPath: "old-project",
+      agentMention: null,
+      skill: { name: "old-skill" },
+      personaId: "",
+    });
+    const agentMention = { appId: "app", agentName: "agent", appLabel: "App" };
+    renderChatComponent({}, undefined, {
+      pathname: "/chat",
+      state: { draft: "explicit", skill: "new-skill", projectPath: "new-project", agentMention },
+    });
+    await waitFor(() =>
+      expect(loadNewChatDraft()).toMatchObject({
+        text: "explicit",
+        projectPath: "new-project",
+        skill: { name: "new-skill" },
+        agentMention,
+      }),
+    );
+    expect(screen.getByTestId("chat-location").getAttribute("data-state")).toBe("null");
+    fireEvent.input(screen.getByRole("textbox"), { target: { value: "edited" } });
+    expect(loadNewChatDraft()?.text).toBe("edited");
+  });
+
+  it("consumes prefill and widget keys while preserving other history state", async () => {
+    const otherState = { futureKey: { keep: true } };
+    renderChatComponent({}, undefined, {
+      pathname: "/chat",
+      state: {
+        ...otherState,
+        widgets: [{ type: "app", appId: "app" }],
+        draft: "explicit",
+        skill: "skill",
+        projectPath: "project",
+        agentMention: { appId: "app", agentName: "agent", appLabel: "App" },
+        agentName: "agent",
+      },
+    });
+    await waitFor(() =>
+      expect(JSON.parse(screen.getByTestId("chat-location").getAttribute("data-state")!)).toEqual(
+        otherState,
+      ),
+    );
+    expect(loadNewChatDraft()?.text).toBe("explicit");
+  });
+
+  it("text-only prefill removes the saved skill", async () => {
+    saveNewChatDraft({
+      version: 1,
+      text: "saved",
+      projectPath: "default",
+      agentMention: null,
+      skill: { name: "old-skill" },
+      personaId: "",
+    });
+    renderChatComponent({}, undefined, { pathname: "/chat", state: { draft: "explicit" } });
+    await waitFor(() =>
+      expect(loadNewChatDraft()).toMatchObject({ text: "explicit", skill: null }),
+    );
+    expect(screen.queryByRole("button", { name: "Remove skill" })).toBeNull();
+  });
+
+  it("skill-only prefill keeps the saved text", async () => {
+    saveNewChatDraft({
+      version: 1,
+      text: "unsent task",
+      projectPath: "default",
+      agentMention: null,
+      skill: null,
+      personaId: "",
+    });
+    renderChatComponent({}, undefined, { pathname: "/chat", state: { skill: "new-skill" } });
+    await waitFor(() =>
+      expect(loadNewChatDraft()).toMatchObject({
+        text: "unsent task",
+        skill: { name: "new-skill" },
+      }),
+    );
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("unsent task");
+  });
+
+  it("does not resurrect a failed first turn after the session exists and a retry succeeds", async () => {
+    let attempts = 0;
+    renderChatComponent(
+      {},
+      {
+        sessions: [],
+        projects: [],
+        postTurn: () =>
+          ++attempts === 1
+            ? Response.json({ error: "try again" }, { status: 500 })
+            : Response.json({ turnId: "turn-1" }),
+      },
+    );
+    fireEvent.input(screen.getByRole("textbox"), { target: { value: "retry me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("retry me"),
+    );
+    expect(loadNewChatDraft()).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(attempts).toBe(2));
+    expect(loadNewChatDraft()).toBeNull();
+  });
+
+  it("posts the first turn even if navigation unmounts the composer during creation", async () => {
+    let resolveCreate!: (response: Response) => void;
+    const creation = new Promise<Response>((resolve) => {
+      resolveCreate = resolve;
+    });
+    const { unmount, fetchSpy } = renderChatComponent(
+      {},
+      { sessions: [], projects: [], createSession: () => creation },
+    );
+    fireEvent.input(screen.getByRole("textbox"), { target: { value: "complete this send" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    unmount();
+    await act(async () => resolveCreate(Response.json({ id: "created-after-leaving" })));
+    await waitFor(() =>
+      expect(
+        fetchSpy.mock.calls.some(
+          ([url, init]) =>
+            String(url) === "/api/chat/sessions/created-after-leaving/turns" &&
+            init?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+    expect(loadNewChatDraft()).toBeNull();
   });
 });

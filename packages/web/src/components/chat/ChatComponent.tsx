@@ -97,28 +97,39 @@ export function ChatComponent({
     if (!sessionId && !coarsePointer) composerRef.current?.focus();
   }, [sessionId, coarsePointer]);
 
-  // Seed the draft composer once per provided draft. insertText (vs. a
-  // useState seed in the composer) also fixes up textarea height and cursor.
-  const appliedDraftRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!initialDraftText || sessionId) return;
-    if (appliedDraftRef.current === initialDraftText) return;
-    appliedDraftRef.current = initialDraftText;
-    composerRef.current?.insertText(initialDraftText, { focus: !coarsePointer });
-  }, [initialDraftText, sessionId, coarsePointer]);
-
-  // Same once-per-value seeding for a structured skill selection — the chip
-  // counterpart of the draft text.
-  const appliedSkillRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!initialSkillName || sessionId) return;
-    if (appliedSkillRef.current === initialSkillName) return;
-    appliedSkillRef.current = initialSkillName;
-    composerRef.current?.setSkillSelection({ name: initialSkillName });
-  }, [initialSkillName, sessionId]);
-
   const navigate = useNavigate();
   const location = useLocation();
+  useEffect(() => {
+    if (sessionId) return;
+    const hasTextOrSkill = initialDraftText !== undefined || initialSkillName !== undefined;
+    if (hasTextOrSkill) {
+      // A skill-only entry (the Skills app with a blank task) keeps the unsent text.
+      if (initialDraftText !== undefined)
+        composerRef.current?.insertText(initialDraftText, { focus: !coarsePointer });
+      composerRef.current?.setSkillSelection(initialSkillName ? { name: initialSkillName } : null);
+    }
+    const state = { ...location.state };
+    // FreeGrid's effect consumes this render's widgets even after history state is stripped.
+    const prefillKeys = ["draft", "skill", "projectPath", "agentMention", "agentName", "widgets"];
+    if (!prefillKeys.some((key) => key in state)) return;
+    for (const key of prefillKeys) delete state[key];
+    navigate(location.pathname + location.search, {
+      replace: true,
+      state: Object.keys(state).length ? state : null,
+    });
+  }, [
+    sessionId,
+    initialDraftText,
+    initialSkillName,
+    initialProjectName,
+    initialAgentMention,
+    coarsePointer,
+    navigate,
+    location.pathname,
+    location.search,
+    location.state,
+  ]);
+
   const hideSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
   const handleSessionNotFound = useCallback(
     (missingSessionId: string) => {

@@ -6,6 +6,11 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { normalizeBondLevel, type PeopleList, type PersonResource } from "@rome/api-types/people";
+import {
+  loadNewChatDraft,
+  saveNewChatDraft,
+  type NewChatDraft,
+} from "@/lib/new-chat-draft-storage";
 import i18n from "@/i18n";
 import {
   ChatComposer,
@@ -20,6 +25,8 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
+  sessionStorage.clear();
+  localStorage.clear();
   rs.restoreAllMocks();
   rs.unstubAllGlobals();
 });
@@ -54,6 +61,7 @@ function peopleList(people: PersonResource[]): PeopleList {
 interface RenderComposerOptions {
   composerRef?: Ref<ChatComposerHandle>;
   settings?: Record<string, unknown>;
+  settingsPromise?: Promise<Record<string, unknown>>;
   /** What `GET /api/people` answers. Defaults to a listing with nobody in it. */
   people?: PersonResource[];
 }
@@ -66,7 +74,8 @@ function renderComposer(props: Partial<ChatComposerProps>, options: RenderCompos
   ) => {
     const url = String(input);
     if (url === "/api/settings") {
-      return Response.json({ guardianName: "Ada", ...options.settings });
+      const settings = options.settingsPromise ? await options.settingsPromise : options.settings;
+      return Response.json({ guardianName: "Ada", ...settings });
     }
     if (url === "/api/people") return Response.json(peopleList(options.people ?? []));
     if (url === "/api/skills") {
@@ -316,11 +325,9 @@ describe("composer attachment uploads", () => {
 
   it("keeps the typed message on screen for the whole upload, then clears it", async () => {
     let resolveSend: (() => void) | null = null;
-    let controls: ChatComposerSendControls | null = null;
     const onSend = rs.fn(
-      (_snapshot, nextControls: ChatComposerSendControls) =>
+      () =>
         new Promise<void>((resolve) => {
-          controls = nextControls;
           resolveSend = resolve;
         }),
     );
@@ -731,5 +738,319 @@ describe("composer focus on send", () => {
     fireEvent.click(send);
 
     expect(document.activeElement).not.toBe(textarea);
+  });
+});
+
+describe("New chat draft", () => {
+  const empty: NewChatDraft = {
+    version: 1,
+    text: "",
+    projectPath: "default",
+    agentMention: null,
+    skill: null,
+    personaId: "",
+  };
+  const draft: NewChatDraft = {
+    ...empty,
+    text: "  中文🙂\nunsent  ",
+    projectPath: "research",
+    agentMention: { appId: "app", agentName: "app/agent", appLabel: "App" },
+    skill: { name: "skill" },
+    personaId: "person",
+  };
+  const input = () => screen.getByRole("textbox") as HTMLTextAreaElement;
+
+  it("synchronously restores text and context on remount, without waiting for identity or settings", async () => {
+    saveNewChatDraft(draft);
+    let resolveSettings!: (value: Record<string, unknown>) => void;
+    const settingsPromise = new Promise<Record<string, unknown>>((resolve) => {
+      resolveSettings = resolve;
+    });
+    const first = renderComposer(
+      { persistNewChatDraft: true, showProjectSelector: true },
+      { settingsPromise },
+    );
+    expect(input().value).toBe(draft.text);
+    expect(input().selectionStart).toBe(draft.text.length);
+    fireEvent.input(input(), { target: { value: "edited before settings" } });
+    await act(async () => resolveSettings({ enableImpersonation: true }));
+    expect(loadNewChatDraft()).toEqual({ ...draft, text: "edited before settings" });
+    first.unmount();
+    renderComposer({ persistNewChatDraft: true }, { settings: { enableImpersonation: true } });
+    expect(input().value).toBe("edited before settings");
+    expect(loadNewChatDraft()).toEqual({ ...draft, text: "edited before settings" });
+  });
+
+  it.each([
+    "send",
+    "submit",
+  ])("includes the restored persona before settings resolve (%s)", async (method) => {
+    saveNewChatDraft(draft);
+    const composerRef = createRef<ChatComposerHandle>();
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderComposer(
+      { persistNewChatDraft: true, onSend },
+      {
+        composerRef,
+        settingsPromise: new Promise<Record<string, unknown>>(() => {}),
+      },
+    );
+    expect(composerRef.current?.getMetadataSnapshot().personaId).toBe(draft.personaId);
+    if (method === "send") fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    else act(() => composerRef.current?.submit("Quick entry"));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][0].personaId).toBe(draft.personaId);
+  });
+
+  it("focuses without moving the current selection after restoring the end caret", () => {
+    saveNewChatDraft(draft);
+    const composerRef = createRef<ChatComposerHandle>();
+    renderComposer({ persistNewChatDraft: true }, { composerRef });
+    expect([input().selectionStart, input().selectionEnd]).toEqual([
+      draft.text.length,
+      draft.text.length,
+    ]);
+    act(() => composerRef.current?.focus());
+    expect(document.activeElement).toBe(input());
+    expect([input().selectionStart, input().selectionEnd]).toEqual([
+      draft.text.length,
+      draft.text.length,
+    ]);
+    input().setSelectionRange(2, 5);
+    input().blur();
+    act(() => composerRef.current?.focus());
+    expect(document.activeElement).toBe(input());
+    expect([input().selectionStart, input().selectionEnd]).toEqual([2, 5]);
+  });
+
+  it("does not save an old composer's edits after another tab changes auth", () => {
+    saveNewChatDraft(draft);
+    const first = renderComposer(
+      { persistNewChatDraft: true },
+      { settings: { enableImpersonation: true } },
+    );
+    expect(input().value).toBe(draft.text);
+    localStorage.setItem("rome:auth-epoch", "other-tab-logout");
+    fireEvent.input(input(), { target: { value: "edited old user's text" } });
+    expect(sessionStorage.getItem("rome:new-chat-draft")).toBeNull();
+    first.unmount();
+    renderComposer({ persistNewChatDraft: true });
+    expect(input().value).toBe("");
+  });
+
+  it("does not write a failed snapshot back after another tab changes auth", async () => {
+    const composerRef = createRef<ChatComposerHandle>();
+    let rejectSend!: (error: Error) => void;
+    renderComposer(
+      {
+        persistNewChatDraft: true,
+        onSend: () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectSend = reject;
+          }),
+      },
+      { composerRef },
+    );
+    act(() => composerRef.current?.addFiles([new File(["fixture"], "notes.txt")]));
+    fireEvent.input(input(), { target: { value: "old user's message" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    localStorage.setItem("rome:auth-epoch", "other-tab-logout");
+    await act(async () => rejectSend(new Error("create failed")));
+    expect(sessionStorage.getItem("rome:new-chat-draft")).toBeNull();
+  });
+
+  it("keeps deletion deleted on remount", () => {
+    saveNewChatDraft({ ...empty, text: "delete me" });
+    const first = renderComposer({ persistNewChatDraft: true });
+    fireEvent.input(input(), { target: { value: "" } });
+    expect(loadNewChatDraft()).toBeNull();
+    first.unmount();
+    renderComposer({ persistNewChatDraft: true });
+    expect(input().value).toBe("");
+  });
+
+  it("clears text and context storage at send start", () => {
+    saveNewChatDraft(draft);
+    renderComposer(
+      { persistNewChatDraft: true, onSend: () => new Promise<void>(() => {}) },
+      { settings: { enableImpersonation: true } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(input().value).toBe("");
+    expect(loadNewChatDraft()).toBeNull();
+  });
+
+  it.each([
+    false,
+    true,
+  ])("restores a failed send locally, but saves only before session creation (created %s)", async (created) => {
+    saveNewChatDraft(draft);
+    const onSend = rs.fn((_snapshot, controls: ChatComposerSendControls) => {
+      if (created) controls.onSessionCreated?.();
+      return Promise.reject(new Error(created ? "postTurn failed" : "createSession failed"));
+    });
+    renderComposer(
+      { persistNewChatDraft: true, onSend },
+      { settings: { enableImpersonation: true } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(input().value).toBe(draft.text));
+    expect(loadNewChatDraft()).toEqual(created ? null : draft);
+  });
+
+  it("restores storage after an attachment send fails before session creation", async () => {
+    saveNewChatDraft(draft);
+    const composerRef = createRef<ChatComposerHandle>();
+    let rejectSend!: (error: Error) => void;
+    const first = renderComposer(
+      {
+        persistNewChatDraft: true,
+        onSend: () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectSend = reject;
+          }),
+      },
+      { composerRef, settings: { enableImpersonation: true } },
+    );
+    act(() => composerRef.current?.addFiles([new File(["fixture"], "notes.txt")]));
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(input().value).toBe(draft.text);
+    expect(input().disabled).toBe(true);
+    expect(loadNewChatDraft()).toBeNull();
+    await act(async () => rejectSend(new Error("create failed")));
+    await waitFor(() => expect(loadNewChatDraft()).toEqual(draft));
+    expect(input().value).toBe(draft.text);
+    expect(input().disabled).toBe(false);
+    first.unmount();
+    renderComposer({ persistNewChatDraft: true }, { settings: { enableImpersonation: true } });
+    expect(input().value).toBe(draft.text);
+    expect(screen.queryByText("notes.txt")).toBeNull();
+  });
+
+  it.each([
+    false,
+    true,
+  ])("clears in-flight edits on adoption only while the original composer is mounted (unmounted %s)", async (unmounted) => {
+    let adopt!: () => void;
+    const first = renderComposer({
+      persistNewChatDraft: true,
+      onSend: (_snapshot, controls) =>
+        new Promise<void>((resolve) => {
+          adopt = () => {
+            controls.onSessionCreated?.();
+            resolve();
+          };
+        }),
+    });
+    fireEvent.input(input(), { target: { value: "first send" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    if (unmounted) {
+      first.unmount();
+      renderComposer({ persistNewChatDraft: true });
+    }
+    fireEvent.input(input(), { target: { value: "newer draft" } });
+    expect(loadNewChatDraft()?.text).toBe("newer draft");
+    await act(async () => adopt());
+    expect(input().value).toBe("newer draft");
+    expect(loadNewChatDraft()?.text ?? null).toBe(unmounted ? "newer draft" : null);
+  });
+
+  it("restores a failed create despite a context-only record from late settings", async () => {
+    saveNewChatDraft(draft);
+    let resolveSettings!: (settings: Record<string, unknown>) => void;
+    const settingsPromise = new Promise<Record<string, unknown>>((resolve) => {
+      resolveSettings = resolve;
+    });
+    let rejectCreate!: (error: Error) => void;
+    renderComposer(
+      {
+        persistNewChatDraft: true,
+        onSend: () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectCreate = reject;
+          }),
+      },
+      { settingsPromise },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(input().value).toBe("");
+    expect(loadNewChatDraft()).toBeNull();
+    await act(async () => resolveSettings({ enableImpersonation: false }));
+    await waitFor(() => expect(loadNewChatDraft()).toMatchObject({ text: "", personaId: "" }));
+    await act(async () => rejectCreate(new Error("create failed")));
+    expect(input().value).toBe(draft.text);
+    expect(loadNewChatDraft()).toMatchObject({ text: draft.text, personaId: "" });
+  });
+
+  it("does not replace a newer draft on failure", async () => {
+    let reject!: (error: Error) => void;
+    renderComposer({
+      persistNewChatDraft: true,
+      onSend: () =>
+        new Promise<void>((_resolve, fail) => {
+          reject = fail;
+        }),
+    });
+    fireEvent.input(input(), { target: { value: "first" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    fireEvent.input(input(), { target: { value: "newer" } });
+    await act(async () => reject(new Error("create failed")));
+    expect(input().value).toBe("newer");
+    expect(loadNewChatDraft()?.text).toBe("newer");
+  });
+
+  it("restores an existing-session send over newer text as on main", async () => {
+    let rejectSend!: (error: Error) => void;
+    renderComposer({
+      persistNewChatDraft: false,
+      onSend: () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectSend = reject;
+        }),
+    });
+    fireEvent.input(input(), { target: { value: "failed message" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    fireEvent.input(input(), { target: { value: "newer text" } });
+    await act(async () => rejectSend(new Error("post failed")));
+    expect(input().value).toBe("failed message");
+  });
+
+  it("does not load or persist an existing-session composer's edits", () => {
+    saveNewChatDraft(draft);
+    renderComposer({ persistNewChatDraft: false });
+    expect(input().value).toBe("");
+    fireEvent.input(input(), { target: { value: "session reply" } });
+    expect(loadNewChatDraft()).toEqual(draft);
+  });
+
+  it("drops a restored persona only when settings confirm impersonation is disabled", async () => {
+    saveNewChatDraft(draft);
+    renderComposer({ persistNewChatDraft: true }, { settings: { enableImpersonation: false } });
+    await waitFor(() => expect(loadNewChatDraft()?.personaId).toBe(""));
+    expect(loadNewChatDraft()?.text).toBe(draft.text);
+  });
+
+  it("keeps an unrelated draft and selected skill/uploads when Rome News submits its own prompt", async () => {
+    saveNewChatDraft(draft);
+    const composerRef = createRef<ChatComposerHandle>();
+    const onSend = rs.fn((_snapshot, controls: ChatComposerSendControls) => {
+      controls.onSessionCreated?.();
+      return Promise.resolve();
+    });
+    renderComposer(
+      { persistNewChatDraft: true, onSend },
+      { composerRef, settings: { enableImpersonation: true } },
+    );
+    const file = new File(["fixture"], "notes.txt");
+    act(() => composerRef.current?.addFiles([file]));
+    await act(async () => composerRef.current?.submit("News prompt"));
+    expect(onSend.mock.calls[0][0]).toMatchObject({
+      text: "News prompt",
+      skillName: "skill",
+      uploads: [{ file }],
+    });
+    expect(input().value).toBe(draft.text);
+    expect(loadNewChatDraft()).toEqual(draft);
+    expect(screen.getByRole("button", { name: "Remove skill" })).toBeTruthy();
   });
 });

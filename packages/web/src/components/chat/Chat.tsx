@@ -1387,6 +1387,7 @@ export function Chat({
             agentName: snapshot.agentMention?.agentName,
           });
           sendingSessionId = created.id;
+          controls.onSessionCreated?.();
         } catch (error) {
           setStreamError(
             error instanceof ChatApiError && error.message
@@ -2036,6 +2037,7 @@ export function Chat({
                     </div>
                   ) : (
                     <ChatComposer
+                      persistNewChatDraft={!mainSessionId}
                       ref={composerRef}
                       // The box look lives on the composer now so the chip row can sit
                       // outside it; this mount adds the floating blur/translucency.
