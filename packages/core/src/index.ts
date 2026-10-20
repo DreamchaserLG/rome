@@ -110,6 +110,7 @@ import { ActionRegistryImpl } from "./actions/registry.js";
 import { ActionLoader } from "./actions/loader.js";
 import { ActionEngine } from "./actions/engine.js";
 import { readMemoryHeadroom } from "./actions/memory-headroom.js";
+import { defaultWorkerCap } from "./actions/worker-cap.js";
 import { bumpModuleEnvEpoch } from "./actions/module-loader.js";
 import { ActionWorkerCoordinator } from "./actions/action-subprocess.js";
 import { endInterruptedRuns } from "./actions/restart-recovery.js";
@@ -589,6 +590,18 @@ async function main() {
 
   const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, serviceOfChannel);
 
+  // The worker cap bounds memory, so its default follows the instance's
+  // memory: the fixed 8 was tight on 4 GB and idle on 16 GB. The limit comes
+  // from the same reader the memory gate uses, so the cap and the gate size
+  // the instance the same way, and where the gate has no reading the cap
+  // keeps the fixed default.
+  const instanceMemory = readMemoryHeadroom()?.limitBytes ?? null;
+  const maxWorkerProcesses = config.actionWorkerMaxProcesses ?? defaultWorkerCap(instanceMemory);
+  log.info("action worker cap", {
+    maxWorkers: maxWorkerProcesses,
+    source: config.actionWorkerMaxProcesses === undefined ? "memory" : "env",
+    instanceMemoryMB: instanceMemory === null ? null : Math.round(instanceMemory / 1_048_576),
+  });
   const actionEngine = new ActionEngine(
     actionRegistry,
     { executions: actionExecutionsRepo, approvals: approvalsRepo, journal: executionJournalRepo },
@@ -596,7 +609,7 @@ async function main() {
       tracer: tracer,
       processRole: "main",
       onWorkerInterrupted: createHostWorkerRecovery(actionExecutionsRepo),
-      maxWorkerProcesses: config.actionWorkerMaxProcesses,
+      maxWorkerProcesses,
       memoryHeadroom: readMemoryHeadroom,
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
       onApprovalCreated: (approval) => sendApprovalCard(channelsService, approval),
