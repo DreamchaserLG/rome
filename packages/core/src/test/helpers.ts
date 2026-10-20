@@ -564,7 +564,8 @@ export async function buildTestDeps(
   const actionEngine = new ActionEngine(
     actionRegistry,
     { executions: actionExecutionsRepo, approvals: approvalsRepo, journal: executionJournalRepo },
-    { processRole: "main" },
+    // The host running the tests has no say over queued roots.
+    { processRole: "main", memoryHeadroom: () => null },
   );
 
   const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };

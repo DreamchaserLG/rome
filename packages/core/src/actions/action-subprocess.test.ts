@@ -186,6 +186,7 @@ describe("main-owned action subprocess", () => {
     const sessionAttach = rs.fn();
     const engine = new ActionEngine(new ActionRegistryImpl(), createActionEngineRepos(), {
       processRole: "main",
+      memoryHeadroom: () => null,
       workerWarmPoolSize: 0,
       actionWorkerFork: processFactory,
     });
@@ -552,6 +553,7 @@ describe("main-owned action subprocess", () => {
     registry.register(buildAction("action_a"));
     const engine = new ActionEngine(registry, createActionEngineRepos(), {
       processRole: "main",
+      memoryHeadroom: () => null,
       workerWarmPoolSize: 0,
       actionWorkerFork: () => children.shift() as unknown as ChildProcess,
     });
@@ -615,6 +617,7 @@ describe("main-owned action subprocess", () => {
     registry.register(buildAction("action_b"));
     const engine = new ActionEngine(registry, createActionEngineRepos(), {
       processRole: "main",
+      memoryHeadroom: () => null,
       workerWarmPoolSize: 0,
       actionWorkerFork: () => detachedChild as unknown as ChildProcess,
     });

@@ -33,6 +33,7 @@ import {
   type ActionWorkerPayload,
   type ActionWorkerShutdown,
 } from "./worker-protocol.js";
+import type { MemoryHeadroomReader } from "./memory-headroom.js";
 import {
   normalizeActionEvent,
   type ActionInvocationObserver,
@@ -113,6 +114,19 @@ const DEFAULT_QUEUED_ROOT_MAX_WAIT_MS = 10 * 60_000;
  * callers — agent tool calls, nested delegations, interactive turns — whose
  * caller often holds a worker of its own and cannot wait for one. */
 const RESERVED_WORKER_SLOTS = 2;
+/** A queued root starts only while the instance's available memory is at least
+ * this share of its limit. One line, no latch: each start is judged against a
+ * reading taken just before it, so a started root stops the next start once
+ * its usage shows in a later reading, and a finished root lets the next one go.
+ * Roots admitted on one reading start together. Fail-fast callers never see
+ * the gate: their caller may hold a worker and cannot wait. */
+const MEMORY_HOLD_FRACTION = 0.15;
+/** How often a held queue re-reads memory. Memory can recover without any
+ * worker exiting, so the queue cannot rely on slot changes alone. */
+const QUEUE_MEMORY_RECHECK_MS = 5_000;
+/** A reading that hovers at the line crosses it on many rechecks. The gate logs
+ * a crossing at most this often, so a long hold costs two lines, not hundreds. */
+const MEMORY_LOG_INTERVAL_MS = 60_000;
 
 export interface ActionRunContext {
   initiator?: string;
@@ -196,6 +210,12 @@ interface ActionEngineOptions {
   /** How long a queued root waits for a worker before it fails with
    * {@link ActionWorkerCapacityError}. Defaults to ten minutes. */
   queuedRootMaxWaitMs?: number;
+  /** Reads the instance's memory headroom when a queued root could take a
+   * worker. The default reads nothing, so an engine built without it never
+   * holds the queue; the production wiring passes `readMemoryHeadroom`, which
+   * reads the cgroup limit, then Linux's `/proc/meminfo` (the Mac app reads
+   * its Lima VM's). Tests inject a controllable reading. */
+  memoryHeadroom?: MemoryHeadroomReader;
   /**
    * Number of already-initialized action workers to keep ready in the main
    * process. Root actions take a ready worker and fall back
@@ -290,6 +310,9 @@ interface ActiveRootProcess {
 interface QueuedRoot {
   rootExecutionId: string;
   queuedAt: number;
+  /** Set once the memory gate holds this root, so a timeout names the reason
+   * this root waited rather than the gate's state at the deadline. */
+  heldByMemory: boolean;
   deadline: ClockTimer;
   admit: (worker: ActionWorkerProcess) => void;
   reject: (error: Error) => void;
@@ -342,6 +365,13 @@ export class ActionEngine {
   private maxWorkerProcesses: number;
   private queuedRootMaxWaitMs: number;
   private queuedRoots: QueuedRoot[] = [];
+  private memoryHeadroom: MemoryHeadroomReader;
+  /** Whether the last reading was short. Steers the log lines only, so a long
+   * hold logs its start and its end rather than every recheck. */
+  private memoryShort = false;
+  /** When the gate last logged a crossing of the line. */
+  private memoryLoggedAt: number | null = null;
+  private queueRecheckTimer: ClockTimer | null = null;
   private workerWarmPoolStarted = false;
   private workerPoolGeneration = 0;
   private warmWorkers = new Set<ActionWorkerProcess>();
@@ -375,6 +405,17 @@ export class ActionEngine {
         ? Math.max(1, Math.floor(options?.maxWorkerProcesses ?? Number.POSITIVE_INFINITY))
         : 0;
     this.queuedRootMaxWaitMs = options?.queuedRootMaxWaitMs ?? DEFAULT_QUEUED_ROOT_MAX_WAIT_MS;
+    this.memoryHeadroom = options?.memoryHeadroom ?? (() => null);
+    if (this.processRole === "main") {
+      // One line at boot says which reading the gate will trust, so a wrong
+      // source on a new kind of host shows up without waiting for a hold.
+      const sample = this.memoryHeadroom();
+      log.info("memory gate reading", {
+        source: sample?.source ?? "none",
+        limitMB: sample ? Math.round(sample.limitBytes / 1_048_576) : null,
+        availableMB: sample ? Math.round(sample.availableBytes / 1_048_576) : null,
+      });
+    }
   }
 
   setWorkerRpcServer(server: WorkerRpcServer | null): void {
@@ -1260,7 +1301,11 @@ export class ActionEngine {
    * `queuedRootMaxWaitMs`, or with ActionCancelledError when `cancel()` names
    * the root first. */
   private waitForRootWorker(rootExecutionId: string): Promise<ActionWorkerProcess> {
-    if (this.queuedRoots.length === 0 && this.canAdmitQueuedRoot()) {
+    if (
+      this.queuedRoots.length === 0 &&
+      this.canAdmitQueuedRoot() &&
+      this.memoryAllowsAdmission()
+    ) {
       return Promise.resolve(this.checkoutWorker(true));
     }
     return new Promise<ActionWorkerProcess>((resolve, reject) => {
@@ -1268,6 +1313,7 @@ export class ActionEngine {
       const entry: QueuedRoot = {
         rootExecutionId,
         queuedAt,
+        heldByMemory: false,
         deadline: this.clock.setTimeout(() => {
           this.removeQueuedRoot(entry);
           const waitedMs = this.clock.now().getTime() - queuedAt;
@@ -1276,18 +1322,66 @@ export class ActionEngine {
             waitedMs,
             workers: this.describeLiveWorkers(),
           });
-          reject(new ActionWorkerCapacityError(this.maxWorkerProcesses, waitedMs));
+          reject(
+            new ActionWorkerCapacityError(
+              this.maxWorkerProcesses,
+              waitedMs,
+              entry.heldByMemory ? "memory" : "workers",
+            ),
+          );
         }, this.queuedRootMaxWaitMs),
         admit: resolve,
         reject,
       };
       this.queuedRoots.push(entry);
+      // A free slot with a waiting root means memory is what holds it.
+      if (this.canAdmitQueuedRoot()) {
+        entry.heldByMemory = true;
+        this.scheduleQueueRecheck();
+      }
       log.info("root queued for an action worker", {
         rootExecutionId,
         queueDepth: this.queuedRoots.length,
         liveWorkers: this.liveWorkers.size,
+        heldBy: entry.heldByMemory ? "memory" : "workers",
       });
     });
+  }
+
+  /** Whether the instance has the memory to start another queued root. Reads
+   * headroom live, so the answer tracks work that grows or frees memory
+   * without any worker exiting. An unreadable sample never holds the queue. */
+  private memoryAllowsAdmission(): boolean {
+    const sample = this.memoryHeadroom();
+    if (!sample || !(sample.limitBytes > 0)) return true;
+    const available = sample.availableBytes / sample.limitBytes;
+    const short = available < MEMORY_HOLD_FRACTION;
+    if (short !== this.memoryShort) {
+      this.memoryShort = short;
+      const now = this.clock.now().getTime();
+      if (this.memoryLoggedAt === null || now - this.memoryLoggedAt >= MEMORY_LOG_INTERVAL_MS) {
+        this.memoryLoggedAt = now;
+        const fields = {
+          availableMB: Math.round(sample.availableBytes / 1_048_576),
+          limitMB: Math.round(sample.limitBytes / 1_048_576),
+          source: sample.source,
+          queueDepth: this.queuedRoots.length,
+          liveWorkers: this.liveWorkers.size,
+        };
+        if (short) log.warn("instance short on memory; holding queued roots", fields);
+        else log.info("memory recovered; queued roots resume", fields);
+      }
+    }
+    return !short;
+  }
+
+  /** Re-runs admission after QUEUE_MEMORY_RECHECK_MS. One timer at a time. */
+  private scheduleQueueRecheck(): void {
+    if (this.queueRecheckTimer) return;
+    this.queueRecheckTimer = this.clock.setTimeout(() => {
+      this.queueRecheckTimer = null;
+      this.admitQueuedRoots();
+    }, QUEUE_MEMORY_RECHECK_MS);
   }
 
   /** Whether a queued root may take a worker now. Queued roots stop short of
@@ -1311,9 +1405,15 @@ export class ActionEngine {
   /** Hands freed capacity to queued roots. Called wherever a slot opens: a
    * worker exits, a worker returns to the warm pool, or a warm worker becomes
    * ready. Runs before the warm pool refills, so a queued root outranks a new
-   * idle worker. */
+   * idle worker. A slot alone is not enough: the memory gate must also allow
+   * the start, and it is asked again for every root. */
   private admitQueuedRoots(): void {
     while (this.queuedRoots.length > 0 && this.canAdmitQueuedRoot()) {
+      if (!this.memoryAllowsAdmission()) {
+        for (const waiting of this.queuedRoots) waiting.heldByMemory = true;
+        this.scheduleQueueRecheck();
+        return;
+      }
       const entry = this.queuedRoots.shift()!;
       this.clock.clearTimeout(entry.deadline);
       let worker: ActionWorkerProcess;
@@ -1329,6 +1429,10 @@ export class ActionEngine {
         queueDepth: this.queuedRoots.length,
       });
       entry.admit(worker);
+    }
+    if (this.queuedRoots.length === 0 && this.queueRecheckTimer) {
+      this.clock.clearTimeout(this.queueRecheckTimer);
+      this.queueRecheckTimer = null;
     }
   }
 
