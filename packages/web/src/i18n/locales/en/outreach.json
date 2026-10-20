@@ -42,13 +42,11 @@
   "overview": {
     "bots": "Accounts",
     "noBots": "To reach <agent>{{agent}}</agent> in a chat app, connect an account for it, then invite the account to a group or DM.",
-    "since": "since",
+    "since": "Connected",
+    "groups": "Groups",
+    "dms": "DMs",
     "inviteTitle": "Invite {{bot}}.",
-    "addBot": "Connect an account",
-    "groupCount_one": "{{count}} group",
-    "groupCount_other": "{{count}} groups",
-    "dmCount_one": "{{count}} DM",
-    "dmCount_other": "{{count}} DMs"
+    "addBot": "Connect an account"
   },
   "settings": {
     "chats": "Chats",
