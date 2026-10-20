@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Link,
   Navigate,
@@ -11,7 +11,7 @@ import {
 } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, MessagesSquare, Search, Users } from "lucide-react";
+import { ArrowLeft, Search } from "lucide-react";
 import {
   Page,
   PageActions,
@@ -41,7 +41,6 @@ import {
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { List, ListRow, ListRowContent } from "@/components/ui/list-row";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   Select,
   SelectContent,
@@ -60,19 +59,14 @@ import { useDocumentTitle } from "@/hooks/use-document-title";
 import { Avatar } from "../people/avatar";
 import {
   CHAT_PLATFORMS,
-  type ChatEntry,
   type ChatPlatform,
   DELEGATE_PLATFORMS,
   type LinkKind,
   PLATFORM_SETUP,
   type OutreachAgentSummary,
   type OutreachBot,
-  type OutreachChat,
   type UnlinkedAccount,
   outreachKeys,
-  useAgentActivity,
-  useAgentChats,
-  useChat,
   useMoveBot,
   useOutreachAgent,
   useOutreachAgents,
@@ -90,10 +84,8 @@ import {
  * are listed here. A connected account has at most one agent, usually chosen
  * when the account is connected: the agent's own account, or the guardian's
  * account with the agent as delegate. Accounts connected with no agent are
- * listed apart, and Rome does not listen to them until an agent is linked. Each listed agent has an Overview (its accounts),
- * its Chats (every group and DM one of its accounts is in), Activity across
- * those chats, and Settings. A group is one chat with one history, however many
- * of Rome's accounts are in it.
+ * listed apart, and Rome does not listen to them until an agent is linked.
+ * Each listed agent has an Overview of its accounts and Settings.
  */
 export default function OutreachPage() {
   return (
@@ -562,7 +554,7 @@ function NewBot() {
 
 // ─── One agent ───────────────────────────────────────────────────────────────
 
-type Tab = "overview" | "chats" | "activity" | "settings";
+type Tab = "overview" | "settings";
 
 function AgentPage() {
   const { t } = useTranslation("outreach");
@@ -571,8 +563,7 @@ function AgentPage() {
   const query = useOutreachAgent(name);
   const agent = query.data;
   const rest = location.pathname.slice(agentPath(name).length).split("/").filter(Boolean);
-  const tab: Tab =
-    (["chats", "activity", "settings"] as const).find((x) => x === rest[0]) ?? "overview";
+  const tab: Tab = (["settings"] as const).find((x) => x === rest[0]) ?? "overview";
   useDocumentTitle(agent ? [t(`tabs.${tab}`), agent.name, t("index.title")] : null);
 
   if (query.isPending) return <Loading />;
@@ -585,10 +576,8 @@ function AgentPage() {
     );
   }
 
-  const tabs: { id: Tab; to: string; count?: number }[] = [
+  const tabs: { id: Tab; to: string }[] = [
     { id: "overview", to: agentPath(name) },
-    { id: "chats", to: agentPath(name, "/chats"), count: agent.chats },
-    { id: "activity", to: agentPath(name, "/activity") },
     { id: "settings", to: agentPath(name, "/settings") },
   ];
 
@@ -612,20 +601,12 @@ function AgentPage() {
       <PageNav aria-label={agent.name}>
         {tabs.map((x) => (
           <PageNavLink asChild key={x.id} active={x.id === tab}>
-            <Link to={x.to}>
-              {t(`tabs.${x.id}`)}
-              {x.count !== undefined && (
-                <span className="ml-1 text-muted-foreground">{x.count}</span>
-              )}
-            </Link>
+            <Link to={x.to}>{t(`tabs.${x.id}`)}</Link>
           </PageNavLink>
         ))}
       </PageNav>
       <Routes>
         <Route index element={<Overview agent={agent} />} />
-        <Route path="chats" element={<Chats agent={agent} />} />
-        <Route path="chats/:chatId" element={<ChatView agent={agent} />} />
-        <Route path="activity" element={<Activity agent={agent} />} />
         <Route path="settings" element={<Settings agent={agent} />} />
         <Route path="*" element={<Navigate to={agentPath(name)} replace />} />
       </Routes>
@@ -653,7 +634,8 @@ function Overview({ agent }: { agent: OutreachAgentSummary }) {
                   <ListRowContent>
                     <div className="font-medium">{b.name}</div>
                     <div className="text-aux text-muted-foreground">
-                      {t("overview.botStats", { groups: b.groups, dms: b.dms })}
+                      {t("overview.groupCount", { count: b.groups })},{" "}
+                      {t("overview.dmCount", { count: b.dms })}
                       {" · "}
                       {t("overview.since")} <Timestamp value={b.connectedAt} format="date" />
                     </div>
@@ -680,270 +662,6 @@ function Overview({ agent }: { agent: OutreachAgentSummary }) {
           </div>
         </CardContent>
       </Card>
-    </div>
-  );
-}
-
-function otherBots(chat: OutreachChat, agent: string) {
-  return chat.bots.filter((b) => b.answersAs !== agent);
-}
-
-function Chats({ agent }: { agent: OutreachAgentSummary }) {
-  const { t } = useTranslation("outreach");
-  const query = useAgentChats(agent.name);
-  const chats = query.data?.chats ?? [];
-  if (query.isPending) return <Loading />;
-  if (query.error) return <LoadError message={query.error.message} />;
-  if (chats.length === 0) {
-    return (
-      <EmptyState>
-        <EmptyStateTitle>{t("chats.emptyTitle")}</EmptyStateTitle>
-        <EmptyStateDescription>
-          {agent.bots[0]
-            ? t(`platforms.${agent.bots[0].platform}.invite`, { bot: agent.bots[0].name })
-            : t("overview.noBots", { agent: agent.name })}
-        </EmptyStateDescription>
-      </EmptyState>
-    );
-  }
-  const groups = chats.filter((c) => c.kind === "group");
-  const dms = chats.filter((c) => c.kind === "dm");
-  return (
-    <div className="flex flex-col gap-6">
-      {[
-        { label: t("chats.groups"), rows: groups },
-        { label: t("chats.dms"), rows: dms },
-      ]
-        .filter((s) => s.rows.length > 0)
-        .map((s) => (
-          <Section key={s.label}>
-            <SectionHeader>
-              <SectionHeading>
-                <SectionTitle>
-                  {s.label} <span className="text-muted-foreground">{s.rows.length}</span>
-                </SectionTitle>
-              </SectionHeading>
-            </SectionHeader>
-            <Card className="py-0">
-              <List>
-                {s.rows.map((c) => (
-                  <ChatRow key={c.id} chat={c} agent={agent.name} />
-                ))}
-              </List>
-            </Card>
-          </Section>
-        ))}
-    </div>
-  );
-}
-
-function ChatRow({ chat, agent }: { chat: OutreachChat; agent: string }) {
-  const { t } = useTranslation("outreach");
-  const others = otherBots(chat, agent);
-  return (
-    <ListRow asChild interactive>
-      <Link to={agentPath(agent, `/chats/${encodeURIComponent(chat.id)}`)}>
-        {chat.kind === "group" ? (
-          <span className="flex size-8 items-center justify-center rounded-8 bg-surface-muted text-muted-foreground">
-            <Users className="size-4" aria-hidden="true" />
-          </span>
-        ) : (
-          <Avatar name={chat.name} size="sm" />
-        )}
-        <ListRowContent>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="truncate font-medium">{chat.name}</span>
-            {chat.kind === "group" && (
-              <Badge variant="muted">{t("chats.members", { count: chat.members })}</Badge>
-            )}
-            {others.map((b) => (
-              <Badge key={b.id} variant="info">
-                {t("chats.alsoHere", { bot: b.name })}
-              </Badge>
-            ))}
-          </div>
-          {chat.preview && (
-            <div className="truncate text-aux text-muted-foreground">{chat.preview}</div>
-          )}
-        </ListRowContent>
-        <div className="shrink-0 text-right text-aux text-muted-foreground">
-          <Timestamp value={chat.lastMessageAt ?? chat.joinedAt} />
-          <div>{t("chats.addedBy", { name: chat.addedBy })}</div>
-        </div>
-      </Link>
-    </ListRow>
-  );
-}
-
-function ChatView({ agent }: { agent: OutreachAgentSummary }) {
-  const { t } = useTranslation("outreach");
-  const chatId = useParams<{ chatId: string }>().chatId ?? "";
-  const query = useChat(chatId);
-  if (query.isPending) return <Loading />;
-  if (query.error) return <LoadError message={query.error.message} />;
-  const { chat, entries } = query.data;
-  const others = otherBots(chat, agent.name);
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="text-title font-semibold">{chat.name}</h2>
-          <p className="text-aux text-muted-foreground">
-            {chat.kind === "group"
-              ? t("chat.groupMeta", { count: chat.members, name: chat.addedBy })
-              : t("chat.dmMeta", { name: chat.addedBy })}
-            {" · "}
-            {t("chat.botsHere", { bots: chat.bots.map((b) => b.name).join(", ") })}
-          </p>
-        </div>
-      </div>
-      <Card>
-        <CardContent className="flex flex-col gap-4">
-          {entries.map((e) => (
-            <Entry key={e.id} entry={e} />
-          ))}
-        </CardContent>
-      </Card>
-      {others.length > 0 && (
-        <p className="text-aux text-muted-foreground">
-          {t("chat.shared", {
-            bots: others.map((b) => `${b.name} (${b.answersAs})`).join(", "),
-            count: others.length,
-          })}
-        </p>
-      )}
-      <p className="text-aux text-muted-foreground">{t("chat.settings")}</p>
-      <p className="text-aux text-muted-foreground">{t("chat.override")}</p>
-    </div>
-  );
-}
-
-function Entry({ entry }: { entry: ChatEntry }) {
-  const { t } = useTranslation("outreach");
-  if (entry.kind === "event") {
-    return (
-      <p className="text-center text-aux text-muted-foreground">
-        <Timestamp value={entry.at} format="datetime" /> · {entry.text}
-      </p>
-    );
-  }
-  return (
-    <div className="flex gap-3">
-      <Avatar name={entry.sender} size="sm" />
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2 text-aux text-muted-foreground">
-          <span className="text-ui font-medium text-foreground">{entry.sender}</span>
-          {entry.bot && (
-            <Badge variant="brand">
-              {entry.bot.kind === "delegate"
-                ? t("chat.onBehalf", { agent: entry.bot.agent })
-                : entry.bot.agent}
-            </Badge>
-          )}
-          <Timestamp value={entry.at} format="time" />
-        </div>
-        <p className="text-ui whitespace-pre-wrap">{entry.text}</p>
-      </div>
-    </div>
-  );
-}
-
-function Activity({ agent }: { agent: OutreachAgentSummary }) {
-  const { t } = useTranslation("outreach");
-  const query = useAgentActivity(agent.name);
-  const [view, setView] = useState<"chat" | "time">("chat");
-  const items = query.data?.items ?? [];
-  const byChat = useMemo(() => {
-    const map = new Map<
-      string,
-      { name: string; asked: number; said: number; last?: string; at: string }
-    >();
-    for (const it of items) {
-      const row = map.get(it.chatId) ?? { name: it.chatName, asked: 0, said: 0, at: it.entry.at };
-      if (it.entry.bot) {
-        row.said += 1;
-        row.last ??= it.entry.text;
-      } else {
-        row.asked += 1;
-      }
-      map.set(it.chatId, row);
-    }
-    return [...map.entries()];
-  }, [items]);
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-ui text-muted-foreground">
-          {t("activity.description", { agent: agent.name })}
-        </p>
-        <SegmentedControl
-          aria-label={t("activity.view")}
-          size="sm"
-          value={view}
-          onValueChange={setView}
-          options={[
-            { value: "chat", label: t("activity.byChat") },
-            { value: "time", label: t("activity.timeline") },
-          ]}
-        />
-      </div>
-      {query.isPending ? (
-        <Loading />
-      ) : query.error ? (
-        <LoadError message={query.error.message} />
-      ) : items.length === 0 ? (
-        <EmptyState>
-          <EmptyStateTitle>{t("activity.emptyTitle")}</EmptyStateTitle>
-        </EmptyState>
-      ) : view === "chat" ? (
-        <ListGrid>
-          {byChat.map(([id, row]) => (
-            <Card key={id}>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <MessagesSquare className="size-4 text-muted-foreground" aria-hidden="true" />
-                  {row.name}
-                </CardTitle>
-                <CardDescription>
-                  <Timestamp value={row.at} />
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-2 text-ui">
-                <p>
-                  {t("activity.counts", { asked: row.asked, said: row.said, agent: agent.name })}
-                </p>
-                {row.last && (
-                  <p className="text-muted-foreground">
-                    {t("activity.lastSaid")} {row.last}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          ))}
-        </ListGrid>
-      ) : (
-        <Card className="py-0">
-          <List>
-            {items.map((it) => (
-              <ListRow key={it.entry.id} className="items-start py-3">
-                <span className="w-24 shrink-0 text-aux text-muted-foreground">
-                  <Timestamp value={it.entry.at} />
-                </span>
-                <ListRowContent>
-                  <div>
-                    <span className="font-medium">{it.entry.sender}</span> {it.entry.text}
-                  </div>
-                  <div className="text-aux text-muted-foreground">
-                    {t("activity.inChat", { chat: it.chatName })}
-                  </div>
-                </ListRowContent>
-              </ListRow>
-            ))}
-          </List>
-        </Card>
-      )}
     </div>
   );
 }

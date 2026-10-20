@@ -4,8 +4,6 @@
   "chatCount_other": "{{count}} chats",
   "tabs": {
     "overview": "Overview",
-    "chats": "Chats",
-    "activity": "Activity",
     "settings": "Settings"
   },
   "index": {
@@ -46,40 +44,13 @@
   "overview": {
     "bots": "Accounts",
     "noBots": "To reach {{agent}} in a chat app, connect an account for it, then invite the account to a group or DM.",
-    "botStats": "{{groups}} groups, {{dms}} DMs",
     "since": "since",
     "inviteTitle": "Invite {{bot}}.",
-    "addBot": "Connect an account"
-  },
-  "chats": {
-    "groups": "Groups",
-    "dms": "DMs",
-    "members_one": "{{count}} member",
-    "members_other": "{{count}} members",
-    "alsoHere": "Also {{bot}}",
-    "addedBy": "added by {{name}}",
-    "emptyTitle": "No chats yet"
-  },
-  "chat": {
-    "groupMeta_one": "Group · {{count}} member · added by {{name}}",
-    "groupMeta_other": "Group · {{count}} members · added by {{name}}",
-    "dmMeta": "DM · started by {{name}}",
-    "botsHere": "Rome's accounts here: {{bots}}",
-    "shared_one": "{{bots}} is in this chat too. Each agent sees only what the platform delivers to its own account, which may leave out the other agents' messages.",
-    "shared_other": "{{bots}} are in this chat too. Each agent sees only what the platform delivers to its own account, which may leave out the other agents' messages.",
-    "settings": "Reply rule for this account here: answers when @mentioned · replies in thread",
-    "override": "Agent choices on the chat app's group settings do not apply. Each account always answers as its own agent.",
-    "onBehalf": "{{agent}}, on your behalf"
-  },
-  "activity": {
-    "description": "{{agent}} reads this same view to know what it said in other chats.",
-    "view": "Activity view",
-    "byChat": "By chat",
-    "timeline": "Timeline",
-    "counts": "{{asked}} asked, {{said}} answered",
-    "lastSaid": "Last said:",
-    "inChat": "in {{chat}}",
-    "emptyTitle": "No activity yet"
+    "addBot": "Connect an account",
+    "groupCount_one": "{{count}} group",
+    "groupCount_other": "{{count}} groups",
+    "dmCount_one": "{{count}} DM",
+    "dmCount_other": "{{count}} DMs"
   },
   "settings": {
     "chats": "Chats",

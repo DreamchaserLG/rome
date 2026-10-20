@@ -6,9 +6,7 @@ import { fetchJson } from "@/lib/fetch-json";
 // Envoys lists the agents that speak through the accounts Rome has connected.
 // A connected account has at most one agent: its own account, or the guardian's
 // account with the agent as delegate. An account with no agent is connected but
-// unlinked, and Rome does not listen to it until an agent is linked. A chat is stored once with its
-// whole history, however many of Rome's accounts are in it, so two agents in
-// one group read one transcript.
+// unlinked, and Rome does not listen to it until an agent is linked.
 //
 // The backend for these routes does not exist yet. Mock mode answers them from
 // `mock/handlers/outreach.ts`, and the types here are the contract a backend
@@ -86,50 +84,6 @@ export interface OutreachAgentSummary extends OutreachAgent {
   chats: number;
 }
 
-export interface ChatBotRef {
-  id: string;
-  name: string;
-  answersAs: string;
-  kind: LinkKind;
-}
-
-export interface OutreachChat {
-  id: string;
-  platform: ChatPlatform;
-  kind: "group" | "dm";
-  name: string;
-  members: number;
-  bots: ChatBotRef[];
-  addedBy: string;
-  joinedAt: string;
-  lastMessageAt: string | null;
-  preview: string | null;
-}
-
-export type ChatEntry =
-  | { kind: "event"; id: string; at: string; text: string }
-  | {
-      kind: "message";
-      id: string;
-      at: string;
-      sender: string;
-      /** Set when one of Rome's accounts sent it; names the account, its agent,
-       *  and whether the agent spoke as its own account or as a delegate. */
-      bot?: { id: string; agent: string; kind: LinkKind };
-      text: string;
-    };
-
-export interface ChatDetail {
-  chat: OutreachChat;
-  entries: ChatEntry[];
-}
-
-export interface ActivityItem {
-  chatId: string;
-  chatName: string;
-  entry: Extract<ChatEntry, { kind: "message" }>;
-}
-
 export interface BotRegistration {
   id: string;
   agent: string;
@@ -149,9 +103,6 @@ export const outreachKeys = {
   list: () => [KEY, "list"] as const,
   candidates: () => [KEY, "candidates"] as const,
   agent: (name: string) => [KEY, "agent", name] as const,
-  chats: (name: string) => [KEY, "chats", name] as const,
-  chat: (id: string) => [KEY, "chat", id] as const,
-  activity: (name: string) => [KEY, "activity", name] as const,
   registration: (id: string) => [KEY, "registration", id] as const,
 };
 
@@ -186,34 +137,6 @@ export function useOutreachAgent(name: string) {
     queryFn: () =>
       fetchJson<OutreachAgentSummary>(`/api/outreach/agents/${enc(name)}`, {
         fallback: "Failed to load agent",
-      }),
-  });
-}
-
-export function useAgentChats(name: string) {
-  return useQuery({
-    queryKey: outreachKeys.chats(name),
-    queryFn: () =>
-      fetchJson<{ chats: OutreachChat[] }>(`/api/outreach/agents/${enc(name)}/chats`, {
-        fallback: "Failed to load chats",
-      }),
-  });
-}
-
-export function useChat(id: string) {
-  return useQuery({
-    queryKey: outreachKeys.chat(id),
-    queryFn: () =>
-      fetchJson<ChatDetail>(`/api/outreach/chats/${enc(id)}`, { fallback: "Failed to load chat" }),
-  });
-}
-
-export function useAgentActivity(name: string) {
-  return useQuery({
-    queryKey: outreachKeys.activity(name),
-    queryFn: () =>
-      fetchJson<{ items: ActivityItem[] }>(`/api/outreach/agents/${enc(name)}/activity`, {
-        fallback: "Failed to load activity",
       }),
   });
 }

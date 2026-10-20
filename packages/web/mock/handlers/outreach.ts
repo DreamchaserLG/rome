@@ -1,17 +1,14 @@
 import { http, HttpResponse } from "msw";
 import type {
-  ActivityItem,
   BotRegistration,
   ChatPlatform,
-  ChatEntry,
   LinkKind,
   OutreachAgent,
   OutreachAgentSummary,
   OutreachBot,
-  OutreachChat,
 } from "@/pages/outreach/outreach-api";
 
-// Envoys: agents, the connected accounts they speak through, and the chats
+// Envoys: agents, the connected accounts they speak through, and how many chats
 // those accounts are in. The surface has no backend yet, so this module is the
 // only implementation of its routes. Writes run against the in-memory store
 // below.
@@ -38,11 +35,7 @@ interface StoredChat {
   id: string;
   kind: "group" | "dm";
   name: string;
-  members: number;
   botIds: string[];
-  addedBy: string;
-  joinedAt: string;
-  entries: ChatEntry[];
 }
 
 const day = (d: number, hh: number, mm: number) =>
@@ -160,163 +153,48 @@ let bots: StoredBot[] = [
   },
 ];
 
-let entrySeq = 0;
-const ev = (at: string, text: string): ChatEntry => ({
-  kind: "event",
-  id: `e${++entrySeq}`,
-  at,
-  text,
-});
-const say = (at: string, sender: string, text: string): ChatEntry => ({
-  kind: "message",
-  id: `e${++entrySeq}`,
-  at,
-  sender,
-  text,
-});
-const botSay = (at: string, botId: string, text: string): ChatEntry => {
-  const bot = bots.find((b) => b.id === botId);
-  if (!linked(bot)) throw new Error(`fixture message from unlinked account ${botId}`);
-  return {
-    kind: "message",
-    id: `e${++entrySeq}`,
-    at,
-    sender: bot.name,
-    bot: { id: bot.id, agent: bot.answersAs, kind: bot.kind },
-    text,
-  };
-};
-
 let chats: StoredChat[] = [
   {
     id: "oc_release",
     kind: "group",
     name: "Release crew",
-    members: 8,
     botIds: ["cli_writer"],
-    addedBy: "Lin Wei",
-    joinedAt: day(9, 9, 20),
-    entries: [
-      ev(day(9, 9, 20), "Lin Wei added Writer to the group"),
-      say(
-        day(13, 9, 30),
-        "Lin Wei",
-        "@Writer we cut 1.8 today. Can you draft the release notes from the merged PRs?",
-      ),
-      botSay(
-        day(13, 9, 42),
-        "cli_writer",
-        "The draft is in ~/docs/releases/1.8.md. Two open questions: do we mention the Lark region, and is the pricing change public yet?",
-      ),
-      say(day(13, 9, 44), "Zhao Min", "Pricing is not public until Friday."),
-    ],
   },
   {
     id: "oc_launch",
     kind: "group",
     name: "Launch room",
-    members: 6,
     botIds: ["cli_rome", "cli_writer"],
-    addedBy: "Zhao Min",
-    joinedAt: day(12, 15, 0),
-    entries: [
-      ev(day(12, 15, 0), "Zhao Min added Rome and Writer to the group"),
-      say(day(13, 10, 2), "Zhao Min", "Launch is Thursday. Who is drafting the announcement?"),
-      say(
-        day(13, 10, 4),
-        "Ouou",
-        "@Writer draft it, under 80 words. @Rome put Thursday 10:00 on my calendar.",
-      ),
-      botSay(day(13, 10, 5), "cli_rome", "Added “Launch” to your calendar for Thursday at 10:00."),
-      botSay(
-        day(13, 10, 7),
-        "cli_writer",
-        "Draft: “Rome agents now join your Feishu groups. Give an agent its own account, invite it like a teammate, and @mention it when you need it.”",
-      ),
-    ],
   },
   {
     id: "oc_marketing",
     kind: "group",
     name: "Marketing weekly",
-    members: 14,
     botIds: ["cli_writer"],
-    addedBy: "Chen Yu",
-    joinedAt: day(10, 11, 0),
-    entries: [
-      ev(day(10, 11, 0), "Chen Yu added Writer to the group"),
-      say(day(12, 16, 20), "Chen Yu", "@Writer can you tighten the launch blurb? It runs long."),
-      botSay(
-        day(12, 16, 22),
-        "cli_writer",
-        "Here is a 40-word version. I kept the Lark line and dropped the pricing line.",
-      ),
-    ],
   },
   {
     id: "oc_dm_lin",
     kind: "dm",
     name: "Lin Wei",
-    members: 2,
     botIds: ["cli_writer"],
-    addedBy: "Lin Wei",
-    joinedAt: day(9, 9, 15),
-    entries: [
-      say(day(13, 8, 51), "Lin Wei", "Did the changelog go out?"),
-      botSay(day(13, 8, 55), "cli_writer", "Yes. I sent it to Release crew at 08:54."),
-    ],
   },
   {
     id: "oc_dm_ouou",
     kind: "dm",
     name: "Ouou",
-    members: 2,
     botIds: ["cli_rome"],
-    addedBy: "Ouou",
-    joinedAt: day(2, 10, 0),
-    entries: [
-      say(day(13, 9, 58), "Ouou", "Move my 11:00 to 11:30."),
-      botSay(day(13, 10, 3), "cli_rome", "Done. Your 11:00 is now at 11:30."),
-    ],
   },
   {
     id: "tg_press",
     kind: "group",
     name: "Press list",
-    members: 5,
     botIds: ["tg_writer"],
-    addedBy: "Sam Lee",
-    joinedAt: day(11, 14, 10),
-    entries: [
-      ev(day(11, 14, 10), "Sam Lee added WriterRomeBot to the group"),
-      say(
-        day(13, 11, 5),
-        "Sam Lee",
-        "@WriterRomeBot an English version of the launch note, please.",
-      ),
-      botSay(
-        day(13, 11, 7),
-        "tg_writer",
-        "Here it is: “Rome agents now join your team's chats, each under its own name.”",
-      ),
-    ],
   },
   {
     id: "tg_dm_sam",
     kind: "dm",
     name: "Sam Lee",
-    members: 2,
     botIds: ["tg_ouou"],
-    addedBy: "Sam Lee",
-    joinedAt: day(12, 9, 5),
-    entries: [
-      say(day(13, 12, 30), "Sam Lee", "Are you free Thursday afternoon for the press call?"),
-      botSay(
-        day(13, 12, 31),
-        "tg_ouou",
-        "Thursday 14:00 works. The launch runs until 11:00, so anything after lunch is fine.",
-      ),
-    ],
   },
 ];
 
@@ -330,10 +208,6 @@ function agentNamed(name: string) {
 
 function botsOf(agent: string) {
   return bots.filter((b): b is StoredBot & { answersAs: string } => b.answersAs === agent);
-}
-
-function linked(b: StoredBot | undefined): b is StoredBot & { answersAs: string } {
-  return b !== undefined && b.answersAs !== null;
 }
 
 function chatsOf(agent: string) {
@@ -355,31 +229,8 @@ function toBot(b: StoredBot & { answersAs: string }): OutreachBot {
   };
 }
 
-function toChat(c: StoredChat): OutreachChat {
-  const last = [...c.entries].reverse().find((e) => e.kind === "message");
-  return {
-    id: c.id,
-    platform: bots.find((b) => b.id === c.botIds[0])?.platform ?? "feishu",
-    kind: c.kind,
-    name: c.name,
-    members: c.members,
-    bots: c.botIds
-      .map((id) => bots.find((b) => b.id === id))
-      .filter(linked)
-      .map((b) => ({ id: b.id, name: b.name, answersAs: b.answersAs, kind: b.kind })),
-    addedBy: c.addedBy,
-    joinedAt: c.joinedAt,
-    lastMessageAt: last?.at ?? null,
-    preview: last?.kind === "message" ? `${last.sender}: ${last.text}` : null,
-  };
-}
-
 function summary(a: OutreachAgent): OutreachAgentSummary {
   return { ...a, bots: botsOf(a.name).map(toBot), chats: chatsOf(a.name).length };
-}
-
-function byRecent(a: OutreachChat, b: OutreachChat) {
-  return (b.lastMessageAt ?? b.joinedAt).localeCompare(a.lastMessageAt ?? a.joinedAt);
 }
 
 /** A stand-in QR code: a deterministic grid of cells, drawn as an SVG data URL. */
@@ -455,34 +306,6 @@ export const outreachHandlers = [
     return HttpResponse.json(a);
   }),
 
-  http.get("/api/outreach/agents/:name/chats", ({ params }) =>
-    HttpResponse.json({ chats: chatsOf(String(params.name)).map(toChat).sort(byRecent) }),
-  ),
-
-  http.get("/api/outreach/agents/:name/activity", ({ params }) => {
-    const name = String(params.name);
-    const mine = new Set(botsOf(name).map((b) => b.name.toLowerCase()));
-    const items: ActivityItem[] = [];
-    for (const c of chatsOf(name)) {
-      for (const e of c.entries) {
-        if (e.kind !== "message") continue;
-        const byAgent = e.bot?.agent === name;
-        const toAgent =
-          !e.bot &&
-          (c.kind === "dm" ? true : [...mine].some((n) => e.text.toLowerCase().includes(`@${n}`)));
-        if (byAgent || toAgent) items.push({ chatId: c.id, chatName: c.name, entry: e });
-      }
-    }
-    items.sort((x, y) => y.entry.at.localeCompare(x.entry.at));
-    return HttpResponse.json({ items });
-  }),
-
-  http.get("/api/outreach/chats/:id", ({ params }) => {
-    const c = chats.find((x) => x.id === params.id);
-    if (!c) return HttpResponse.json({ detail: "No such chat" }, { status: 404 });
-    return HttpResponse.json({ chat: toChat(c), entries: c.entries });
-  }),
-
   http.patch("/api/outreach/bots/:id", async ({ params, request }) => {
     const b = bots.find((x) => x.id === params.id);
     if (!b) return HttpResponse.json({ detail: "No such account" }, { status: 404 });
@@ -490,18 +313,7 @@ export const outreachHandlers = [
     if (answersAs === undefined || (answersAs !== null && !agentNamed(answersAs))) {
       return HttpResponse.json({ detail: "No such agent" }, { status: 400 });
     }
-    const from = b.answersAs;
-    const at = new Date().toISOString();
     b.answersAs = answersAs;
-    const text =
-      answersAs === null
-        ? `${from} unlinked from ${b.name}`
-        : from === null
-          ? `${answersAs} linked to ${b.name}`
-          : `${b.name} switched from ${from} to ${answersAs}`;
-    for (const c of chats) {
-      if (c.botIds.includes(b.id)) c.entries = [...c.entries, ev(at, text)];
-    }
     return new HttpResponse(null, { status: 204 });
   }),
 
