@@ -674,11 +674,6 @@ function Overview({ agent }: { agent: OutreachAgentSummary }) {
             </p>
           )}
           <div className="flex flex-wrap gap-2">
-            {agent.chats > 0 && (
-              <Button asChild variant="outline" size="sm">
-                <Link to={agentPath(agent.name, "/chats")}>{t("overview.seeChats")}</Link>
-              </Button>
-            )}
             <Button asChild variant={agent.bots.length ? "ghost" : "default"} size="sm">
               <Link to={agentPath(agent.name, "/new")}>{t("overview.addBot")}</Link>
             </Button>

@@ -49,7 +49,6 @@
     "botStats": "{{groups}} groups, {{dms}} DMs",
     "since": "since",
     "inviteTitle": "Invite {{bot}}.",
-    "seeChats": "See chats",
     "addBot": "Connect an account"
   },
   "chats": {
