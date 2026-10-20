@@ -13,11 +13,11 @@
     "description": "人们可以在聊天平台上找到的智能体，每个都通过你连接的账号发言。",
     "add": "连接账号",
     "emptyTitle": "还没有连接的账号",
-    "emptyBody": "在聊天平台上连接一个账号，并选择通过它发言的智能体，智能体就会出现在这里。"
+    "emptyBody": "要让智能体出现在这里，先在聊天平台上为它连接一个账号。"
   },
   "add": {
     "title": "连接账号",
-    "description": "先选择通过这个账号发言的智能体，再选择平台并设置账号。",
+    "description": "选择通过新账号发言的智能体，下一步选择平台。",
     "search": "搜索智能体",
     "noMatch": "没有匹配的智能体。",
     "footnote_one": "{{count}} 个智能体。智能体在应用中创建和编辑。",
@@ -25,7 +25,7 @@
   },
   "newBot": {
     "title": "为 {{agent}} 连接{{app}}账号",
-    "description": "{{agent}} 在这个账号所在的每个聊天里都通过它发言。之后可以一步切换到其他智能体。",
+    "description": "{{agent}} 会在这个账号所在的每个聊天里回答。之后切换到其他智能体，账号和它的聊天都会保留。",
     "name": "{{app}}里的账号名",
     "nameHint": "人们在群里看到并 @ 这个名称。",
     "showQr": "显示二维码",
@@ -37,15 +37,15 @@
     "token": "机器人令牌",
     "connect": "连接",
     "delegateTitle": "连接你的{{app}}账号",
-    "delegateDescription": "{{agent}} 用你自己的账号代你回答。别人看到的仍然是你，智能体是你的代理。",
-    "signInBody": "在{{app}}应用里登录你自己的账号，之后由 {{agent}} 代你回答。"
+    "delegateDescription": "{{agent}} 用你自己的账号代你回答。聊天里的人看到的是你的名字，而不是智能体的。",
+    "signInBody": "在{{app}}应用里登录你自己的账号后扫码。"
   },
   "agent": {
     "missing": "没有这个智能体"
   },
   "overview": {
     "bots": "账号",
-    "noBots": "{{agent}} 还没有通过任何账号发言。先在聊天平台上连接一个账号，再邀请它进任意群或私聊。",
+    "noBots": "要在聊天应用里联系 {{agent}}，先为它连接一个账号，再把账号邀请进群聊或私聊。",
     "botStats": "{{groups}} 个群，{{dms}} 个私聊",
     "since": "始于",
     "inviteTitle": "邀请 {{bot}}。",
@@ -66,14 +66,14 @@
     "groupMeta_other": "群聊 · {{count}} 位成员 · 由 {{name}} 添加",
     "dmMeta": "私聊 · 由 {{name}} 发起",
     "botsHere": "这里的 Rome 账号：{{bots}}",
-    "shared_one": "{{bots}} 也在这个聊天里。这是一个聊天、一份记录。每个智能体只看到平台推送给它自己账号的消息，可能看不到其他智能体的消息。",
-    "shared_other": "{{bots}} 也在这个聊天里。这是一个聊天、一份记录。每个智能体只看到平台推送给它自己账号的消息，可能看不到其他智能体的消息。",
+    "shared_one": "{{bots}} 也在这个聊天里。每个智能体只看到平台发给它自己账号的消息，可能不包括其他智能体的消息。",
+    "shared_other": "{{bots}} 也在这个聊天里。每个智能体只看到平台发给它自己账号的消息，可能不包括其他智能体的消息。",
     "settings": "这个账号在这里的回复规则：被 @ 时回答 · 在话题中回复",
-    "override": "由谁回答：每个账号的智能体。没有按聊天选择智能体的设置。",
+    "override": "聊天应用群设置里的智能体选择不生效。每个账号始终以它自己的智能体回答。",
     "onBehalf": "{{agent}}，代你回答"
   },
   "activity": {
-    "description": "{{agent}} 在各个聊天中收到和发出的消息，最新的在前。",
+    "description": "{{agent}} 也读取这个视图，以了解它在其他聊天里说过什么。",
     "view": "动态视图",
     "byChat": "按聊天",
     "timeline": "时间线",
@@ -95,16 +95,18 @@
     "removeBot": "断开连接",
     "noAgent": "不关联智能体",
     "unlinkConfirm": "要取消 {{agent}} 与 {{bot}} 的关联吗？{{bot}} 仍保持连接，但在你重新关联智能体之前，Rome 不再接收它的消息。",
-    "unlink": "取消关联"
+    "unlink": "取消关联",
+    "disconnectConfirm_one": "要断开 {{bot}} 吗？Rome 将失去对这个账号的访问，不再在它的 {{count}} 个聊天里回答。只要还有 Rome 的其他账号在聊天里，聊天记录就会保留。",
+    "disconnectConfirm_other": "要断开 {{bot}} 吗？Rome 将失去对这个账号的访问，不再在它的 {{count}} 个聊天里回答。只要还有 Rome 的其他账号在聊天里，聊天记录就会保留。"
   },
   "choose": {
     "title": "为 {{agent}} 连接账号",
-    "description": "选择这是谁的账号，以及它在哪个平台上。一个智能体可以通过任意多个账号发言。",
+    "description": "一个智能体可以通过任意数量的账号发言，在同一平台或多个平台上都可以。",
     "back": "平台",
     "ownTitle": "{{agent}} 的自有账号",
-    "ownBody": "为 {{agent}} 创建的账号，{{agent}} 以这个账号的身份发言。",
+    "ownBody": "别人看到的 {{agent}} 是一个独立成员，使用这个账号的名字。",
     "delegateTitle": "你自己的账号",
-    "delegateBody": "{{agent}} 用你的账号代你回答，作为你的代理。",
+    "delegateBody": "{{agent}} 用你的账号回答，别人在回复上看到的是你的名字。",
     "yourAccount": "你的{{app}}",
     "delegateSetup": "在{{app}}应用里扫码登录"
   },
@@ -146,7 +148,7 @@
   },
   "unlinked": {
     "title": "已连接，未关联智能体",
-    "description": "Rome 能访问这些账号，但没有智能体通过它们说话，所以 Rome 不接收它们的消息。关联一个智能体即可开始。",
+    "description": "Rome 能访问这些账号，但没有智能体通过它们发言，所以 Rome 不接收它们的消息。",
     "yours": "你的账号",
     "pick": "关联智能体",
     "link": "为 {{bot}} 关联智能体",

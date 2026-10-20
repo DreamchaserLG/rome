@@ -13,11 +13,11 @@
     "description": "Agents people can reach on chat platforms, each speaking through an account you connected.",
     "add": "Connect an account",
     "emptyTitle": "No connected accounts yet",
-    "emptyBody": "Connect an account on a chat platform and pick the agent that speaks through it. The agent shows up here."
+    "emptyBody": "To list an agent here, connect an account for it on a chat platform."
   },
   "add": {
     "title": "Connect an account",
-    "description": "First pick the agent that speaks through the account. Next you pick the platform and set the account up.",
+    "description": "Pick the agent that speaks through the new account. The platform comes next.",
     "search": "Search agents",
     "noMatch": "No agent matches.",
     "footnote_one": "{{count}} agent. Agents are created and edited in Apps.",
@@ -25,7 +25,7 @@
   },
   "newBot": {
     "title": "Connect an account on {{app}} for {{agent}}",
-    "description": "{{agent}} speaks through this account in every chat it is in. You can switch the account to another agent later in one step.",
+    "description": "{{agent}} answers in every chat this account is in. Switching to another agent later keeps the account and its chats.",
     "name": "Account name in {{app}}",
     "nameHint": "People see this name in groups and @mention it.",
     "showQr": "Show QR code",
@@ -37,15 +37,15 @@
     "token": "Bot token",
     "connect": "Connect",
     "delegateTitle": "Connect your {{app}} account",
-    "delegateDescription": "{{agent}} answers on your behalf from your own account. People still see you; the agent is your delegate.",
-    "signInBody": "Sign in to your own account in the {{app}} app. {{agent}} then answers on your behalf."
+    "delegateDescription": "{{agent}} answers from your own account on your behalf. People in your chats see your name, not the agent's.",
+    "signInBody": "Scan while signed in to your own account in the {{app}} app."
   },
   "agent": {
     "missing": "No such agent"
   },
   "overview": {
     "bots": "Accounts",
-    "noBots": "{{agent}} speaks through no account yet. Connect one on a chat platform, then invite it to any group or DM.",
+    "noBots": "To reach {{agent}} in a chat app, connect an account for it, then invite the account to a group or DM.",
     "botStats": "{{groups}} groups, {{dms}} DMs",
     "since": "since",
     "inviteTitle": "Invite {{bot}}.",
@@ -66,14 +66,14 @@
     "groupMeta_other": "Group · {{count}} members · added by {{name}}",
     "dmMeta": "DM · started by {{name}}",
     "botsHere": "Rome's accounts here: {{bots}}",
-    "shared_one": "{{bots}} is in this chat too. It is one chat with one history. Each agent sees what the platform delivers to its own account, which may not include the other agents' messages.",
-    "shared_other": "{{bots}} are in this chat too. It is one chat with one history. Each agent sees what the platform delivers to its own account, which may not include the other agents' messages.",
+    "shared_one": "{{bots}} is in this chat too. Each agent sees only what the platform delivers to its own account, which may leave out the other agents' messages.",
+    "shared_other": "{{bots}} are in this chat too. Each agent sees only what the platform delivers to its own account, which may leave out the other agents' messages.",
     "settings": "Reply rule for this account here: answers when @mentioned · replies in thread",
-    "override": "Who answers: each account's agent. There is no per-chat choice of agent.",
+    "override": "Agent choices on the chat app's group settings do not apply. Each account always answers as its own agent.",
     "onBehalf": "{{agent}}, on your behalf"
   },
   "activity": {
-    "description": "What was said to and by {{agent}} across its chats, newest first.",
+    "description": "{{agent}} reads this same view to know what it said in other chats.",
     "view": "Activity view",
     "byChat": "By chat",
     "timeline": "Timeline",
@@ -95,16 +95,18 @@
     "removeBot": "Disconnect",
     "noAgent": "No agent",
     "unlinkConfirm": "Unlink {{agent}} from {{bot}}? {{bot}} stays connected, but Rome stops listening to its messages until you link an agent again.",
-    "unlink": "Unlink"
+    "unlink": "Unlink",
+    "disconnectConfirm_one": "Disconnect {{bot}}? Rome loses access to the account and stops answering in its {{count}} chat. The chat keeps its history while another of Rome's accounts is in it.",
+    "disconnectConfirm_other": "Disconnect {{bot}}? Rome loses access to the account and stops answering in its {{count}} chats. A chat keeps its history while another of Rome's accounts is in it."
   },
   "choose": {
     "title": "Connect an account for {{agent}}",
-    "description": "Pick whose account it is and the platform it lives on. An agent can speak through any number of accounts.",
+    "description": "An agent can speak through any number of accounts, on one platform or several.",
     "back": "Platforms",
     "ownTitle": "{{agent}}'s own account",
-    "ownBody": "An account made for {{agent}}. {{agent}} speaks as that account.",
+    "ownBody": "People see {{agent}} as a member of its own, under the account's name.",
     "delegateTitle": "Your own account",
-    "delegateBody": "{{agent}} answers from your account on your behalf, as your delegate.",
+    "delegateBody": "{{agent}} answers from your account. People see your name on its replies.",
     "yourAccount": "Your {{app}}",
     "delegateSetup": "Sign in by scanning a QR code in the {{app}} app"
   },
@@ -146,7 +148,7 @@
   },
   "unlinked": {
     "title": "Connected, no agent",
-    "description": "Rome has access to these accounts, but no agent speaks through them, so Rome does not listen to their messages. Link an agent to start.",
+    "description": "Rome has access to these accounts, but no agent speaks through them, so Rome does not listen to their messages.",
     "yours": "your account",
     "pick": "Link an agent",
     "link": "Link an agent to {{bot}}",

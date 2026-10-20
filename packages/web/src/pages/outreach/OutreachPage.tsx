@@ -965,6 +965,7 @@ function Settings({ agent }: { agent: OutreachAgentSummary }) {
   const candidates = useOutreachCandidates();
   const all = useOutreachAgents();
   const [pending, setPending] = useState<{ botId: string; to: string } | null>(null);
+  const [disconnecting, setDisconnecting] = useState<string | null>(null);
 
   const names = [
     ...new Set([
@@ -1021,25 +1022,48 @@ function Settings({ agent }: { agent: OutreachAgentSummary }) {
                   <Button
                     variant="destructive"
                     size="sm"
-                    disabled={remove.isPending}
-                    onClick={() =>
-                      remove.mutate(b.id, {
-                        onSuccess: () => {
-                          if (agent.bots.length <= 1) navigate("/outreach");
-                        },
-                      })
-                    }
+                    disabled={disconnecting === b.id}
+                    onClick={() => {
+                      setPending(null);
+                      setDisconnecting(b.id);
+                    }}
                   >
                     {t("settings.removeBot")}
                   </Button>
                 </div>
+                {disconnecting === b.id && (
+                  <div className="flex flex-col gap-3 rounded-8 bg-surface-muted p-3 text-ui">
+                    <p>{t("settings.disconnectConfirm", { bot: b.name, count })}</p>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        disabled={remove.isPending}
+                        onClick={() =>
+                          remove.mutate(b.id, {
+                            onSuccess: () => {
+                              setDisconnecting(null);
+                              if (agent.bots.length <= 1) navigate("/outreach");
+                            },
+                          })
+                        }
+                      >
+                        {t("settings.removeBot")}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setDisconnecting(null)}>
+                        {t("settings.cancel")}
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 <Field className="max-w-xs">
                   <FieldLabel htmlFor={`answers-${b.id}`}>{t("settings.answersAs")}</FieldLabel>
                   <Select
                     value={moving?.to ?? b.answersAs}
-                    onValueChange={(to) =>
-                      setPending(to === b.answersAs ? null : { botId: b.id, to })
-                    }
+                    onValueChange={(to) => {
+                      setDisconnecting(null);
+                      setPending(to === b.answersAs ? null : { botId: b.id, to });
+                    }}
                   >
                     <SelectTrigger id={`answers-${b.id}`} className="w-full">
                       <SelectValue />
