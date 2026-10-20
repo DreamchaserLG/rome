@@ -8,7 +8,7 @@
 // variations, the generic conversation-settings link, and Feishu's registered
 // QR renderer.
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
@@ -112,6 +112,28 @@ it.each([
   expect(screen.queryByText(/linked as guardian/)).toBeNull();
 });
 
+it("renews a degraded account in place instead of only offering Disconnect", async () => {
+  const fetchMock = stubFetch();
+  renderCard(
+    <ChannelConnectCard
+      config={CHANNEL_CONFIGS.discord}
+      slot={{ ...connected("bot", "@rome_helper"), state: "degraded" }}
+      role="primary"
+      onRefresh={() => {}}
+    />,
+  );
+  expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+
+  await waitFor(() => expect(screen.getByLabelText("Discord bot token")).toBeTruthy());
+  expect(
+    fetchMock.mock.calls.some(([url]) =>
+      String(url).includes("/connections/conn-1/grants/bot/setup"),
+    ),
+  ).toBe(true);
+});
+
 // ── Shared frame (via Discord) ──────────────────────────────────────────────
 
 describe("ChannelConnectCard — shared frame", () => {
@@ -202,7 +224,7 @@ describe("ChannelConnectCard — shared frame", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/setups/live-cid"));
   });
 
-  it("Disconnect DELETEs the slot's grant on the connections registry and refreshes", async () => {
+  it("Disconnect asks first, then DELETEs the slot's grant and refreshes", async () => {
     const fetchMock = stubFetch();
     const onRefresh = rs.fn();
     renderCard(
@@ -214,6 +236,11 @@ describe("ChannelConnectCard — shared frame", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    expect(screen.getByText("Disconnect @rome_helper?")).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
     await waitFor(() => expect(onRefresh).toHaveBeenCalled());
     expect(fetchMock).toHaveBeenCalledWith("/api/connections/conn-1/grants/bot", {
       method: "DELETE",

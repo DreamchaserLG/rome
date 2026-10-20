@@ -2,22 +2,29 @@ import { describe, expect, it, rs } from "@rstest/core";
 import type { ChannelApiResult } from "../../channels/api-request.js";
 import type { GrantState } from "../../connections/types.js";
 import { CredentialRejected } from "../../connections/errors.js";
+import { anotherAccountKey } from "../../connections/setup/manager.js";
 import type { ApiDeps } from "../deps.js";
 import { discordCliRoutes } from "./discord-cli.js";
 
+const SETUP_KEYS = {
+  placeholder: "discord",
+  another: anotherAccountKey("discord"),
+  existing: "discord-1",
+} as const;
+
 function appWith(
   execute?: (request: unknown) => Promise<ChannelApiResult>,
-  opts: { activeSetup?: "placeholder" | "existing"; botGrantState?: GrantState } = {},
+  opts: {
+    activeSetup?: "placeholder" | "another" | "existing";
+    botGrantState?: GrantState;
+  } = {},
 ) {
   return discordCliRoutes(
     {
       setupManager: opts.activeSetup
         ? ({
             activeFor: (idOrService: string, grant: string) =>
-              idOrService === (opts.activeSetup === "existing" ? "discord-1" : "discord") &&
-              grant === "bot"
-                ? "setup-1"
-                : null,
+              idOrService === SETUP_KEYS[opts.activeSetup!] && grant === "bot" ? "setup-1" : null,
           } as NonNullable<ApiDeps["setupManager"]>)
         : undefined,
       connectionRegistry:
@@ -73,6 +80,7 @@ describe("Discord CLI loopback broker routes", () => {
 
   it.each([
     "placeholder",
+    "another",
     "existing",
   ] as const)("reports an in-progress %s Discord setup as not paired", async (activeSetup) => {
     const response = await appWith(undefined, { activeSetup }).request("/_internal/discord/auth");
@@ -292,7 +300,7 @@ describe("Discord CLI loopback broker routes", () => {
       expect(invoked).toEqual([]);
     });
 
-    it("reports a Discord channel whose bot is being re-added as not paired", async () => {
+    it("reports a released Discord channel as not connected, even while another account is being added", async () => {
       const invoked: string[] = [];
       const response = await discordCliRoutes(
         {
@@ -309,8 +317,8 @@ describe("Discord CLI loopback broker routes", () => {
         },
         "127.0.0.1",
       ).request("/_internal/discord/auth", { headers: { "x-rome-channel": "discord-4" } });
-      expect(response.status).toBe(409);
-      expect(await response.json()).toMatchObject({ error: { type: "not_paired" } });
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({ error: { type: "not_authenticated" } });
       expect(invoked).toEqual([]);
     });
   });

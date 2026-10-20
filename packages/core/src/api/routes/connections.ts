@@ -7,13 +7,13 @@
 // The projection speaks registry vocabulary (GrantState / CapabilityStatus)
 // verbatim; identity only ever crosses through the descriptor's `reviveProfile`
 // hook, so no service-owned profile field name is known here. Minting stays in
-// the connect setup, except a later account of a service, which
-// `POST /connections` mints before its setup runs.
+// the connect setup, a later account of a service included.
 
 import type { ConnectionAccountFields } from "@rome/api-types/channel-accounts";
 import { LINKABLE_SERVICES } from "@rome/api-types/account-agents";
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
+import { createLogger } from "../../logger.js";
 import { isEnabledOAuthProvider, isOAuthProvider } from "../../lib/oauth-providers.js";
 import { createRomeCloudOAuthStartUrl } from "../../lib/rome-cloud-oauth.js";
 import type { ConnectionRegistry } from "../../connections/index.js";
@@ -28,12 +28,15 @@ import type {
   GrantState,
 } from "../../connections/types.js";
 import type { SetupManager } from "../../connections/setup/manager.js";
+import { isUnconnectedAccount } from "../../connections/unconnected-accounts.js";
 import {
   ChannelRecordsRepository,
   type ChannelRecord,
 } from "../../db/repositories/channel-records.js";
 import type { ApiDeps } from "../deps.js";
 import { requireConnectionRegistry } from "../helpers.js";
+
+const log = createLogger("api:connections");
 
 /** Per-grant active-setup ids for a connection.
  *  `idOrService` is the connection id for a real connection, or the service name
@@ -354,39 +357,32 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     // per-(service, grant) critical section the setup's terminal write uses, so
     // the two can never interleave.
     await deps.setupManager?.cancelActive(conn.id, name);
-    await registry.withGrantSection(conn.service, name, () =>
-      registry.revoke(conn.id, name, { inTx: guardianMappingTeardown(registry, conn, name) }),
-    );
+    // An account exists only while it is connected, so revoking the last grant
+    // a channel's Connection holds removes the Connection, and its channel with
+    // it. The revoke runs first either way, since it is what clears the
+    // grant's custody artifacts.
+    const removed = await registry.withGrantSection(conn.service, name, async () => {
+      // A disconnect that ran while this one waited may have removed it.
+      if (!registry.all().some((held) => held.id === conn.id)) return true;
+      await registry.revoke(conn.id, name, { inTx: guardianMappingTeardown(registry, conn, name) });
+      if (!(await isUnconnectedAccount(registry, conn))) return false;
+      try {
+        await registry.remove(conn.id);
+      } catch (error) {
+        // The revoke committed, so the disconnect stands. The boot pass
+        // removes the account this left behind.
+        log.warn("could not remove a disconnected account", { id: conn.id, error });
+        return false;
+      }
+      return true;
+    });
     c.header("Cache-Control", "no-store");
     return c.json({
       ok: true,
-      connection: await serializeConnection(registry, conn, deps.setupManager ?? null, channels),
+      connection: removed
+        ? null
+        : await serializeConnection(registry, conn, deps.setupManager ?? null, channels),
     });
-  });
-
-  // Add another account of a service: mint a Connection with no grant yet,
-  // and with it the channel it will back. The dashboard then runs the
-  // service's ordinary setup against the new id. A Connection of the service
-  // that no setup has ever filled is handed back instead, so an abandoned setup
-  // or a double click does not leave another empty account behind.
-  app.post("/connections", async (c) => {
-    if (!isSameOriginMutationRequest(c.req.raw)) {
-      return c.json({ error: "Cross-site requests are not allowed." }, 403);
-    }
-    const registry = requireConnectionRegistry(deps);
-    const body = await c.req.json<{ service?: unknown } | null>().catch(() => null);
-    const service = typeof body?.service === "string" ? body.service : "";
-    if (registry.getDescriptor(service)?.severalAccounts !== true) {
-      return c.json({ error: `"${service}" does not offer another account.` }, 400);
-    }
-    const { connection: conn, minted } = await registry.connectUnusedOrAnother(service);
-    c.header("Cache-Control", "no-store");
-    return c.json(
-      {
-        connection: await serializeConnection(registry, conn, deps.setupManager ?? null, channels),
-      },
-      minted ? 201 : 200,
-    );
   });
 
   app.delete("/connections/:id", async (c) => {

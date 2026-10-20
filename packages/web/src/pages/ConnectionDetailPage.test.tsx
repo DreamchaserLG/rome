@@ -150,6 +150,35 @@ describe("ConnectionDetailPage — unknown serviceId redirects", () => {
   });
 });
 
+it("redirects the retired telegram-user route to a Telegram card on an opaque channel", async () => {
+  mockApi([
+    connection({ service: "telegram", grants: { bot: "authorized" }, channel: "chan-7" }),
+    connection({ service: "telegram_user", grants: { session: "authorized" } }),
+  ]);
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  });
+  const locations: string[] = [];
+
+  render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={["/settings/connections/telegram-user"]}>
+        <Routes>
+          <Route path="/settings/connections/:serviceId" element={<ConnectionDetailPage />} />
+          <Route
+            path="/settings/connections/chan-7"
+            element={<LocationCapture onLocation={(p) => locations.push(p)} />}
+          />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+
+  await waitFor(() => {
+    expect(locations).toContain("/settings/connections/chan-7");
+  });
+});
+
 describe("ConnectionDetailPage — load failure", () => {
   it("stays on the detail route and retries the connections request", async () => {
     let connectionRequests = 0;
@@ -329,20 +358,22 @@ describe("ConnectionDetailPage — several accounts", () => {
     expect(title.textContent).toBe("Feishu");
   });
 
-  it("adds another account, then navigates to its route", async () => {
+  /** The setup start for a new account, answered as connected at once. */
+  const connectedSetup = (connectionId: string) => ({
+    cid: "cid-new",
+    state: { status: "done", conferral: { connectionId } },
+    reattached: false,
+  });
+
+  it("connects another account, then navigates to its route", async () => {
     const accounts = [feishu()];
-    const posts: unknown[] = [];
+    const starts: unknown[] = [];
     rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
-      if (url === "/api/connections" && init?.method === "POST") {
-        posts.push(JSON.parse(String(init.body)));
-        const created = feishu({
-          id: "conn-feishu-2",
-          channel: SECOND_FEISHU,
-          grants: { app: "unauthorized" },
-        });
-        accounts.push(created);
-        return new Response(JSON.stringify({ connection: created }), { status: 201 });
+      if (url.endsWith("/setup") && init?.method === "POST") {
+        starts.push({ url, body: JSON.parse(String(init.body)) });
+        accounts.push(secondFeishu());
+        return new Response(JSON.stringify(connectedSetup("conn-feishu-2")), { status: 200 });
       }
       if (url === "/api/connections") {
         return new Response(JSON.stringify({ connections: accounts }), { status: 200 });
@@ -358,22 +389,27 @@ describe("ConnectionDetailPage — several accounts", () => {
     const { locations } = renderWithLocation("/settings/connections/feishu");
 
     fireEvent.click(await screen.findByRole("button", { name: "Add another account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
     await waitFor(() => {
       expect(locations).toContain(`/settings/connections/${SECOND_FEISHU}`);
     });
-    expect(posts).toEqual([{ service: "feishu" }]);
-    expect(await screen.findByText("Not connected")).toBeTruthy();
+    expect(starts).toEqual([
+      {
+        url: "/api/connections/feishu/grants/app/setup",
+        body: { force: false, another: true },
+      },
+    ]);
+    expect(await screen.findByText("Feishu · Sales Bot")).toBeTruthy();
   });
 
   it("stays on the account when the refetched list lacks the new one", async () => {
-    let posted = false;
+    let started = false;
     rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
-      if (url === "/api/connections" && init?.method === "POST") {
-        posted = true;
-        const created = feishu({ id: "conn-feishu-2", channel: SECOND_FEISHU });
-        return new Response(JSON.stringify({ connection: created }), { status: 201 });
+      if (url.endsWith("/setup") && init?.method === "POST") {
+        started = true;
+        return new Response(JSON.stringify(connectedSetup("conn-feishu-2")), { status: 200 });
       }
       if (url === "/api/connections") {
         return new Response(JSON.stringify({ connections: [feishu()] }), { status: 200 });
@@ -385,12 +421,12 @@ describe("ConnectionDetailPage — several accounts", () => {
     });
     const { locations } = renderWithLocation("/settings/connections/feishu");
 
-    const add = await screen.findByRole("button", { name: "Add another account" });
-    fireEvent.click(add);
+    fireEvent.click(await screen.findByRole("button", { name: "Add another account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 
     await waitFor(() => {
-      expect(posted).toBe(true);
-      expect((add as HTMLButtonElement).disabled).toBe(false);
+      expect(started).toBe(true);
+      expect(screen.getByRole("button", { name: "Add another account" })).toBeTruthy();
     });
     expect(locations).not.toContain(`/settings/connections/${SECOND_FEISHU}`);
     expect(locations).not.toContain("/settings/connections");

@@ -10,26 +10,67 @@
 //
 // `:id` addresses the connection to confer. For a service the guardian has
 // never connected there is no ledger row yet (the terminal conferral mints it),
-// so `:id` may instead be a bare service name — an offerable placeholder. Either
-// way the setup is keyed by (service, grant); the manager enforces one active
-// setup per grant and re-attaches a duplicate start.
+// so `:id` may instead be a bare service name — an offerable placeholder. A
+// start naming the service with `another: true` connects a new account of a
+// service that offers several, minted the same way. Either way the setup is
+// keyed by (service, grant); the manager enforces one active setup per grant
+// and re-attaches a duplicate start.
 
 import { Hono, type Context } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { NoSetupError, type SetupTarget } from "../../connections/setup/manager.js";
 import type { ConnectionRegistry } from "../../connections/index.js";
+import { isUnconnectedAccount } from "../../connections/unconnected-accounts.js";
 import type { ApiDeps } from "../deps.js";
+import { createLogger } from "../../logger.js";
 import { requireSetupManager, requireConnectionRegistry } from "../helpers.js";
+
+const log = createLogger("setups");
 
 /** Resolve what a setup start addresses. `:id` is either a live connection id
  *  (carry the id AND its service so the terminal write imports into THAT
  *  connection) or, for a never-connected service, the bare service name — valid
  *  only when a descriptor is registered for it (placeholder; the write mints the
- *  row). Null when neither. */
-function resolveTarget(registry: ConnectionRegistry, id: string): SetupTarget | null {
+ *  row). With `another`, `:id` must name a service that offers several
+ *  accounts, and the write mints a new one. Null when none of these. */
+function resolveTarget(
+  registry: ConnectionRegistry,
+  id: string,
+  another: boolean,
+): SetupTarget | null {
+  if (another) {
+    return registry.getDescriptor(id)?.severalAccounts === true
+      ? { service: id, another: true }
+      : null;
+  }
   const conn = registry.all().find((c) => c.id === id);
   if (conn) return { service: conn.service, connectionId: conn.id };
   return registry.isRegistered(id) ? { service: id } : null;
+}
+
+/** Remove `connectionId` when it is an account a failed removal left behind,
+ *  so no setup connects into its old channel. Answers "kept" for an account
+ *  still connected, "gone" once it is removed (now, or by a disconnect that
+ *  ran first), and "stuck" when the removal fails again, which leaves it for
+ *  the boot pass. */
+async function removeLeftoverAccount(
+  registry: ConnectionRegistry,
+  service: string,
+  connectionId: string,
+  grant: string,
+): Promise<"kept" | "gone" | "stuck"> {
+  return registry.withGrantSection(service, grant, async () => {
+    const conn = registry.all().find((held) => held.id === connectionId);
+    if (!conn) return "gone";
+    if (!(await isUnconnectedAccount(registry, conn))) return "kept";
+    try {
+      await registry.remove(connectionId);
+    } catch (error) {
+      log.warn("could not remove a disconnected account before its setup", { connectionId, error });
+      return "stuck";
+    }
+    return "gone";
+  });
 }
 
 function crossOriginBlocked(c: Context): Response | null {
@@ -48,11 +89,45 @@ export function setupsRoutes(deps: ApiDeps): Hono {
     if (blocked) return blocked;
     const registry = requireConnectionRegistry(deps);
     const manager = requireSetupManager(deps);
-    const target = resolveTarget(registry, c.req.param("id"));
-    if (!target) return c.json({ error: "Unknown connection." }, 404);
-    const grant = c.req.param("name");
-    const body = await c.req.json<{ force?: unknown }>().catch(() => ({}) as { force?: unknown });
+    const body = await c.req
+      .json<{ force?: unknown; another?: unknown }>()
+      .catch(() => ({}) as { force?: unknown; another?: unknown });
     const force = body.force === true;
+    const another = body.another === true;
+    const id = c.req.param("id");
+    const target = resolveTarget(registry, id, another);
+    if (!target) {
+      return another
+        ? c.json({ error: `"${id}" does not offer another account.` }, 400)
+        : c.json({ error: "Unknown connection." }, 404);
+    }
+    const grant = c.req.param("name");
+    // An account that connects again starts fresh, so the card of a
+    // disconnected account offers no setup into it. Its card goes on the next
+    // refresh, and the service's own Connect starts the new account.
+    if (target.connectionId) {
+      const leftover = await removeLeftoverAccount(
+        registry,
+        target.service,
+        target.connectionId,
+        grant,
+      );
+      if (leftover === "gone") {
+        return c.json(
+          { error: "This account was disconnected. Connect it again from its service." },
+          409,
+        );
+      }
+      if (leftover === "stuck") {
+        return c.json(
+          {
+            error:
+              "Rome could not clear this disconnected account. Restart Rome, then connect it again.",
+          },
+          409,
+        );
+      }
+    }
     try {
       const started = await manager.start(target, grant, { force });
       c.header("Cache-Control", "no-store");

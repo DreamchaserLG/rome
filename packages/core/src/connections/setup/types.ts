@@ -125,6 +125,9 @@ export type SetupState =
  *  The credential and raw profile never cross to the client. */
 export interface SetupDoneView {
   summary?: SetupView;
+  /** The connection the conferral wrote, so a setup for a new account can
+   *  name the account it made. */
+  connectionId?: string;
 }
 
 /** The guardian-facing verbs handed to a setup coroutine. Deliberately
@@ -159,6 +162,10 @@ export interface SetupContext {
   step<T>(label: string, fn: (signal: AbortSignal) => Promise<T>): Promise<T>;
   /** The setup's cancellation signal — aborts when the guardian cancels. */
   readonly signal: AbortSignal;
+  /** The setup renews a connection that already names its account, so only
+   *  that same account can confer. A flow that always creates a new account
+   *  has nothing to offer here. */
+  readonly renewing?: boolean;
 }
 
 /**

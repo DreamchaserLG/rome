@@ -4,9 +4,11 @@ import type { ChannelMessage } from "@rome-os/app-runtime";
 import type { DrizzleTx } from "../db/index.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger, type Logger } from "../logger.js";
+import { isUnconnectedAccount } from "./unconnected-accounts.js";
 import type { ConnectionRecord, GrantLedger, GrantRecord, PersistedCredential } from "./ledger.js";
 import {
   AccountAlreadyConnectedError,
+  DifferentAccountError,
   CredentialRejected,
   Disconnected,
   DuplicateServiceConnectionsError,
@@ -43,6 +45,15 @@ const KIND_OF: Record<Capability, CapabilityKind> = {
   act: "actor",
   watch: "watcher",
 };
+
+/** How {@link ConnectionRegistry.confer} writes. */
+export interface ConferOptions {
+  /** A participant run in the conferral's transaction (the guardian mapping). */
+  inTx?: (tx: DrizzleTx) => void;
+  /** Mint another account of the service rather than fill its first one. Only
+   *  read when no connection id is addressed. */
+  another?: boolean;
+}
 
 export interface ConnectionRegistryDeps {
   ledger: GrantLedger;
@@ -276,8 +287,8 @@ export class ConnectionRegistry {
   /** Mint a new Connection from a registered descriptor. Persists the record,
    *  makes sure every declared grant row exists ("unauthorized"), and builds any
    *  zero-grant capabilities immediately (epoch from birth). Refuses a Service
-   *  that already holds a Connection; {@link connectAnother} is the one path
-   *  that adds a second. */
+   *  that already holds a Connection; a conferral asked for another account
+   *  (`confer` with `another`) adds a second. */
   async connect(service: string, label?: string): Promise<Connection> {
     return this.connectionMutex.runExclusive(service, async () => {
       const existing = this.find(service);
@@ -291,29 +302,11 @@ export class ConnectionRegistry {
   }
 
   /** Mint another Connection for a Service, whether or not it already holds
-   *  one. Every other caller assumes one Connection per Service, so only a
-   *  caller that asks for a second account uses this. */
+   *  one, with no grant held yet. Tests use it to stand up several accounts
+   *  without driving a setup.
+   *  @internal */
   async connectAnother(service: string, label?: string): Promise<Connection> {
     return this.connectionMutex.runExclusive(service, () => this.mint(service, label));
-  }
-
-  /** Hand back a Connection of `service` that no conferral has ever filled, or
-   *  mint another when there is none. The lookup and the mint share the
-   *  service's mint lock, so two overlapping calls get the same Connection.
-   *  A Connection whose grant was revoked keeps its channel and is not handed
-   *  back, since it was an account the guardian used. */
-  async connectUnusedOrAnother(
-    service: string,
-  ): Promise<{ connection: Connection; minted: boolean }> {
-    return this.connectionMutex.runExclusive(service, async () => {
-      for (const existing of this.find(service)) {
-        const grants = await this.ledger.listGrants(existing.id);
-        if (grants.length > 0 && grants.every((grant) => grant.conferredAt === undefined)) {
-          return { connection: existing, minted: false };
-        }
-      }
-      return { connection: await this.mint(service, undefined), minted: true };
-    });
   }
 
   private async mint(service: string, label: string | undefined): Promise<Connection> {
@@ -419,19 +412,28 @@ export class ConnectionRegistry {
    *  `connectionId` addresses an existing connection (fails if it vanished
    *  mid-setup rather than resurrecting into `find()[0]`); omit it for an
    *  offerable placeholder (reuse the first existing connection of the service,
-   *  else mint one). This owns the resolve/mint the manager's terminal write did
-   *  inline before. */
+   *  else mint one), or omit it with `opts.another` to mint another account of
+   *  the service whether or not it holds one. This owns the resolve/mint the
+   *  manager's terminal write did inline before. */
   async confer(
     service: string,
     connectionId: ConnectionId | undefined,
     grant: GrantName,
     credential: Credential,
     profile: ProfileRecord | undefined,
-    opts: { inTx?: (tx: DrizzleTx) => void } = {},
+    opts: ConferOptions = {},
   ): Promise<Connection> {
     return this.connectionMutex.runExclusive(service, () =>
       this.conferExclusive(service, connectionId, grant, credential, profile, opts),
     );
+  }
+
+  /** The Connection a placeholder conferral fills: the service's own, unless
+   *  that is an account a failed removal left behind, which a connecting
+   *  account must not inherit, so a fresh one is minted beside it. */
+  private async placeholderTarget(service: string): Promise<ConnectionImpl | undefined> {
+    const conn = this.find(service)[0] as ConnectionImpl | undefined;
+    return conn && !(await isUnconnectedAccount(this, conn)) ? conn : undefined;
   }
 
   private async conferExclusive(
@@ -440,12 +442,14 @@ export class ConnectionRegistry {
     grant: GrantName,
     credential: Credential,
     profile: ProfileRecord | undefined,
-    opts: { inTx?: (tx: DrizzleTx) => void },
+    opts: ConferOptions,
   ): Promise<Connection> {
     const registered = this.descriptors.get(service);
     let conn: ConnectionImpl | undefined = connectionId
       ? this.connections.get(connectionId)
-      : (this.find(service)[0] as ConnectionImpl | undefined);
+      : opts.another
+        ? undefined
+        : await this.placeholderTarget(service);
     if (connectionId && !conn) {
       throw new Error(`Connection "${connectionId}" no longer exists; setup cannot confer.`);
     }
@@ -456,6 +460,7 @@ export class ConnectionRegistry {
 
     const id = conn?.id ?? crypto.randomUUID();
     if (registered && profile !== undefined) {
+      if (conn) await this.refuseDifferentAccount(registered.descriptor, id, grant, profile);
       await this.refuseAccountHeldElsewhere(registered.descriptor, id, grant, profile);
     }
     const createdAt = this.clock();
@@ -498,6 +503,28 @@ export class ConnectionRegistry {
       });
     }
     return conn as Connection;
+  }
+
+  /** Throws DifferentAccountError when `connectionId`'s grant still names an
+   *  account and `profile` names another. A disconnected grant holds no
+   *  profile, so it never refuses there. */
+  private async refuseDifferentAccount(
+    descriptor: ConnectionDescriptor,
+    connectionId: ConnectionId,
+    grant: GrantName,
+    profile: ProfileRecord,
+  ): Promise<void> {
+    const accountIdOf = descriptor.accountIdOf;
+    if (!accountIdOf) return;
+    const held = await this.ledger.getGrant(connectionId, grant);
+    const heldId = held?.profile === undefined ? null : accountIdOf(grant, held.profile);
+    if (heldId !== null && heldId !== accountIdOf(grant, profile)) {
+      throw new DifferentAccountError(
+        descriptor.service,
+        connectionId,
+        descriptor.severalAccounts === true,
+      );
+    }
   }
 
   /** Throws AccountAlreadyConnectedError when another Connection of the

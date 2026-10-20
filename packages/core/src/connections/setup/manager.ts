@@ -27,8 +27,9 @@ import {
   applyGuardianMappingWithinTx,
   planGuardianMapping,
 } from "../../channels/guardian-mapping.js";
+import type { ConferOptions } from "../registry.js";
 import type { Connection, ConnectionDescriptor, Credential, ProfileRecord } from "../types.js";
-import { SetupSession, type SetupInputOutcome } from "./session.js";
+import { SetupAbortError, SetupSession, type SetupInputOutcome } from "./session.js";
 import type { SetupConferral, SetupState } from "./types.js";
 
 /** The narrow registry surface the manager drives — every real
@@ -45,7 +46,7 @@ export interface SetupRegistry {
     grant: string,
     credential: Credential,
     profile: ProfileRecord | undefined,
-    opts?: { inTx?: (tx: DrizzleTx) => void },
+    opts?: ConferOptions,
   ): Promise<Connection>;
 }
 
@@ -56,10 +57,13 @@ export interface SetupManagerDeps {
 
 /** What a setup addresses: the service, plus the connection id when the route
  *  targeted an existing connection (absent for an offerable placeholder — the
- *  terminal conferral mints the row). */
+ *  terminal conferral mints the row). `another` asks for a new account of the
+ *  service, minted by the terminal conferral like a placeholder's, so an
+ *  abandoned setup leaves no account behind. */
 export interface SetupTarget {
   service: string;
   connectionId?: string;
+  another?: boolean;
 }
 
 /** Raised when a start targets a grant whose descriptor declares no setup. */
@@ -102,8 +106,17 @@ function keyOf(idOrService: string, grant: string): string {
   return `${idOrService}\u0000${grant}`;
 }
 
+/** What a new account of `service` is keyed by in place of a connection id. A
+ *  service name never holds the separator, so it names no connection or
+ *  placeholder. */
+export function anotherAccountKey(service: string): string {
+  return `${service}\u0001another`;
+}
+
 function keyOfTarget(target: SetupTarget, grant: string): string {
-  return keyOf(target.connectionId ?? target.service, grant);
+  const address =
+    target.connectionId ?? (target.another ? anotherAccountKey(target.service) : target.service);
+  return keyOf(address, grant);
 }
 
 /** The `state` query param carried by a redirect URL — the return-leg
@@ -164,6 +177,7 @@ export class SetupManager {
     const session = new SetupSession({
       fn,
       commit: (conferral, signal) => this.#commit(target, grant, conferral, signal),
+      renewing: target.connectionId !== undefined,
     });
     const managed: Managed = { cid, target, grant, session };
     this.#byKey.set(key, managed);
@@ -300,22 +314,20 @@ export class SetupManager {
     target: SetupTarget,
     grant: string,
     conferral: SetupConferral,
-    _signal: AbortSignal,
-  ): Promise<void> {
-    await this.#deps.registry.withGrantSection(target.service, grant, async () => {
+    signal: AbortSignal,
+  ): Promise<string> {
+    return this.#deps.registry.withGrantSection(target.service, grant, async () => {
+      // A cancel that landed while the write waited for the section wins, so
+      // an abandoned setup leaves nothing behind.
+      if (signal.aborted) throw new SetupAbortError();
       const channelUserId = conferral.guardianChannelUserId;
       const plan = channelUserId
         ? await planGuardianMapping(this.#deps.personMappingRepo, target.service, channelUserId)
         : null;
-      await this.#deps.registry.confer(
-        target.service,
-        target.connectionId,
-        grant,
-        conferral.credential,
-        conferral.profile,
-        plan && channelUserId
+      const opts = {
+        ...(plan && channelUserId
           ? {
-              inTx: (tx) =>
+              inTx: (tx: DrizzleTx) =>
                 applyGuardianMappingWithinTx(
                   tx,
                   this.#deps.personMappingRepo,
@@ -324,8 +336,18 @@ export class SetupManager {
                   plan,
                 ),
             }
-          : undefined,
+          : {}),
+        ...(target.another ? { another: true } : {}),
+      };
+      const connection = await this.#deps.registry.confer(
+        target.service,
+        target.connectionId,
+        grant,
+        conferral.credential,
+        conferral.profile,
+        Object.keys(opts).length > 0 ? opts : undefined,
       );
+      return connection.id;
     });
   }
 }

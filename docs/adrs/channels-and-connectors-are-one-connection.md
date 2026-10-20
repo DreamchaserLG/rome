@@ -101,3 +101,16 @@ Rome stores each channel's platform as a fixed value mapped from its service ([`
 
 - **Let main answer wherever no agent is linked.** Rejected because a guardian who moves an agent to another account would leave the old one answering as main, which is not what moving it means. Linking main makes who answers explicit on every account.
 - **Parse the platform out of a channel id.** Rejected because a later channel's id is opaque, and `telegram_user` would need a parsing rule of its own. A fixed mapping from the service answers the question once.
+
+## Amendment (2026-10-20): an account exists only while it is connected
+
+Adding another account of a service mints its Connection at the end of the setup, not ahead of it. The setup starts addressed to a new account of the service, and its terminal conferral mints the Connection and its channel, as it already does for a service's first Connection. `POST /connections` and `connectUnusedOrAnother` from the 2026-10-15 amendment are withdrawn.
+
+An account here is a Connection of a service with a Talk that names its accounts by its own id for them: a Telegram or Discord bot, a Feishu app, the signed-in Telegram user. Revoking the last grant an account holds removes it, and boot removes any account it finds with no grant held. Every other Connection, email's included, stays after its last grant goes.
+
+A linkable service's next Connection never takes back a released channel, the same account's included, so every account that connects starts fresh and none inherits another's conversations, settings or agent sessions (#1073). Its channel gets the service's name if no channel holds it and an opaque id otherwise, and it is linked to main when it is the service's only connected account. A released channel and its history stay stored, reached by nothing. Services that take no agent keep taking their released channel back, since apps address their one channel by the service's name.
+
+### Alternatives
+
+- **Keep minting ahead of setup, and hide accounts that hold no grant.** Rejected because the hidden rows still back channels, take names and count against the one-agent-per-platform rule.
+- **Give a released channel back to the same account when it connects again.** Rejected to keep one rule for every account that connects: it starts empty.

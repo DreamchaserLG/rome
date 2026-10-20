@@ -2,6 +2,8 @@ import { useState, type ComponentType, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { User } from "lucide-react";
+import { LINKABLE_SERVICES } from "@rome/api-types/account-agents";
+import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { ConnectionSlotCard } from "@/components/connection-slot-card";
@@ -155,6 +157,11 @@ export interface ChannelConnectCardProps {
   slot: ConnectionSlot;
   role: "primary" | "secondary";
   onRefresh: () => void | Promise<void>;
+  /** Connect a new account of the service rather than the slot's own. */
+  another?: boolean;
+  /** Fired after a setup connects, in place of the refresh, with the
+   *  connection it connected when core reports it. */
+  onConnected?: (connectionId: string | null) => void;
 }
 
 /**
@@ -164,21 +171,39 @@ export interface ChannelConnectCardProps {
  * renderer). A channel that reads connected was guardian-linked during the
  * terminal conferral, so there is no separate verify-status polling.
  */
-export function ChannelConnectCard({ config, slot, role, onRefresh }: ChannelConnectCardProps) {
+export function ChannelConnectCard({
+  config,
+  slot,
+  role,
+  onRefresh,
+  another = false,
+  onConnected,
+}: ChannelConnectCardProps) {
   const { t } = useTranslation("settings");
   const connected = slot.state !== "unauthorized";
+  // A degraded credential is renewed in place: disconnecting would remove the
+  // account, and an account that connects again starts with no history.
+  const degraded = slot.state === "degraded";
 
   const [disconnecting, setDisconnecting] = useState(false);
+  // Disconnecting an account removes it, so the guardian confirms the cost first.
+  const [confirming, setConfirming] = useState(false);
+  const confirmsDisconnect = LINKABLE_SERVICES.has(config.service);
   const [error, setError] = useState<string | null>(null);
 
   // The setup addresses the connection by id, or by the bare service name when
-  // the guardian has never connected (the terminal conferral mints the row).
+  // the guardian has never connected or is adding another account (the
+  // terminal conferral mints the row).
   const setup = useSetup({
-    idOrService: slot.connectionId ?? config.service,
+    idOrService: (another ? null : slot.connectionId) ?? config.service,
     grant: slot.grant ?? config.defaultGrant,
+    another,
     activeCid: slot.activeSetupCid,
-    onDone: () => {
-      void onRefresh();
+    // A caller that opens the account it connected refetches as it does, so
+    // the refresh does not first drop a card whose route the connect moved.
+    onDone: (connectionId) => {
+      if (onConnected) onConnected(connectionId);
+      else void onRefresh();
     },
   });
 
@@ -200,11 +225,27 @@ export function ChannelConnectCard({ config, slot, role, onRefresh }: ChannelCon
     setDisconnecting(false);
   }
 
-  const disconnectAction = connected ? (
-    <Button variant="destructive" size="sm" onClick={handleDisconnect} disabled={disconnecting}>
+  const disconnectButton = connected ? (
+    <Button
+      variant="destructive"
+      size="sm"
+      onClick={() => (confirmsDisconnect ? setConfirming(true) : void handleDisconnect())}
+      disabled={disconnecting}
+    >
       {disconnecting ? t("common.disconnecting") : t("common.disconnect")}
     </Button>
   ) : undefined;
+  const disconnectAction =
+    degraded && !setup.state ? (
+      <div className="flex items-center gap-2">
+        <Button size="sm" onClick={() => setup.start(true)} disabled={setup.busy}>
+          {setup.busy ? t("common.connecting") : t("channels.reconnect")}
+        </Button>
+        {disconnectButton}
+      </div>
+    ) : (
+      disconnectButton
+    );
 
   const configureAction =
     connected && slot.connectionId && config.conversationSettings ? (
@@ -239,8 +280,28 @@ export function ChannelConnectCard({ config, slot, role, onRefresh }: ChannelCon
       }
     >
       {error && <p className="text-aux text-destructive-fg">{error}</p>}
+      <RomeConfirmDialog
+        open={confirming}
+        destructive
+        title={
+          identityTitle
+            ? t("channels.disconnectConfirmTitle", { name: identityTitle })
+            : t("channels.disconnectConfirmTitleUnnamed")
+        }
+        description={t("channels.disconnectConfirmBody")}
+        confirmLabel={t("common.disconnect")}
+        confirmDisabled={disconnecting}
+        onCancel={() => setConfirming(false)}
+        onConfirm={() => {
+          setConfirming(false);
+          void handleDisconnect();
+        }}
+      />
 
-      {connected ? (
+      {degraded && setup.error && !setup.state ? (
+        <p className="text-aux text-destructive-fg">{setup.error}</p>
+      ) : null}
+      {connected && !(degraded && setup.state) ? (
         config.guardianLinkedKey ? (
           <div>
             <p className="text-aux text-success-fg">{t(config.guardianLinkedKey)}</p>

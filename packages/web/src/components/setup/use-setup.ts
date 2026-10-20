@@ -19,12 +19,15 @@ export interface UseSetupOptions {
   /** Connection id, or the bare service name for a never-connected service. */
   idOrService: string;
   grant: string;
+  /** Connect a new account of the service `idOrService` names. */
+  another?: boolean;
   /** A live setup id discovered on the connection response — the hook
    *  re-attaches to it (polls its state) instead of starting fresh. */
   activeCid?: string | null;
-  /** Fired once when the setup reaches `done` — the card refreshes
-   *  connections so the slot flips to connected. */
-  onDone?: () => void;
+  /** Fired once when the setup reaches `done`, with the connection it
+   *  connected when core reports it — the card refreshes connections so the
+   *  slot flips to connected. */
+  onDone?: (connectionId: string | null) => void;
 }
 
 // Poll interval while the setup awaits an external event.
@@ -45,12 +48,15 @@ export interface SetupRunner {
 }
 
 export function useSetup(options: UseSetupOptions): SetupRunner {
-  const { idOrService, grant, activeCid, onDone } = options;
+  const { idOrService, grant, another, activeCid, onDone } = options;
   const [cid, setCid] = useState<string | null>(activeCid ?? null);
   const [state, setState] = useState<SetupState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const doneFiredRef = useRef(false);
+  // Set once the card unmounts, so a start that answers afterwards is not
+  // left running.
+  const unmountedRef = useRef(false);
   // The cid reset() dropped: the adopt effect must not immediately re-adopt it
   // from a stale `activeCid` discovery (the refresh that clears the discovery
   // races the reset). A fresh start() supersedes the dismissal.
@@ -61,7 +67,7 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
       setState(next);
       if (next.status === "done" && !doneFiredRef.current) {
         doneFiredRef.current = true;
-        onDone?.();
+        onDone?.(next.conferral?.connectionId ?? null);
       }
     },
     [onDone],
@@ -95,7 +101,13 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
       setBusy(true);
       setError(null);
       void (async () => {
-        const result = await startSetup(idOrService, grant, { force });
+        const result = await startSetup(idOrService, grant, { force, another });
+        if (unmountedRef.current) {
+          // The card that asked went away first, so nothing could finish this
+          // new account's setup.
+          if (another && result.ok) void cancelSetup(result.start.cid);
+          return;
+        }
         setBusy(false);
         if (!result.ok) {
           setError(result.error);
@@ -107,7 +119,7 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
         settle(result.start.state);
       })();
     },
-    [idOrService, grant, settle],
+    [idOrService, grant, another, settle],
   );
 
   const submit = useCallback(
@@ -174,6 +186,28 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
   useEffect(() => {
     if (settled) setBusy(false);
   }, [settled]);
+
+  // A new account's setup has no connection a reopened card could find it
+  // through, so it ends with the card that started it. Otherwise a flow left
+  // running (a QR code still on a phone) could connect an account after the
+  // guardian navigated away. A start still in flight is cancelled when it
+  // answers. That includes a setup this card re-attached to. A reload or a
+  // closed tab runs no cleanup, so its setup runs until the next Add re-attaches
+  // to it.
+  const liveCidRef = useRef<string | null>(null);
+  liveCidRef.current = cid && !settled ? cid : null;
+  useEffect(() => {
+    if (!another) return;
+    return () => {
+      if (liveCidRef.current) void cancelSetup(liveCidRef.current);
+    };
+  }, [another]);
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+    };
+  }, []);
 
   return { cid, state, busy, error, start, submit, cancel, reset };
 }

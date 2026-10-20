@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { StatusIndicator } from "@/lib/connection-status";
 import { ConnectionDetailBody } from "@/components/ConnectionDetail";
-import { buildConnectionCards } from "@/lib/connection-cards";
+import { accountRoute, buildConnectionCards } from "@/lib/connection-cards";
 import { CONNECTIONS_REFRESH_INTERVAL_MS, fetchConnections } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 import {
@@ -78,18 +78,14 @@ export default function ConnectionDetailPage() {
   // first would hit the unknown-route redirect. A refetch that still lacks it
   // throws, so the add button reports the failure instead of the page
   // silently falling back to the list.
-  const openAccount = async (route: string) => {
+  const openAccount = async (connectionId: string) => {
     const { data } = await connectionsQuery.refetch();
     const cards = buildConnectionCards(data ?? [], composioQuery.data ?? null);
-    if (!cards.some((entry) => entry.route === route)) throw new Error();
-    navigate(`${BACK_TO_LIST}/${encodeURIComponent(route)}`);
+    const route = accountRoute(cards, connectionId);
+    if (!route) throw new Error();
+    // A reconnect lands on the card already open, which needs no new entry.
+    if (route !== serviceId) navigate(`${BACK_TO_LIST}/${encodeURIComponent(route)}`);
   };
-
-  // The Telegram personal account folded onto the Telegram connection as a slot;
-  // its old standalone route redirects to the merged Telegram detail.
-  if (serviceId === "telegram-user") {
-    return <Navigate to={`${BACK_TO_LIST}/telegram`} replace />;
-  }
 
   if (loading) {
     return <DetailSkeleton />;
@@ -124,6 +120,19 @@ export default function ConnectionDetailPage() {
 
   const composio = composioQuery.data ?? null;
   const cards = buildConnectionCards(connectionsQuery.data ?? [], composio);
+  // The Telegram personal account folded onto a Telegram card as a slot; its
+  // old standalone route redirects to whichever card holds it.
+  if (serviceId === "telegram-user") {
+    const telegram = cards.filter((entry) => entry.service === "telegram");
+    const folded =
+      telegram.find((entry) => entry.slots.some((slot) => slot.key === "session")) ?? telegram[0];
+    return (
+      <Navigate
+        to={folded ? `${BACK_TO_LIST}/${encodeURIComponent(folded.route)}` : BACK_TO_LIST}
+        replace
+      />
+    );
+  }
   const card = cards.find((entry) => entry.route === serviceId);
 
   // Unknown / unmatched route — back to the list.
