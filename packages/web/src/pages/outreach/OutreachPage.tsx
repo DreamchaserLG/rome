@@ -10,7 +10,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { ArrowLeft, Search } from "lucide-react";
 import {
   Page,
@@ -136,6 +136,25 @@ function Loading() {
 
 function LoadError({ message }: { message: string }) {
   return <p className="text-ui text-destructive">{message}</p>;
+}
+
+/** A sentence from the outreach namespace whose `<agent>` tag sets the agent's
+ *  name in monospace, so a name such as main does not read as a plain word. */
+function AgentText({ k, values }: { k: string; values: Record<string, unknown> }) {
+  const { t } = useTranslation("outreach");
+  return (
+    <Trans
+      t={t}
+      i18nKey={k}
+      values={values}
+      components={{ agent: <span className="font-mono text-[0.95em]" /> }}
+    />
+  );
+}
+
+/** The same sentence as plain text, for the document title. */
+function plainAgentText(text: string) {
+  return text.replace(/<\/?agent>/g, "");
 }
 
 function BotPills({ bots }: { bots: OutreachBot[] }) {
@@ -303,9 +322,7 @@ function AddAgent() {
   const query = useOutreachCandidates();
   const [term, setTerm] = useState("");
   const all = query.data?.agents ?? [];
-  const shown = all.filter((a) =>
-    `${a.name} ${a.description}`.toLowerCase().includes(term.trim().toLowerCase()),
-  );
+  const shown = all.filter((a) => a.name.toLowerCase().includes(term.trim().toLowerCase()));
   useDocumentTitle([t("add.title"), t("index.title")]);
 
   return (
@@ -339,7 +356,6 @@ function AddAgent() {
                   <Avatar name={a.name} size="sm" />
                   <ListRowContent>
                     <div className="font-medium">{a.name}</div>
-                    <div className="truncate text-aux text-muted-foreground">{a.description}</div>
                   </ListRowContent>
                   <span className="text-aux text-muted-foreground">{a.model}</span>
                 </Link>
@@ -351,7 +367,6 @@ function AddAgent() {
           </List>
         </Card>
       )}
-      <p className="text-aux text-muted-foreground">{t("add.footnote", { count: all.length })}</p>
     </Page>
   );
 }
@@ -363,7 +378,7 @@ function ChoosePlatform() {
   const name = useParams<{ agent: string }>().agent ?? "";
   const agentQuery = useOutreachAgent(name);
   const bots = agentQuery.data?.bots ?? [];
-  useDocumentTitle([t("choose.title", { agent: name }), t("index.title")]);
+  useDocumentTitle([plainAgentText(t("choose.title", { agent: name })), t("index.title")]);
   return (
     <Page>
       <BackLink to={bots.length ? agentPath(name) : "/outreach/add"}>
@@ -371,15 +386,21 @@ function ChoosePlatform() {
       </BackLink>
       <PageHeader>
         <PageHeading>
-          <PageTitle>{t("choose.title", { agent: name })}</PageTitle>
-          <PageDescription>{t("choose.description", { agent: name })}</PageDescription>
+          <PageTitle>
+            <AgentText k="choose.title" values={{ agent: name }} />
+          </PageTitle>
+          <PageDescription>{t("choose.description")}</PageDescription>
         </PageHeading>
       </PageHeader>
       <Section>
         <SectionHeader>
           <SectionHeading>
-            <SectionTitle>{t("choose.ownTitle", { agent: name })}</SectionTitle>
-            <SectionDescription>{t("choose.ownBody", { agent: name })}</SectionDescription>
+            <SectionTitle>
+              <AgentText k="choose.ownTitle" values={{ agent: name }} />
+            </SectionTitle>
+            <SectionDescription>
+              <AgentText k="choose.ownBody" values={{ agent: name }} />
+            </SectionDescription>
           </SectionHeading>
         </SectionHeader>
         <Card className="max-w-3xl py-0">
@@ -390,9 +411,6 @@ function ChoosePlatform() {
                   <PlatformIcon platform={p} className="size-6" />
                   <ListRowContent>
                     <div className="font-medium">{t(`platforms.${p}.name`)}</div>
-                    <div className="truncate text-aux text-muted-foreground">
-                      {t(`platforms.${p}.setup`)}
-                    </div>
                   </ListRowContent>
                 </Link>
               </ListRow>
@@ -403,8 +421,10 @@ function ChoosePlatform() {
       <Section>
         <SectionHeader>
           <SectionHeading>
-            <SectionTitle>{t("choose.delegateTitle", { agent: name })}</SectionTitle>
-            <SectionDescription>{t("choose.delegateBody", { agent: name })}</SectionDescription>
+            <SectionTitle>{t("choose.delegateTitle")}</SectionTitle>
+            <SectionDescription>
+              <AgentText k="choose.delegateBody" values={{ agent: name }} />
+            </SectionDescription>
           </SectionHeading>
         </SectionHeader>
         <Card className="max-w-3xl py-0">
@@ -416,9 +436,6 @@ function ChoosePlatform() {
                   <ListRowContent>
                     <div className="font-medium">
                       {t("choose.yourAccount", { app: t(`platforms.${p}.name`) })}
-                    </div>
-                    <div className="truncate text-aux text-muted-foreground">
-                      {t("choose.delegateSetup", { app: t(`platforms.${p}.name`) })}
                     </div>
                   </ListRowContent>
                 </Link>
@@ -450,7 +467,7 @@ function NewBot() {
   const title = delegate
     ? t("newBot.delegateTitle", { app })
     : t("newBot.title", { agent: name, app });
-  useDocumentTitle([title, t("index.title")]);
+  useDocumentTitle([plainAgentText(title), t("index.title")]);
 
   // Connecting the account moves this agent into Envoys and changes its
   // counts, so every Envoys read is stale once it lands.
@@ -473,11 +490,14 @@ function NewBot() {
       <BackLink to={agentPath(name, "/new")}>{t("choose.back")}</BackLink>
       <PageHeader>
         <PageHeading>
-          <PageTitle>{title}</PageTitle>
+          <PageTitle>
+            {delegate ? title : <AgentText k="newBot.title" values={{ agent: name, app }} />}
+          </PageTitle>
           <PageDescription>
-            {delegate
-              ? t("newBot.delegateDescription", { agent: name })
-              : t("newBot.description", { agent: name })}
+            <AgentText
+              k={delegate ? "newBot.delegateDescription" : "newBot.description"}
+              values={{ agent: name }}
+            />
           </PageDescription>
         </PageHeading>
       </PageHeader>
@@ -533,9 +553,11 @@ function NewBot() {
                   />
                   <p className="text-ui font-medium">{t("newBot.scanTitle", { app })}</p>
                   <p className="text-aux text-muted-foreground">
-                    {delegate
-                      ? t("newBot.signInBody", { app, agent: name })
-                      : t("newBot.scanBody", { bot: start.data.botName, app })}
+                    {delegate ? (
+                      <AgentText k="newBot.signInBody" values={{ app, agent: name }} />
+                    ) : (
+                      t("newBot.scanBody", { bot: start.data.botName, app })
+                    )}
                   </p>
                   <p className="text-aux text-muted-foreground" role="status">
                     {t("newBot.waiting")}
@@ -622,7 +644,9 @@ function Overview({ agent }: { agent: OutreachAgentSummary }) {
         <CardHeader>
           <CardTitle>{t("overview.bots")}</CardTitle>
           {agent.bots.length === 0 && (
-            <CardDescription>{t("overview.noBots", { agent: agent.name })}</CardDescription>
+            <CardDescription>
+              <AgentText k="overview.noBots" values={{ agent: agent.name }} />
+            </CardDescription>
           )}
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
@@ -794,9 +818,17 @@ function Settings({ agent }: { agent: OutreachAgentSummary }) {
                 {moving && (
                   <div className="flex flex-col gap-3 rounded-8 bg-surface-muted p-3 text-ui">
                     <p>
-                      {moving.to === NO_AGENT
-                        ? t("settings.unlinkConfirm", { bot: b.name, agent: agent.name })
-                        : t("settings.moveConfirm", { bot: b.name, to: moving.to, count })}
+                      {moving.to === NO_AGENT ? (
+                        <AgentText
+                          k="settings.unlinkConfirm"
+                          values={{ bot: b.name, agent: agent.name }}
+                        />
+                      ) : (
+                        <AgentText
+                          k="settings.moveConfirm"
+                          values={{ bot: b.name, to: moving.to, count }}
+                        />
+                      )}
                     </p>
                     <div className="flex gap-2">
                       <Button

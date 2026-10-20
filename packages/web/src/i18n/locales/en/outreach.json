@@ -17,13 +17,11 @@
     "title": "Connect an account",
     "description": "Pick the agent that speaks through the new account. The platform comes next.",
     "search": "Search agents",
-    "noMatch": "No agent matches.",
-    "footnote_one": "{{count}} agent. Agents are created and edited in Apps.",
-    "footnote_other": "{{count}} agents. Agents are created and edited in Apps."
+    "noMatch": "No agent matches."
   },
   "newBot": {
-    "title": "Connect an account on {{app}} for {{agent}}",
-    "description": "{{agent}} answers in every chat this account is in. Switching to another agent later keeps the account and its chats.",
+    "title": "Connect an account on {{app}} for <agent>{{agent}}</agent>",
+    "description": "<agent>{{agent}}</agent> answers in every chat this account is in.",
     "name": "Account name in {{app}}",
     "nameHint": "People see this name in groups and @mention it.",
     "showQr": "Show QR code",
@@ -35,7 +33,7 @@
     "token": "Bot token",
     "connect": "Connect",
     "delegateTitle": "Connect your {{app}} account",
-    "delegateDescription": "{{agent}} answers from your own account on your behalf. People in your chats see your name, not the agent's.",
+    "delegateDescription": "<agent>{{agent}}</agent> answers from your own account on your behalf. People in your chats see your name, not the agent's.",
     "signInBody": "Scan while signed in to your own account in the {{app}} app."
   },
   "agent": {
@@ -43,7 +41,7 @@
   },
   "overview": {
     "bots": "Accounts",
-    "noBots": "To reach {{agent}} in a chat app, connect an account for it, then invite the account to a group or DM.",
+    "noBots": "To reach <agent>{{agent}}</agent> in a chat app, connect an account for it, then invite the account to a group or DM.",
     "since": "since",
     "inviteTitle": "Invite {{bot}}.",
     "addBot": "Connect an account",
@@ -58,56 +56,50 @@
     "introduceBody": "Posts one short hello with what it can help with.",
     "bots": "Accounts",
     "answersAs": "Agent",
-    "moveConfirm_one": "Switch {{bot}} to {{to}}? {{to}} answers in its {{count}} chat from now on. It reads the chat's history as context and starts with fresh working memory.",
-    "moveConfirm_other": "Switch {{bot}} to {{to}}? {{to}} answers in its {{count}} chats from now on. It reads each chat's history as context and starts with fresh working memory.",
+    "moveConfirm_one": "Switch {{bot}} to <agent>{{to}}</agent>? <agent>{{to}}</agent> answers in its {{count}} chat from now on. It reads the chat's history as context and starts with fresh working memory.",
+    "moveConfirm_other": "Switch {{bot}} to <agent>{{to}}</agent>? <agent>{{to}}</agent> answers in its {{count}} chats from now on. It reads each chat's history as context and starts with fresh working memory.",
     "move": "Switch agent",
     "cancel": "Cancel",
     "removeBot": "Disconnect",
     "noAgent": "No agent",
-    "unlinkConfirm": "Unlink {{agent}} from {{bot}}? {{bot}} stays connected, but Rome stops listening to its messages until you link an agent again.",
+    "unlinkConfirm": "Unlink <agent>{{agent}}</agent> from {{bot}}? {{bot}} stays connected, but Rome stops listening to its messages until you link an agent again.",
     "unlink": "Unlink",
     "disconnectConfirm_one": "Disconnect {{bot}}? Rome loses access to the account and stops answering in its {{count}} chat. The chat keeps its history while another of Rome's accounts is in it.",
     "disconnectConfirm_other": "Disconnect {{bot}}? Rome loses access to the account and stops answering in its {{count}} chats. A chat keeps its history while another of Rome's accounts is in it."
   },
   "choose": {
-    "title": "Connect an account for {{agent}}",
+    "title": "Connect an account for <agent>{{agent}}</agent>",
     "description": "An agent can speak through any number of accounts, on one platform or several.",
     "back": "Platforms",
-    "ownTitle": "{{agent}}'s own account",
-    "ownBody": "People see {{agent}} as a member of its own, under the account's name.",
+    "ownTitle": "<agent>{{agent}}</agent>'s own account",
+    "ownBody": "People see <agent>{{agent}}</agent> as a member of its own, under the account's name.",
     "delegateTitle": "Your own account",
-    "delegateBody": "{{agent}} answers from your account. People see your name on its replies.",
-    "yourAccount": "Your {{app}}",
-    "delegateSetup": "Sign in by scanning a QR code in the {{app}} app"
+    "delegateBody": "<agent>{{agent}}</agent> answers from your account. People see your name on its replies.",
+    "yourAccount": "Your {{app}}"
   },
   "platforms": {
     "feishu": {
       "name": "Feishu",
-      "setup": "Scan a QR code in the Feishu app",
       "invite": "Open a group, then Settings, Group bots, Add bot, and pick {{bot}}. To start a DM, search for {{bot}} in Feishu. Chats appear here on their own.",
       "tokenHint": ""
     },
     "lark": {
       "name": "Lark",
-      "setup": "Scan a QR code in the Lark app",
       "invite": "Open a group, then Settings, Group bots, Add bot, and pick {{bot}}. To start a DM, search for {{bot}} in Lark. Chats appear here on their own.",
       "tokenHint": ""
     },
     "telegram": {
       "name": "Telegram",
-      "setup": "Paste a bot token from @BotFather",
       "invite": "Add {{bot}} to a group from its member list, or search for {{bot}} in Telegram to start a DM. Chats appear here on their own.",
       "tokenHint": "Create the bot with @BotFather in Telegram, then paste the token it gives you."
     },
     "discord": {
       "name": "Discord",
-      "setup": "Paste a bot token from the Discord Developer Portal",
       "invite": "Invite {{bot}} to a server with its install link, then @mention it in a channel. Chats appear here on their own.",
       "tokenHint": "Create an application in the Discord Developer Portal, add a bot to it, and paste the bot's token."
     },
     "wechat": {
       "name": "WeChat",
-      "setup": "Scan a QR code in the WeChat app",
       "invite": "Add {{bot}} to a group from its member list, or message {{bot}} directly in WeChat. Chats appear here on their own.",
       "tokenHint": ""
     }
