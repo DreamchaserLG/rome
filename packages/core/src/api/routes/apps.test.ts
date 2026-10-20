@@ -493,3 +493,81 @@ describe("GET /apps/events", () => {
     }
   });
 });
+
+describe("POST /apps/:appId/publish", () => {
+  // A locally developed app whose packed artifact does not exist, so a request
+  // that clears every intent check stops at the publisher's own artifact check
+  // (409) — proof it got that far — without anything leaving the test.
+  function publishHarness() {
+    const testDb = createTestDb();
+    const view = buildResolvedApp("notes", undefined, {
+      source: { mode: "source", path: "/tmp/rome-publish-route-missing" },
+    });
+    const build = async () => {
+      const deps = { ...(await buildTestDeps(testDb.db)), appCatalog: catalogWith(view) };
+      return new Hono().route("/", appsRoutes(deps));
+    };
+    return { build, close: () => testDb.close() };
+  }
+
+  function publish(app: Hono, init: { cookie?: boolean; body?: string }) {
+    return app.request("/apps/notes/publish", {
+      method: "POST",
+      headers: {
+        ...(init.cookie === false ? {} : { Cookie: guardianCookie() }),
+        ...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
+      ...(init.body === undefined ? {} : { body: init.body }),
+    });
+  }
+
+  it("refuses a caller without a guardian session, such as a public app's visitor", async () => {
+    const h = publishHarness();
+    try {
+      const res = await publish(await h.build(), {
+        cookie: false,
+        body: JSON.stringify({ version: "0.0.1" }),
+      });
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: "Guardian session required" });
+    } finally {
+      h.close();
+    }
+  });
+
+  it("refuses a bodyless or empty request instead of publishing", async () => {
+    const h = publishHarness();
+    try {
+      const app = await h.build();
+      for (const body of [undefined, "{}", "not json", JSON.stringify({ version: 1 })]) {
+        const res = await publish(app, { body });
+        expect(res.status).toBe(400);
+        expect((await res.json()).error).toContain("naming the installed version");
+      }
+    } finally {
+      h.close();
+    }
+  });
+
+  it("refuses a version that does not match the installed one", async () => {
+    const h = publishHarness();
+    try {
+      const res = await publish(await h.build(), { body: JSON.stringify({ version: "0.0.2" }) });
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toContain("does not match the installed version 0.0.1");
+    } finally {
+      h.close();
+    }
+  });
+
+  it("passes the intent checks when the guardian names the installed version", async () => {
+    const h = publishHarness();
+    try {
+      const res = await publish(await h.build(), { body: JSON.stringify({ version: "0.0.1" }) });
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toContain("is no longer at");
+    } finally {
+      h.close();
+    }
+  });
+});

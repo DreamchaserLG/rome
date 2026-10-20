@@ -1,6 +1,7 @@
 import type {
   AppInstallResponse,
   AppListResponse,
+  AppPublishRequest,
   AppPublishResponse,
   AppReadmeResponse,
   InstalledAppCard,
@@ -147,11 +148,18 @@ export const appHandlers = [
     if (candidateIndex >= 0) upgradable.splice(candidateIndex, 1);
     return HttpResponse.json({ ok: true });
   }),
-  http.post("/api/apps/:appId/publish", ({ params }) => {
+  http.post("/api/apps/:appId/publish", async ({ params, request }) => {
     const app = cardFor(String(params.appId));
     if (!app) return HttpResponse.json({ error: "Unknown app" }, { status: 404 });
     if (!app.canPublish) {
       return HttpResponse.json({ error: "This app cannot be published" }, { status: 403 });
+    }
+    const body = (await request.json().catch(() => null)) as Partial<AppPublishRequest> | null;
+    if (body?.version !== app.version) {
+      return HttpResponse.json(
+        { error: "Publishing requires the installed version in the body" },
+        { status: body?.version == null ? 400 : 409 },
+      );
     }
     return HttpResponse.json({
       appId: app.id,

@@ -704,12 +704,34 @@ export function appsRoutes(deps: ApiDeps): Hono {
   // authenticated by this instance's token. Version and handle policy are
   // enforced by the store; its rejection messages pass through verbatim with
   // their status so the dashboard can surface them.
+  //
+  // A publish is public and irreversible from this instance, so the route
+  // demands two things before it packs anything: the guardian (a public app's
+  // visitors reach `/api/apps/<id>/*` too), and a body naming the installed
+  // version being published. The version is what the confirm dialog shows and
+  // what the guardian approves; requiring it means a stray or bodyless POST —
+  // e.g. an agent probing the app's own API routes — can never publish.
   app.post("/apps/:appId/publish", async (c) => {
+    const guardian = await resolveGuardianSession(c, deps.db);
+    if (!guardian) {
+      return c.json({ error: "Guardian session required" }, 403);
+    }
     const appId = c.req.param("appId");
     try {
       assertValidAppId(appId);
     } catch {
       return c.json({ error: "Invalid app id" }, 400);
+    }
+    const body = await c.req.json<{ version?: unknown }>().catch(() => null);
+    const confirmedVersion = typeof body?.version === "string" ? body.version : null;
+    if (confirmedVersion == null) {
+      return c.json(
+        {
+          error:
+            'Publishing requires a JSON body naming the installed version to publish, e.g. {"version":"1.2.0"}',
+        },
+        400,
+      );
     }
     const systemBlock = assertAppIdIsNotSystem(c, appId, 'App "system" cannot be published');
     if (systemBlock) return systemBlock;
@@ -732,6 +754,14 @@ export function appsRoutes(deps: ApiDeps): Hono {
     if (view.installedHash == null) {
       return c.json(
         { error: `App "${appId}" has no pinned install hash; re-install before publishing` },
+        409,
+      );
+    }
+    if (confirmedVersion !== view.installedVersion) {
+      return c.json(
+        {
+          error: `Requested version ${confirmedVersion} does not match the installed version ${view.installedVersion ?? "unknown"} of "${appId}"; nothing was published`,
+        },
         409,
       );
     }

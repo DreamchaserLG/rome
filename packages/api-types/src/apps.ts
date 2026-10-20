@@ -161,6 +161,14 @@ export interface AppInstallResponse extends AppDetailResponse {
 }
 
 /**
+ * Body of `POST /apps/:appId/publish`. `version` must equal the installed
+ * version — the one the guardian confirmed — or nothing is published.
+ */
+export interface AppPublishRequest {
+  version: string;
+}
+
+/**
  * Successful App Store publish result. `claimed` reports whether this request
  * claimed the listing handle for the account.
  */

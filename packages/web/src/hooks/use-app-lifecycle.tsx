@@ -7,6 +7,7 @@ import { Globe, Link2, Lock, Mail, X } from "lucide-react";
 import type {
   AppAccessMode,
   AppInstallResponse,
+  AppPublishRequest,
   AppPublishResponse,
   InstalledAppCard,
   SpecSource,
@@ -205,10 +206,13 @@ export function useAppLifecycle(
   // the installed one, so it can't become an upgrade candidate either) — only
   // the app's store listing version is refetched, so the details page stops
   // showing the pre-publish version.
+  // The body names the version the confirm dialog showed; the server refuses to
+  // publish without it, or when the installed version has since changed.
   const publishMutation = useMutation({
-    mutationFn: (vars: { id: string; fallback: string }) =>
+    mutationFn: (vars: { id: string; version: string; fallback: string }) =>
       fetchJson<AppPublishResponse>(`/api/apps/${encodeURIComponent(vars.id)}/publish`, {
         method: "POST",
+        json: { version: vars.version } satisfies AppPublishRequest,
         fallback: vars.fallback,
       }),
     onMutate: ({ id }) => markActing(id, t("installed.publishing")),
@@ -418,6 +422,7 @@ export function useAppLifecycle(
     publishMutation.mutate(
       {
         id: app.id,
+        version: app.version,
         fallback: t("installed.errors.publishFailed", { name: app.displayName }),
       },
       {

@@ -28,18 +28,24 @@ Write both as product copy for users: what the app does, its main features, and 
 2. Reinstall from source (`install` in [`SKILL.md`](./SKILL.md)). Always do this before you publish. The publish ships the artifact that was packed at the last install. It does not include source edits made after that install, including the version bump, and it gives no warning about them. Edits under `.rome_store/` alone do not need a reinstall. A `README.md` edit does.
 3. Publish:
    - The guardian can open **Apps**, select the app, and select **Publish**.
-   - When the guardian asked you to publish, call the loopback API. Encode the app id as one path segment, as described in [`SHARING.md`](./SHARING.md):
+   - When the guardian asked you to publish, call the loopback API. Encode the app id as one path segment, as described in [`SHARING.md`](./SHARING.md). The body must name the installed version that the guardian approved. Without it, nothing is published:
 
      ```bash
-     curl -s -w '\n%{http_code}\n' -X POST "http://127.0.0.1:${INTERNAL_API_PORT:-4141}/api/apps/<encoded appId>/publish"
+     curl -s -w '\n%{http_code}\n' -X POST "http://127.0.0.1:${INTERNAL_API_PORT:-4141}/api/apps/<encoded appId>/publish" \
+       -H 'Content-Type: application/json' -d '{"version":"<installed version>"}'
      ```
+
+     Never send this request to test an app's own API routes. `/api/apps/<appId>/publish` belongs to Rome, not to the app.
 
      A `201` returns the listing id and the published version. On an error, read the `error` text before you act, and do not retry blindly:
 
      | Status | Meaning | Action |
      |---|---|---|
      | `400` "Invalid app id" | The path segment is not a valid encoded app id. | Encode the id as described in `SHARING.md`. |
+     | `400` "naming the installed version" | The body has no `version`. | Send the installed version that the guardian approved. |
+     | `403` "Guardian session required" | The request did not come from the guardian or from this Rome's loopback. | Publish only from the dashboard or the loopback API. |
      | `404` | The app is not installed. | Install it from source first. |
+     | `409` "does not match the installed version" | The installed version is not the version you named. | If you bumped the version, reinstall from source first. Otherwise confirm the version with the guardian. |
      | `409` | The packed artifact is missing or was changed after the install. | Reinstall from source, then publish again. |
      | `409` "not developed on this instance" | The app came from the Store or ships with Rome. | Stop. Tell the guardian. A reinstall does not fix this. |
      | `409` "is broken" | The app failed to load. | Reinstall from source, then publish again. |

@@ -693,7 +693,10 @@ describe("AppsIndexPage reactivity", () => {
     await waitFor(() =>
       expect(globalThis.fetch).toHaveBeenCalledWith(
         "/api/apps/notes/publish",
-        expect.objectContaining({ method: "POST" }),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ version: "1.0.0" }),
+        }),
       ),
     );
     // Success toast, and no error toast, after a successful publish.
