@@ -46,12 +46,11 @@ export function channelAccountsRoutes(
     return c.json({ accounts: channels.all().map(accountView) });
   });
 
-  // Link an agent to an account, or unlink it with `null`. Linking an agent
-  // other than main that has an account on the same platform takes it off
-  // that account. Only an account of a linkable service takes a link;
-  // unlinking is always open. Rome listens to an account of a linkable
-  // service only while it has an agent, so each account the write touched
-  // starts or stops listening.
+  // Link an agent to an account, or unlink it with `null`. Only this account
+  // changes: the agent keeps every other account it is linked to. Only an
+  // account of a linkable service takes a link; unlinking is always open.
+  // Rome listens to an account of a linkable service only while it has an
+  // agent, so the account starts or stops listening.
   app.put("/channels/accounts/:id/agent", async (c) => {
     if (!isSameOriginMutationRequest(c.req.raw)) {
       return c.json({ error: "Cross-site requests are not allowed." }, 403);
@@ -70,12 +69,9 @@ export function channelAccountsRoutes(
     }
     const id = c.req.param("id");
     try {
-      const outcome = channels.link(id, agent);
-      deps.accountListening.changed([outcome.channel.id, outcome.unlinkedFrom]);
-      const result: LinkAccountAgentResult = {
-        account: accountView(outcome.channel),
-        unlinkedFrom: outcome.unlinkedFrom,
-      };
+      const channel = channels.link(id, agent);
+      deps.accountListening.changed([channel.id]);
+      const result: LinkAccountAgentResult = { account: accountView(channel) };
       return c.json(result);
     } catch (err) {
       if (err instanceof ChannelRecordNotFound) return c.json({ error: err.message }, 404);
