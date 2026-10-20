@@ -742,37 +742,73 @@ function Settings({ agent }: { agent: OutreachAgentSummary }) {
   );
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("settings.chats")}</CardTitle>
-        </CardHeader>
-        <CardContent className="divide-y divide-border-subtle">
-          {toggle(
-            t("settings.introduce"),
-            t("settings.introduceBody"),
-            agent.introduceOnJoin,
-            (v) => update.mutate({ introduceOnJoin: v }),
-          )}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("settings.bots")}</CardTitle>
-        </CardHeader>
-        <CardContent className="divide-y divide-border-subtle">
+    <div className="flex flex-col gap-8">
+      <Section>
+        <SectionHeader>
+          <SectionHeading>
+            <SectionTitle>{t("settings.chats")}</SectionTitle>
+          </SectionHeading>
+        </SectionHeader>
+        <Card className="max-w-3xl py-0">
+          <div className="px-4">
+            {toggle(
+              t("settings.introduce"),
+              t("settings.introduceBody"),
+              agent.introduceOnJoin,
+              (v) => update.mutate({ introduceOnJoin: v }),
+            )}
+          </div>
+        </Card>
+      </Section>
+      <Section>
+        <SectionHeader>
+          <SectionHeading>
+            <SectionTitle>{t("settings.bots")}</SectionTitle>
+          </SectionHeading>
+        </SectionHeader>
+        <Card className="max-w-3xl gap-0 divide-y divide-border-subtle py-0">
           {agent.bots.map((b) => {
             const moving = pending?.botId === b.id ? pending : null;
             const count = b.groups + b.dms;
             return (
-              <div key={b.id} className="flex flex-col gap-3 py-3">
-                <div className="flex items-center gap-3">
-                  <PlatformIcon platform={b.platform} className="size-5" />
-                  <span className="flex-1 font-medium">{b.name}</span>
-                  <Badge variant="muted">{t(`kinds.${b.kind}`)}</Badge>
+              <div
+                key={b.id}
+                className="flex flex-col gap-3 px-4 pb-3 has-[>[data-slot=list-row]:only-child]:pb-0"
+              >
+                <ListRow className="px-0">
+                  <PlatformIcon platform={b.platform} className="size-6" />
+                  <ListRowContent>
+                    <div className="truncate font-medium">{b.name}</div>
+                    <div className="truncate text-aux text-muted-foreground">
+                      {t(`platforms.${b.platform}.name`)} · {t(`kinds.${b.kind}`)}
+                    </div>
+                  </ListRowContent>
+                  <label htmlFor={`answers-${b.id}`} className="text-aux text-muted-foreground">
+                    {t("settings.answersAs")}
+                  </label>
+                  <Select
+                    value={moving?.to ?? b.answersAs}
+                    onValueChange={(to) => {
+                      setDisconnecting(null);
+                      setPending(to === b.answersAs ? null : { botId: b.id, to });
+                    }}
+                  >
+                    <SelectTrigger id={`answers-${b.id}`} className="w-40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {names.map((n) => (
+                        <SelectItem key={n} value={n}>
+                          {n}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value={NO_AGENT}>{t("settings.noAgent")}</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <Button
-                    variant="destructive"
+                    variant="ghost"
                     size="sm"
+                    className="text-destructive"
                     disabled={disconnecting === b.id}
                     onClick={() => {
                       setPending(null);
@@ -781,7 +817,7 @@ function Settings({ agent }: { agent: OutreachAgentSummary }) {
                   >
                     {t("settings.removeBot")}
                   </Button>
-                </div>
+                </ListRow>
                 {disconnecting === b.id && (
                   <div className="flex flex-col gap-3 rounded-8 bg-surface-muted p-3 text-ui">
                     <p>{t("settings.disconnectConfirm", { bot: b.name, count })}</p>
@@ -807,28 +843,6 @@ function Settings({ agent }: { agent: OutreachAgentSummary }) {
                     </div>
                   </div>
                 )}
-                <Field className="max-w-xs">
-                  <FieldLabel htmlFor={`answers-${b.id}`}>{t("settings.answersAs")}</FieldLabel>
-                  <Select
-                    value={moving?.to ?? b.answersAs}
-                    onValueChange={(to) => {
-                      setDisconnecting(null);
-                      setPending(to === b.answersAs ? null : { botId: b.id, to });
-                    }}
-                  >
-                    <SelectTrigger id={`answers-${b.id}`} className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {names.map((n) => (
-                        <SelectItem key={n} value={n}>
-                          {n}
-                        </SelectItem>
-                      ))}
-                      <SelectItem value={NO_AGENT}>{t("settings.noAgent")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
                 {moving && (
                   <div className="flex flex-col gap-3 rounded-8 bg-surface-muted p-3 text-ui">
                     <p>
@@ -875,8 +889,8 @@ function Settings({ agent }: { agent: OutreachAgentSummary }) {
               </div>
             );
           })}
-        </CardContent>
-      </Card>
+        </Card>
+      </Section>
     </div>
   );
 }
