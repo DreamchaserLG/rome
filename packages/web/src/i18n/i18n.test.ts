@@ -21,7 +21,11 @@ function flatten(obj: Resource, prefix = ""): Record<string, string> {
 describe("i18n resources", () => {
   const baseLang = "en" as const;
   const baseBundles = resources[baseLang];
-  const namespaces = Object.keys(baseBundles) as Array<keyof typeof baseBundles>;
+  // The Envoys prototype is English-only; other locales fall back to en.
+  const englishOnly = new Set<string>(["outreach"]);
+  const namespaces = (Object.keys(baseBundles) as Array<keyof typeof baseBundles>).filter(
+    (ns) => !englishOnly.has(String(ns)),
+  );
 
   for (const ns of namespaces) {
     describe(`namespace ${String(ns)}`, () => {

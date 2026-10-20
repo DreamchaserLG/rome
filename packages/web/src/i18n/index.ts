@@ -23,7 +23,6 @@ import zhRoutines from "./locales/zh-CN/routines.json";
 import zhFiles from "./locales/zh-CN/files.json";
 import zhInbox from "./locales/zh-CN/inbox.json";
 import zhOnboard from "./locales/zh-CN/onboard.json";
-import zhOutreach from "./locales/zh-CN/outreach.json";
 import zhPeople from "./locales/zh-CN/people.json";
 import zhSettings from "./locales/zh-CN/settings.json";
 
@@ -78,7 +77,6 @@ export const resources = {
     activity: zhActivity,
     routines: zhRoutines,
     chat: zhChat,
-    outreach: zhOutreach,
     people: zhPeople,
     apps: zhApps,
     files: zhFiles,
