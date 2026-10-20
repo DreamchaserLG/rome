@@ -7,6 +7,7 @@ import {
   useLocation,
   useNavigate,
   useParams,
+  useSearchParams,
 } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -61,10 +62,13 @@ import {
   CHAT_PLATFORMS,
   type ChatEntry,
   type ChatPlatform,
+  DELEGATE_PLATFORMS,
+  type LinkKind,
   PLATFORM_SETUP,
   type OutreachAgentSummary,
   type OutreachBot,
   type OutreachChat,
+  type UnlinkedAccount,
   outreachKeys,
   useAgentActivity,
   useAgentChats,
@@ -80,13 +84,16 @@ import {
 } from "./outreach-api";
 
 /**
- * Outreach: the agents that people can reach from a chat app.
+ * Envoys: the agents that people can reach on chat platforms.
  *
- * Rome may have many agents; only the ones with a linked account are listed here.
- * Each such agent has an Overview (its bots and what it can use), its Chats
- * (every group and DM one of its bots is in), Activity across those chats, and
- * Settings. Each account keeps its own history of a chat: what the chat app
- * delivered to it.
+ * Rome may have many agents; only the ones speaking through a connected account
+ * are listed here. A connected account has at most one agent, usually chosen
+ * when the account is connected: the agent's own account, or the guardian's
+ * account with the agent as delegate. Accounts connected with no agent are
+ * listed apart, and Rome does not listen to them until an agent is linked. Each listed agent has an Overview (its accounts),
+ * its Chats (every group and DM one of its accounts is in), Activity across
+ * those chats, and Settings. A group is one chat with one history, however many
+ * of Rome's accounts are in it.
  */
 export default function OutreachPage() {
   return (
@@ -104,6 +111,7 @@ const agentPath = (name: string, rest = "") => `/outreach/${encodeURIComponent(n
 
 const PLATFORM_ICONS: Record<ChatPlatform, typeof FeishuIcon> = {
   feishu: FeishuIcon,
+  lark: FeishuIcon,
   telegram: TelegramIcon,
   discord: DiscordIcon,
   wechat: WeChatIcon,
@@ -157,6 +165,7 @@ function OutreachIndex() {
   const { t } = useTranslation("outreach");
   const query = useOutreachAgents();
   const agents = query.data?.agents ?? [];
+  const unlinked = query.data?.unlinked ?? [];
 
   return (
     <Page>
@@ -175,7 +184,7 @@ function OutreachIndex() {
         <Loading />
       ) : query.error ? (
         <LoadError message={query.error.message} />
-      ) : agents.length === 0 ? (
+      ) : agents.length === 0 && unlinked.length === 0 ? (
         <EmptyState>
           <EmptyStateTitle>{t("index.emptyTitle")}</EmptyStateTitle>
           <EmptyStateDescription>{t("index.emptyBody")}</EmptyStateDescription>
@@ -186,13 +195,86 @@ function OutreachIndex() {
           </EmptyStateAction>
         </EmptyState>
       ) : (
-        <ListGrid>
-          {agents.map((a) => (
-            <AgentCard key={a.name} agent={a} />
-          ))}
-        </ListGrid>
+        <>
+          {agents.length > 0 && (
+            <ListGrid>
+              {agents.map((a) => (
+                <AgentCard key={a.name} agent={a} />
+              ))}
+            </ListGrid>
+          )}
+          {unlinked.length > 0 && <UnlinkedAccounts accounts={unlinked} />}
+        </>
       )}
     </Page>
+  );
+}
+
+/** Accounts Rome has access to but no agent speaks through. Linking an agent is
+ *  one step and starts Rome listening to the account. */
+function UnlinkedAccounts({ accounts }: { accounts: UnlinkedAccount[] }) {
+  const { t } = useTranslation("outreach");
+  const navigate = useNavigate();
+  const candidates = useOutreachCandidates();
+  const link = useMoveBot();
+  const names = (candidates.data?.agents ?? []).map((a) => a.name).sort();
+
+  return (
+    <Section>
+      <SectionHeader>
+        <SectionHeading>
+          <SectionTitle>{t("unlinked.title")}</SectionTitle>
+          <SectionDescription>{t("unlinked.description")}</SectionDescription>
+        </SectionHeading>
+      </SectionHeader>
+      <Card className="max-w-3xl py-0">
+        <List>
+          {accounts.map((acc) => {
+            // A delegate is the guardian's pick, with main suggested first.
+            const order =
+              acc.kind === "delegate" ? ["main", ...names.filter((n) => n !== "main")] : names;
+            return (
+              <ListRow key={acc.id}>
+                <PlatformIcon platform={acc.platform} className="size-6" />
+                <ListRowContent>
+                  <div className="font-medium">{acc.name}</div>
+                  <div className="truncate text-aux text-muted-foreground">
+                    {t(`platforms.${acc.platform}.name`)}
+                    {acc.kind === "delegate" && ` · ${t("unlinked.yours")}`}
+                  </div>
+                </ListRowContent>
+                <Select
+                  value=""
+                  disabled={link.isPending}
+                  onValueChange={(agent) =>
+                    link.mutate(
+                      { botId: acc.id, answersAs: agent },
+                      { onSuccess: () => navigate(agentPath(agent, "/settings")) },
+                    )
+                  }
+                >
+                  <SelectTrigger
+                    className="w-48"
+                    aria-label={t("unlinked.link", { bot: acc.name })}
+                  >
+                    <SelectValue placeholder={t("unlinked.pick")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {order.map((n) => (
+                      <SelectItem key={n} value={n}>
+                        {acc.kind === "delegate" && n === "main"
+                          ? t("unlinked.suggested", { agent: n })
+                          : n}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </ListRow>
+            );
+          })}
+        </List>
+      </Card>
+    </Section>
   );
 }
 
@@ -301,28 +383,58 @@ function ChoosePlatform() {
           <PageDescription>{t("choose.description", { agent: name })}</PageDescription>
         </PageHeading>
       </PageHeader>
-      <Card className="max-w-3xl py-0">
-        <List>
-          {CHAT_PLATFORMS.map((p) => {
-            const current = bots.find((b) => b.platform === p);
-            return (
+      <Section>
+        <SectionHeader>
+          <SectionHeading>
+            <SectionTitle>{t("choose.ownTitle", { agent: name })}</SectionTitle>
+            <SectionDescription>{t("choose.ownBody", { agent: name })}</SectionDescription>
+          </SectionHeading>
+        </SectionHeader>
+        <Card className="max-w-3xl py-0">
+          <List>
+            {CHAT_PLATFORMS.map((p) => (
               <ListRow key={p} asChild interactive>
                 <Link to={agentPath(name, `/${p}/new`)}>
                   <PlatformIcon platform={p} className="size-6" />
                   <ListRowContent>
                     <div className="font-medium">{t(`platforms.${p}.name`)}</div>
                     <div className="truncate text-aux text-muted-foreground">
-                      {current
-                        ? t("choose.replaces", { bot: current.name })
-                        : t(`platforms.${p}.setup`)}
+                      {t(`platforms.${p}.setup`)}
                     </div>
                   </ListRowContent>
                 </Link>
               </ListRow>
-            );
-          })}
-        </List>
-      </Card>
+            ))}
+          </List>
+        </Card>
+      </Section>
+      <Section>
+        <SectionHeader>
+          <SectionHeading>
+            <SectionTitle>{t("choose.delegateTitle", { agent: name })}</SectionTitle>
+            <SectionDescription>{t("choose.delegateBody", { agent: name })}</SectionDescription>
+          </SectionHeading>
+        </SectionHeader>
+        <Card className="max-w-3xl py-0">
+          <List>
+            {DELEGATE_PLATFORMS.map((p) => (
+              <ListRow key={p} asChild interactive>
+                <Link to={agentPath(name, `/${p}/new?kind=delegate`)}>
+                  <PlatformIcon platform={p} className="size-6" />
+                  <ListRowContent>
+                    <div className="font-medium">
+                      {t("choose.yourAccount", { app: t(`platforms.${p}.name`) })}
+                    </div>
+                    <div className="truncate text-aux text-muted-foreground">
+                      {t("choose.delegateSetup", { app: t(`platforms.${p}.name`) })}
+                    </div>
+                  </ListRowContent>
+                </Link>
+              </ListRow>
+            ))}
+          </List>
+        </Card>
+      </Section>
     </Page>
   );
 }
@@ -332,9 +444,9 @@ function NewBot() {
   const navigate = useNavigate();
   const params = useParams<{ agent: string; platform: string }>();
   const name = params.agent ?? "";
-  const agentQuery = useOutreachAgent(name);
+  const [search] = useSearchParams();
+  const kind: LinkKind = search.get("kind") === "delegate" ? "delegate" : "own";
   const [botName, setBotName] = useState(name.charAt(0).toUpperCase() + name.slice(1));
-  const [region, setRegion] = useState<"feishu" | "lark">("feishu");
   const [token, setToken] = useState("");
   const queryClient = useQueryClient();
   const start = useStartRegistration();
@@ -342,11 +454,14 @@ function NewBot() {
   const status = reg.data?.status ?? start.data?.status;
   const platform = isPlatform(params.platform) ? params.platform : null;
   const app = platform ? t(`platforms.${platform}.name`) : "";
-  const current = agentQuery.data?.bots.find((b) => b.platform === platform);
-  useDocumentTitle([t("newBot.title", { agent: name, app }), t("index.title")]);
+  const delegate = kind === "delegate";
+  const title = delegate
+    ? t("newBot.delegateTitle", { app })
+    : t("newBot.title", { agent: name, app });
+  useDocumentTitle([title, t("index.title")]);
 
-  // Creating the account moves this agent into Outreach and changes its
-  // counts, so every Outreach read is stale once it lands.
+  // Connecting the account moves this agent into Envoys and changes its
+  // counts, so every Envoys read is stale once it lands.
   useEffect(() => {
     if (status !== "connected") return;
     void queryClient
@@ -354,23 +469,26 @@ function NewBot() {
       .then(() => navigate(agentPath(name), { replace: true }));
   }, [status, name, navigate, queryClient]);
 
-  if (!platform) return <Navigate to={agentPath(name, "/new")} replace />;
-  const byQr = PLATFORM_SETUP[platform] === "qr";
+  if (!platform || (delegate && !DELEGATE_PLATFORMS.includes(platform))) {
+    return <Navigate to={agentPath(name, "/new")} replace />;
+  }
+  // Signing in to the guardian's own account is a QR scan in the app on every
+  // platform that allows a delegate.
+  const byQr = delegate || PLATFORM_SETUP[platform] === "qr";
 
   return (
     <Page>
       <BackLink to={agentPath(name, "/new")}>{t("choose.back")}</BackLink>
       <PageHeader>
         <PageHeading>
-          <PageTitle>{t("newBot.title", { agent: name, app })}</PageTitle>
-          <PageDescription>{t("newBot.description", { agent: name })}</PageDescription>
+          <PageTitle>{title}</PageTitle>
+          <PageDescription>
+            {delegate
+              ? t("newBot.delegateDescription", { agent: name })
+              : t("newBot.description", { agent: name })}
+          </PageDescription>
         </PageHeading>
       </PageHeader>
-      {current && (
-        <p className="max-w-4xl rounded-8 bg-surface-muted p-3 text-ui">
-          {t("newBot.replaces", { agent: name, bot: current.name, app })}
-        </p>
-      )}
       <div className="grid max-w-4xl gap-6 md:grid-cols-2">
         <form
           className="flex flex-col gap-4"
@@ -378,30 +496,18 @@ function NewBot() {
             e.preventDefault();
             start.mutate({
               agent: name,
-              botName,
+              botName: delegate ? "" : botName,
               platform,
-              ...(platform === "feishu" ? { region } : {}),
+              kind,
               ...(byQr ? {} : { token }),
             });
           }}
         >
-          <Field>
-            <FieldLabel htmlFor="bot-name">{t("newBot.name", { app })}</FieldLabel>
-            <Input id="bot-name" value={botName} onChange={(e) => setBotName(e.target.value)} />
-            <FieldDescription>{t("newBot.nameHint")}</FieldDescription>
-          </Field>
-          {platform === "feishu" && (
+          {!delegate && (
             <Field>
-              <FieldLabel htmlFor="bot-region">{t("newBot.region")}</FieldLabel>
-              <Select value={region} onValueChange={(v) => setRegion(v as "feishu" | "lark")}>
-                <SelectTrigger id="bot-region" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="feishu">{t("newBot.regionFeishu")}</SelectItem>
-                  <SelectItem value="lark">{t("newBot.regionLark")}</SelectItem>
-                </SelectContent>
-              </Select>
+              <FieldLabel htmlFor="bot-name">{t("newBot.name", { app })}</FieldLabel>
+              <Input id="bot-name" value={botName} onChange={(e) => setBotName(e.target.value)} />
+              <FieldDescription>{t("newBot.nameHint")}</FieldDescription>
             </Field>
           )}
           {!byQr && (
@@ -435,7 +541,9 @@ function NewBot() {
                   />
                   <p className="text-ui font-medium">{t("newBot.scanTitle", { app })}</p>
                   <p className="text-aux text-muted-foreground">
-                    {t("newBot.scanBody", { bot: start.data.botName, app })}
+                    {delegate
+                      ? t("newBot.signInBody", { app, agent: name })
+                      : t("newBot.scanBody", { bot: start.data.botName, app })}
                   </p>
                   <p className="text-aux text-muted-foreground" role="status">
                     {t("newBot.waiting")}
@@ -550,7 +658,9 @@ function Overview({ agent }: { agent: OutreachAgentSummary }) {
                       {t("overview.since")} <Timestamp value={b.connectedAt} format="date" />
                     </div>
                   </ListRowContent>
-                  <Badge variant="success">{t("overview.connected")}</Badge>
+                  <Badge variant={b.kind === "delegate" ? "info" : "success"}>
+                    {t(`kinds.${b.kind}`)}
+                  </Badge>
                 </ListRow>
               ))}
             </List>
@@ -715,6 +825,7 @@ function ChatView({ agent }: { agent: OutreachAgentSummary }) {
 }
 
 function Entry({ entry }: { entry: ChatEntry }) {
+  const { t } = useTranslation("outreach");
   if (entry.kind === "event") {
     return (
       <p className="text-center text-aux text-muted-foreground">
@@ -728,7 +839,13 @@ function Entry({ entry }: { entry: ChatEntry }) {
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2 text-aux text-muted-foreground">
           <span className="text-ui font-medium text-foreground">{entry.sender}</span>
-          {entry.bot && <Badge variant="brand">{entry.bot.agent}</Badge>}
+          {entry.bot && (
+            <Badge variant="brand">
+              {entry.bot.kind === "delegate"
+                ? t("chat.onBehalf", { agent: entry.bot.agent })
+                : entry.bot.agent}
+            </Badge>
+          )}
           <Timestamp value={entry.at} format="time" />
         </div>
         <p className="text-ui whitespace-pre-wrap">{entry.text}</p>
@@ -836,6 +953,9 @@ function Activity({ agent }: { agent: OutreachAgentSummary }) {
   );
 }
 
+/** The agent select's value for "no agent"; picking it unlinks the account. */
+const NO_AGENT = "__none__";
+
 function Settings({ agent }: { agent: OutreachAgentSummary }) {
   const { t } = useTranslation("outreach");
   const navigate = useNavigate();
@@ -845,6 +965,7 @@ function Settings({ agent }: { agent: OutreachAgentSummary }) {
   const candidates = useOutreachCandidates();
   const all = useOutreachAgents();
   const [pending, setPending] = useState<{ botId: string; to: string } | null>(null);
+
   const names = [
     ...new Set([
       ...(all.data?.agents ?? []).map((a) => a.name),
@@ -896,6 +1017,7 @@ function Settings({ agent }: { agent: OutreachAgentSummary }) {
                 <div className="flex items-center gap-3">
                   <PlatformIcon platform={b.platform} className="size-5" />
                   <span className="flex-1 font-medium">{b.name}</span>
+                  <Badge variant="muted">{t(`kinds.${b.kind}`)}</Badge>
                   <Button
                     variant="destructive"
                     size="sm"
@@ -928,46 +1050,38 @@ function Settings({ agent }: { agent: OutreachAgentSummary }) {
                           {n}
                         </SelectItem>
                       ))}
+                      <SelectItem value={NO_AGENT}>{t("settings.noAgent")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </Field>
                 {moving && (
                   <div className="flex flex-col gap-3 rounded-8 bg-surface-muted p-3 text-ui">
-                    <p>{t("settings.moveConfirm", { bot: b.name, to: moving.to, count })}</p>
-                    {(() => {
-                      // One account per agent on a platform: the target's
-                      // current account on this app loses its agent and, in
-                      // phase 1, answers as main until another agent is linked.
-                      const previous = (all.data?.agents ?? [])
-                        .find((a) => a.name === moving.to)
-                        ?.bots.find((other) => other.platform === b.platform && other.id !== b.id);
-                      return previous && moving.to !== "main" ? (
-                        <p>
-                          {t("settings.moveReplaces", {
-                            to: moving.to,
-                            previous: previous.name,
-                            app: t(`platforms.${b.platform}.name`),
-                          })}
-                        </p>
-                      ) : null;
-                    })()}
+                    <p>
+                      {moving.to === NO_AGENT
+                        ? t("settings.unlinkConfirm", { bot: b.name, agent: agent.name })
+                        : t("settings.moveConfirm", { bot: b.name, to: moving.to, count })}
+                    </p>
                     <div className="flex gap-2">
                       <Button
                         size="sm"
                         disabled={move.isPending}
                         onClick={() =>
                           move.mutate(
-                            { botId: b.id, answersAs: moving.to },
+                            { botId: b.id, answersAs: moving.to === NO_AGENT ? null : moving.to },
                             {
                               onSuccess: () => {
                                 setPending(null);
-                                navigate(agentPath(moving.to, "/settings"));
+                                if (moving.to !== NO_AGENT) {
+                                  navigate(agentPath(moving.to, "/settings"));
+                                } else if (agent.bots.length <= 1) {
+                                  navigate("/outreach");
+                                }
                               },
                             },
                           )
                         }
                       >
-                        {t("settings.move")}
+                        {moving.to === NO_AGENT ? t("settings.unlink") : t("settings.move")}
                       </Button>
                       <Button size="sm" variant="ghost" onClick={() => setPending(null)}>
                         {t("settings.cancel")}

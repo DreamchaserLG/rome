@@ -4,25 +4,33 @@ import type {
   BotRegistration,
   ChatPlatform,
   ChatEntry,
+  LinkKind,
   OutreachAgent,
   OutreachAgentSummary,
   OutreachBot,
   OutreachChat,
 } from "@/pages/outreach/outreach-api";
 
-// Outreach: agents, the bots that answer as them, and the chats those bots are
-// in. The surface has no backend yet, so this module is the only
-// implementation of its routes. Writes run against the in-memory store below.
+// Envoys: agents, the connected accounts they speak through, and the chats
+// those accounts are in. The surface has no backend yet, so this module is the
+// only implementation of its routes. Writes run against the in-memory store
+// below.
 //
-// A chat is stored once with the bots that are in it, and an agent's chats are
-// the chats where any bot answering as it is a member. That one lookup is the
-// whole model, so it lives in `chatsOf` and every route goes through it.
+// A chat is stored once with Rome's accounts that are in it, and an agent's
+// chats are the chats where any account it speaks through is a member. That one
+// lookup is the whole model, so it lives in `chatsOf` and every route goes
+// through it. A stored account has at most one agent. One with none is connected
+// but unlinked: Rome does not listen to it, so it reaches no chat. Disconnecting
+// removes the account, and a chat goes when the last of Rome's accounts leaves it.
 
 interface StoredBot {
   id: string;
   platform: ChatPlatform;
   name: string;
-  answersAs: string;
+  answersAs: string | null;
+  /** The kind of link the account takes: the agent's own account, or the
+   *  guardian's with the agent as delegate. Kept while the account is unlinked. */
+  kind: LinkKind;
   connectedAt: string;
 }
 
@@ -115,6 +123,7 @@ let bots: StoredBot[] = [
     platform: "feishu",
     name: "Rome",
     answersAs: "main",
+    kind: "own",
     connectedAt: day(2, 10, 0),
   },
   {
@@ -122,6 +131,7 @@ let bots: StoredBot[] = [
     platform: "feishu",
     name: "Writer",
     answersAs: "writer",
+    kind: "own",
     connectedAt: day(9, 9, 12),
   },
   {
@@ -129,7 +139,24 @@ let bots: StoredBot[] = [
     platform: "telegram",
     name: "WriterRomeBot",
     answersAs: "writer",
+    kind: "own",
     connectedAt: day(11, 14, 0),
+  },
+  {
+    id: "tg_ouou",
+    platform: "telegram",
+    name: "Ouou",
+    answersAs: "main",
+    kind: "delegate",
+    connectedAt: day(12, 9, 0),
+  },
+  {
+    id: "dc_ops",
+    platform: "discord",
+    name: "Rome Ops",
+    answersAs: null,
+    kind: "own",
+    connectedAt: day(13, 16, 30),
   },
 ];
 
@@ -148,13 +175,14 @@ const say = (at: string, sender: string, text: string): ChatEntry => ({
   text,
 });
 const botSay = (at: string, botId: string, text: string): ChatEntry => {
-  const bot = bots.find((b) => b.id === botId)!;
+  const bot = bots.find((b) => b.id === botId);
+  if (!linked(bot)) throw new Error(`fixture message from unlinked account ${botId}`);
   return {
     kind: "message",
     id: `e${++entrySeq}`,
     at,
     sender: bot.name,
-    bot: { id: bot.id, agent: bot.answersAs },
+    bot: { id: bot.id, agent: bot.answersAs, kind: bot.kind },
     text,
   };
 };
@@ -273,6 +301,23 @@ let chats: StoredChat[] = [
       ),
     ],
   },
+  {
+    id: "tg_dm_sam",
+    kind: "dm",
+    name: "Sam Lee",
+    members: 2,
+    botIds: ["tg_ouou"],
+    addedBy: "Sam Lee",
+    joinedAt: day(12, 9, 5),
+    entries: [
+      say(day(13, 12, 30), "Sam Lee", "Are you free Thursday afternoon for the press call?"),
+      botSay(
+        day(13, 12, 31),
+        "tg_ouou",
+        "Thursday 14:00 works. The launch runs until 11:00, so anything after lunch is fine.",
+      ),
+    ],
+  },
 ];
 
 const registrations = new Map<string, BotRegistration & { startedAt: number }>();
@@ -284,7 +329,11 @@ function agentNamed(name: string) {
 }
 
 function botsOf(agent: string) {
-  return bots.filter((b) => b.answersAs === agent);
+  return bots.filter((b): b is StoredBot & { answersAs: string } => b.answersAs === agent);
+}
+
+function linked(b: StoredBot | undefined): b is StoredBot & { answersAs: string } {
+  return b !== undefined && b.answersAs !== null;
 }
 
 function chatsOf(agent: string) {
@@ -292,13 +341,14 @@ function chatsOf(agent: string) {
   return chats.filter((c) => c.botIds.some((id) => ids.has(id)));
 }
 
-function toBot(b: StoredBot): OutreachBot {
+function toBot(b: StoredBot & { answersAs: string }): OutreachBot {
   const its = chats.filter((c) => c.botIds.includes(b.id));
   return {
     id: b.id,
     platform: b.platform,
     name: b.name,
     answersAs: b.answersAs,
+    kind: b.kind,
     connectedAt: b.connectedAt,
     groups: its.filter((c) => c.kind === "group").length,
     dms: its.filter((c) => c.kind === "dm").length,
@@ -315,8 +365,8 @@ function toChat(c: StoredChat): OutreachChat {
     members: c.members,
     bots: c.botIds
       .map((id) => bots.find((b) => b.id === id))
-      .filter((b): b is StoredBot => b !== undefined)
-      .map((b) => ({ id: b.id, name: b.name, answersAs: b.answersAs })),
+      .filter(linked)
+      .map((b) => ({ id: b.id, name: b.name, answersAs: b.answersAs, kind: b.kind })),
     addedBy: c.addedBy,
     joinedAt: c.joinedAt,
     lastMessageAt: last?.at ?? null,
@@ -351,32 +401,10 @@ function fakeQr(seed: string): string {
   return `data:image/svg+xml;base64,${btoa(svg)}`;
 }
 
-/**
- * An agent has one account per app. Linking it to `keep` takes it off any other
- * account on that app, which stays silent until another agent is
- * linked. The mock never takes main off its Rome account.
- */
-function unlinkOthers(agent: string, platform: ChatPlatform, keep: string, at: string) {
-  if (agent === "main") return;
-  for (const other of bots) {
-    if (other.id === keep || other.platform !== platform || other.answersAs !== agent) continue;
-    other.answersAs = "main";
-    for (const c of chats) {
-      if (c.botIds.includes(other.id)) {
-        c.entries = [
-          ...c.entries,
-          ev(at, `${other.name} is no longer linked to ${agent}, so it stays silent for now`),
-        ];
-      }
-    }
-  }
-}
-
 /** The scan happens on a phone, so mock mode completes it on a timer. */
 function settle(reg: BotRegistration & { startedAt: number }) {
   if (reg.status !== "waiting" || Date.now() - reg.startedAt < SCAN_AFTER_MS) return;
-  const id = `cli_${reg.agent.replace(/[^a-z0-9]/gi, "")}${bots.length}`;
-  unlinkOthers(reg.agent, reg.platform, id, new Date().toISOString());
+  const id = `${reg.platform}_${reg.agent.replace(/[^a-z0-9]/gi, "")}${bots.length}`;
   bots = [
     ...bots,
     {
@@ -384,6 +412,7 @@ function settle(reg: BotRegistration & { startedAt: number }) {
       platform: reg.platform,
       name: reg.botName,
       answersAs: reg.agent,
+      kind: reg.kind,
       connectedAt: new Date().toISOString(),
     },
   ];
@@ -395,12 +424,21 @@ export const outreachHandlers = [
   http.get("/api/outreach/agents", () =>
     HttpResponse.json({
       agents: agents.filter((a) => botsOf(a.name).length > 0).map(summary),
+      unlinked: bots
+        .filter((b) => b.answersAs === null)
+        .map((b) => ({
+          id: b.id,
+          platform: b.platform,
+          name: b.name,
+          kind: b.kind,
+          connectedAt: b.connectedAt,
+        })),
     }),
   ),
 
-  http.get("/api/outreach/candidates", () =>
-    HttpResponse.json({ agents: agents.filter((a) => botsOf(a.name).length === 0) }),
-  ),
+  // Picking the agent is the first step of connecting an account, and an agent
+  // may speak through any number of accounts, so every agent is a candidate.
+  http.get("/api/outreach/candidates", () => HttpResponse.json({ agents })),
 
   http.get("/api/outreach/agents/:name", ({ params }) => {
     const a = agentNamed(String(params.name));
@@ -447,21 +485,24 @@ export const outreachHandlers = [
 
   http.patch("/api/outreach/bots/:id", async ({ params, request }) => {
     const b = bots.find((x) => x.id === params.id);
-    if (!b) return HttpResponse.json({ detail: "No such bot" }, { status: 404 });
-    const { answersAs } = (await request.json()) as { answersAs?: string };
-    if (!answersAs || !agentNamed(answersAs)) {
+    if (!b) return HttpResponse.json({ detail: "No such account" }, { status: 404 });
+    const { answersAs } = (await request.json()) as { answersAs?: string | null };
+    if (answersAs === undefined || (answersAs !== null && !agentNamed(answersAs))) {
       return HttpResponse.json({ detail: "No such agent" }, { status: 400 });
     }
     const from = b.answersAs;
     const at = new Date().toISOString();
-    unlinkOthers(answersAs, b.platform, b.id, at);
     b.answersAs = answersAs;
+    const text =
+      answersAs === null
+        ? `${from} unlinked from ${b.name}`
+        : from === null
+          ? `${answersAs} linked to ${b.name}`
+          : `${b.name} switched from ${from} to ${answersAs}`;
     for (const c of chats) {
-      if (c.botIds.includes(b.id)) {
-        c.entries = [...c.entries, ev(at, `${b.name} is now linked to ${answersAs} (was ${from})`)];
-      }
+      if (c.botIds.includes(b.id)) c.entries = [...c.entries, ev(at, text)];
     }
-    return HttpResponse.json(toBot(b));
+    return new HttpResponse(null, { status: 204 });
   }),
 
   http.delete("/api/outreach/bots/:id", ({ params }) => {
@@ -476,6 +517,7 @@ export const outreachHandlers = [
       agent: string;
       botName: string;
       platform: ChatPlatform;
+      kind: LinkKind;
       token?: string;
     };
     if (!agentNamed(body.agent)) {
@@ -491,6 +533,7 @@ export const outreachHandlers = [
       agent: body.agent,
       botName: body.botName.trim() || body.agent,
       platform: body.platform,
+      kind: body.kind,
       status: "waiting" as const,
       qr: byToken ? null : fakeQr(id + body.agent),
       // A pasted token needs no phone, so it settles on the next read.

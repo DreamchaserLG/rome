@@ -10,49 +10,47 @@
   },
   "index": {
     "title": "外派智能体",
-    "description": "人们可以在聊天应用中找到的智能体，每个都通过自己的关联账号。",
-    "add": "添加智能体",
-    "emptyTitle": "还没有外派智能体",
-    "emptyBody": "智能体有了关联账号后会出现在这里。添加一个智能体，给它在聊天应用里开一个账号。"
+    "description": "人们可以在聊天平台上找到的智能体，每个都通过你连接的账号发言。",
+    "add": "连接账号",
+    "emptyTitle": "还没有连接的账号",
+    "emptyBody": "在聊天平台上连接一个账号，并选择通过它发言的智能体，智能体就会出现在这里。"
   },
   "add": {
-    "title": "添加智能体",
-    "description": "选择大家要找的智能体。接下来选一个聊天应用，在那里给它开一个账号。",
+    "title": "连接账号",
+    "description": "先选择通过这个账号发言的智能体，再选择平台并设置账号。",
     "search": "搜索智能体",
     "noMatch": "没有匹配的智能体。",
-    "footnote_one": "{{count}} 个智能体没有关联账号。智能体在应用中创建和编辑。",
-    "footnote_other": "{{count}} 个智能体没有关联账号。智能体在应用中创建和编辑。"
+    "footnote_one": "{{count}} 个智能体。智能体在应用中创建和编辑。",
+    "footnote_other": "{{count}} 个智能体。智能体在应用中创建和编辑。"
   },
   "newBot": {
-    "title": "{{agent}} 在{{app}}",
-    "description": "账号关联到 {{agent}}。之后可以改为关联其他智能体。",
+    "title": "为 {{agent}} 连接{{app}}账号",
+    "description": "{{agent}} 在这个账号所在的每个聊天里都通过它发言。之后可以一步切换到其他智能体。",
     "name": "{{app}}里的账号名",
     "nameHint": "人们在群里看到并 @ 这个名称。",
-    "region": "区域",
-    "regionFeishu": "飞书（中国）",
-    "regionLark": "Lark（国际）",
     "showQr": "显示二维码",
     "qrPlaceholder": "二维码显示在这里。",
     "qrAlt": "{{app}}应用的二维码",
     "scanTitle": "用{{app}}应用扫码",
-    "scanBody": "{{app}}会创建 {{bot}} 账号并关联到 Rome。",
+    "scanBody": "{{app}}会创建 {{bot}} 账号并连接到 Rome。",
     "waiting": "等待扫码",
     "token": "机器人令牌",
     "connect": "连接",
-    "replaces": "{{agent}} 在{{app}}已经有 {{bot}}。一个智能体在每个应用里只有一个账号，所以 {{bot}} 会失去关联，在你关联其他智能体之前保持沉默。"
+    "delegateTitle": "连接你的{{app}}账号",
+    "delegateDescription": "{{agent}} 用你自己的账号代你回答。别人看到的仍然是你，智能体是你的代理。",
+    "signInBody": "在{{app}}应用里登录你自己的账号，之后由 {{agent}} 代你回答。"
   },
   "agent": {
     "missing": "没有这个智能体"
   },
   "overview": {
-    "bots": "关联账号",
-    "noBots": "{{agent}} 还没有关联账号。先在聊天应用里给它开一个账号，再邀请它进任意群或私聊。",
+    "bots": "账号",
+    "noBots": "{{agent}} 还没有通过任何账号发言。先在聊天平台上连接一个账号，再邀请它进任意群或私聊。",
     "botStats": "{{groups}} 个群，{{dms}} 个私聊",
     "since": "始于",
-    "connected": "已连接",
     "inviteTitle": "邀请 {{bot}}。",
     "seeChats": "查看聊天",
-    "addBot": "添加账号"
+    "addBot": "连接账号"
   },
   "chats": {
     "groups": "群聊",
@@ -67,11 +65,12 @@
     "groupMeta_one": "群聊 · {{count}} 位成员 · 由 {{name}} 添加",
     "groupMeta_other": "群聊 · {{count}} 位成员 · 由 {{name}} 添加",
     "dmMeta": "私聊 · 由 {{name}} 发起",
-    "botsHere": "这里的关联账号：{{bots}}",
-    "shared_one": "{{bots}} 也在这个群里。每个智能体只看到聊天应用推送给它自己账号的消息，可能看不到其他智能体的回复。",
-    "shared_other": "{{bots}} 也在这个群里。每个智能体只看到聊天应用推送给它自己账号的消息，可能看不到其他智能体的回复。",
-    "settings": "聊天设置：被 @ 时回答 · 在话题中回复",
-    "override": "由哪个智能体回答：关联的智能体。群在聊天应用里自选的智能体不会覆盖它。"
+    "botsHere": "这里的 Rome 账号：{{bots}}",
+    "shared_one": "{{bots}} 也在这个聊天里。这是一个聊天、一份记录。每个智能体只看到平台推送给它自己账号的消息，可能看不到其他智能体的消息。",
+    "shared_other": "{{bots}} 也在这个聊天里。这是一个聊天、一份记录。每个智能体只看到平台推送给它自己账号的消息，可能看不到其他智能体的消息。",
+    "settings": "这个账号在这里的回复规则：被 @ 时回答 · 在话题中回复",
+    "override": "由谁回答：每个账号的智能体。没有按聊天选择智能体的设置。",
+    "onBehalf": "{{agent}}，代你回答"
   },
   "activity": {
     "description": "{{agent}} 在各个聊天中收到和发出的消息，最新的在前。",
@@ -87,26 +86,39 @@
     "chats": "聊天",
     "introduce": "被加入群聊时自我介绍",
     "introduceBody": "发一条简短的问候，说明它能帮什么忙。",
-    "bots": "关联账号",
-    "answersAs": "关联智能体",
-    "moveConfirm_one": "把 {{bot}} 关联到 {{to}}？此后由 {{to}} 在它的 {{count}} 个聊天中回答，聊天和记录保持不变。",
-    "moveConfirm_other": "把 {{bot}} 关联到 {{to}}？此后由 {{to}} 在它的 {{count}} 个聊天中回答，聊天和记录保持不变。",
-    "move": "更改智能体",
+    "bots": "账号",
+    "answersAs": "智能体",
+    "moveConfirm_one": "把 {{bot}} 切换到 {{to}}？此后由 {{to}} 在它的 {{count}} 个聊天中回答。它会把聊天记录作为上下文，并以全新的工作记忆开始。",
+    "moveConfirm_other": "把 {{bot}} 切换到 {{to}}？此后由 {{to}} 在它的 {{count}} 个聊天中回答。它会把每个聊天的记录作为上下文，并以全新的工作记忆开始。",
+    "move": "切换智能体",
     "cancel": "取消",
-    "removeBot": "移除账号",
-    "moveReplaces": "{{to}} 在{{app}}已经有 {{previous}}。一个智能体在每个应用里只有一个账号，所以 {{previous}} 会失去关联，在你关联其他智能体之前保持沉默。"
+    "removeBot": "断开连接",
+    "noAgent": "不关联智能体",
+    "unlinkConfirm": "要取消 {{agent}} 与 {{bot}} 的关联吗？{{bot}} 仍保持连接，但在你重新关联智能体之前，Rome 不再接收它的消息。",
+    "unlink": "取消关联"
   },
   "choose": {
-    "title": "给 {{agent}} 开一个账号",
-    "description": "选择聊天应用。一个智能体在每个应用里只有一个账号。",
-    "replaces": "已有 {{bot}}。在这里新开账号会替换它。",
-    "back": "聊天应用"
+    "title": "为 {{agent}} 连接账号",
+    "description": "选择这是谁的账号，以及它在哪个平台上。一个智能体可以通过任意多个账号发言。",
+    "back": "平台",
+    "ownTitle": "{{agent}} 的自有账号",
+    "ownBody": "为 {{agent}} 创建的账号，{{agent}} 以这个账号的身份发言。",
+    "delegateTitle": "你自己的账号",
+    "delegateBody": "{{agent}} 用你的账号代你回答，作为你的代理。",
+    "yourAccount": "你的{{app}}",
+    "delegateSetup": "在{{app}}应用里扫码登录"
   },
   "platforms": {
     "feishu": {
       "name": "飞书",
       "setup": "在飞书应用里扫码",
       "invite": "打开一个群，进入设置、群机器人、添加机器人，选择 {{bot}}。要发起私聊，在飞书里搜索 {{bot}}。聊天会自动出现在这里。",
+      "tokenHint": ""
+    },
+    "lark": {
+      "name": "Lark",
+      "setup": "在 Lark 应用里扫码",
+      "invite": "打开一个群，进入设置、群机器人、添加机器人，选择 {{bot}}。要发起私聊，在 Lark 里搜索 {{bot}}。聊天会自动出现在这里。",
       "tokenHint": ""
     },
     "telegram": {
@@ -127,5 +139,17 @@
       "invite": "在群成员列表里添加 {{bot}}，或在微信里直接给 {{bot}} 发消息。聊天会自动出现在这里。",
       "tokenHint": ""
     }
+  },
+  "kinds": {
+    "own": "自有账号",
+    "delegate": "代理"
+  },
+  "unlinked": {
+    "title": "已连接，未关联智能体",
+    "description": "Rome 能访问这些账号，但没有智能体通过它们说话，所以 Rome 不接收它们的消息。关联一个智能体即可开始。",
+    "yours": "你的账号",
+    "pick": "关联智能体",
+    "link": "为 {{bot}} 关联智能体",
+    "suggested": "{{agent}}（推荐）"
   }
 }

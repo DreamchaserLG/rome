@@ -10,49 +10,47 @@
   },
   "index": {
     "title": "Envoys",
-    "description": "Agents people can reach from a chat app, each through its own linked account.",
-    "add": "Add an agent",
-    "emptyTitle": "No envoys yet",
-    "emptyBody": "An agent appears here once it has a linked account. Add an agent to give it an account on a chat app."
+    "description": "Agents people can reach on chat platforms, each speaking through an account you connected.",
+    "add": "Connect an account",
+    "emptyTitle": "No connected accounts yet",
+    "emptyBody": "Connect an account on a chat platform and pick the agent that speaks through it. The agent shows up here."
   },
   "add": {
-    "title": "Add an agent",
-    "description": "Pick the agent people should reach. Next, you choose a chat app and give it an account there.",
+    "title": "Connect an account",
+    "description": "First pick the agent that speaks through the account. Next you pick the platform and set the account up.",
     "search": "Search agents",
     "noMatch": "No agent matches.",
-    "footnote_one": "{{count}} agent has no linked account. Agents are created and edited in Apps.",
-    "footnote_other": "{{count}} agents have no linked account. Agents are created and edited in Apps."
+    "footnote_one": "{{count}} agent. Agents are created and edited in Apps.",
+    "footnote_other": "{{count}} agents. Agents are created and edited in Apps."
   },
   "newBot": {
-    "title": "{{agent}} on {{app}}",
-    "description": "The account is linked to {{agent}}. You can link it to another agent later.",
+    "title": "Connect an account on {{app}} for {{agent}}",
+    "description": "{{agent}} speaks through this account in every chat it is in. You can switch the account to another agent later in one step.",
     "name": "Account name in {{app}}",
     "nameHint": "People see this name in groups and @mention it.",
-    "region": "Region",
-    "regionFeishu": "Feishu (China)",
-    "regionLark": "Lark (international)",
     "showQr": "Show QR code",
     "qrPlaceholder": "The QR code appears here.",
     "qrAlt": "QR code for the {{app}} app",
     "scanTitle": "Scan with the {{app}} app",
-    "scanBody": "{{app}} creates the {{bot}} account and links it to Rome.",
+    "scanBody": "{{app}} creates the {{bot}} account and connects it to Rome.",
     "waiting": "Waiting for the scan",
     "token": "Bot token",
     "connect": "Connect",
-    "replaces": "{{agent}} already has {{bot}} on {{app}}. An agent has one account per app, so {{bot}} loses its link and stays silent until you link another agent."
+    "delegateTitle": "Connect your {{app}} account",
+    "delegateDescription": "{{agent}} answers on your behalf from your own account. People still see you; the agent is your delegate.",
+    "signInBody": "Sign in to your own account in the {{app}} app. {{agent}} then answers on your behalf."
   },
   "agent": {
     "missing": "No such agent"
   },
   "overview": {
-    "bots": "Linked accounts",
-    "noBots": "{{agent}} has no linked account yet. Give it an account on a chat app, then invite it to any group or DM.",
+    "bots": "Accounts",
+    "noBots": "{{agent}} speaks through no account yet. Connect one on a chat platform, then invite it to any group or DM.",
     "botStats": "{{groups}} groups, {{dms}} DMs",
     "since": "since",
-    "connected": "Connected",
     "inviteTitle": "Invite {{bot}}.",
     "seeChats": "See chats",
-    "addBot": "Add an account"
+    "addBot": "Connect an account"
   },
   "chats": {
     "groups": "Groups",
@@ -67,11 +65,12 @@
     "groupMeta_one": "Group · {{count}} member · added by {{name}}",
     "groupMeta_other": "Group · {{count}} members · added by {{name}}",
     "dmMeta": "DM · started by {{name}}",
-    "botsHere": "Linked accounts here: {{bots}}",
-    "shared_one": "{{bots}} is in this chat too. Each agent sees what the chat app delivers to its own account here, which may not include the other agents' replies.",
-    "shared_other": "{{bots}} are in this chat too. Each agent sees what the chat app delivers to its own account here, which may not include the other agents' replies.",
-    "settings": "Chat settings: answers when @mentioned · replies in thread",
-    "override": "Which agent answers: the linked agent. A group's own agent choice in the chat app doesn't override it."
+    "botsHere": "Rome's accounts here: {{bots}}",
+    "shared_one": "{{bots}} is in this chat too. It is one chat with one history. Each agent sees what the platform delivers to its own account, which may not include the other agents' messages.",
+    "shared_other": "{{bots}} are in this chat too. It is one chat with one history. Each agent sees what the platform delivers to its own account, which may not include the other agents' messages.",
+    "settings": "Reply rule for this account here: answers when @mentioned · replies in thread",
+    "override": "Who answers: each account's agent. There is no per-chat choice of agent.",
+    "onBehalf": "{{agent}}, on your behalf"
   },
   "activity": {
     "description": "What was said to and by {{agent}} across its chats, newest first.",
@@ -87,26 +86,39 @@
     "chats": "Chats",
     "introduce": "Introduce itself when added to a group",
     "introduceBody": "Posts one short hello with what it can help with.",
-    "bots": "Linked accounts",
-    "answersAs": "Linked agent",
-    "moveConfirm_one": "Link {{bot}} to {{to}}? From now on {{to}} answers in its {{count}} chat. The chat and its history stay as they are.",
-    "moveConfirm_other": "Link {{bot}} to {{to}}? From now on {{to}} answers in its {{count}} chats. The chats and their history stay as they are.",
-    "move": "Change agent",
+    "bots": "Accounts",
+    "answersAs": "Agent",
+    "moveConfirm_one": "Switch {{bot}} to {{to}}? {{to}} answers in its {{count}} chat from now on. It reads the chat's history as context and starts with fresh working memory.",
+    "moveConfirm_other": "Switch {{bot}} to {{to}}? {{to}} answers in its {{count}} chats from now on. It reads each chat's history as context and starts with fresh working memory.",
+    "move": "Switch agent",
     "cancel": "Cancel",
-    "removeBot": "Remove account",
-    "moveReplaces": "{{to}} already has {{previous}} on {{app}}. An agent has one account per app, so {{previous}} loses its link and stays silent until you link another agent."
+    "removeBot": "Disconnect",
+    "noAgent": "No agent",
+    "unlinkConfirm": "Unlink {{agent}} from {{bot}}? {{bot}} stays connected, but Rome stops listening to its messages until you link an agent again.",
+    "unlink": "Unlink"
   },
   "choose": {
-    "title": "Give {{agent}} an account",
-    "description": "Pick the chat app. An agent has one account per app.",
-    "replaces": "Has {{bot}}. A new account here replaces it.",
-    "back": "Chat apps"
+    "title": "Connect an account for {{agent}}",
+    "description": "Pick whose account it is and the platform it lives on. An agent can speak through any number of accounts.",
+    "back": "Platforms",
+    "ownTitle": "{{agent}}'s own account",
+    "ownBody": "An account made for {{agent}}. {{agent}} speaks as that account.",
+    "delegateTitle": "Your own account",
+    "delegateBody": "{{agent}} answers from your account on your behalf, as your delegate.",
+    "yourAccount": "Your {{app}}",
+    "delegateSetup": "Sign in by scanning a QR code in the {{app}} app"
   },
   "platforms": {
     "feishu": {
       "name": "Feishu",
       "setup": "Scan a QR code in the Feishu app",
       "invite": "Open a group, then Settings, Group bots, Add bot, and pick {{bot}}. To start a DM, search for {{bot}} in Feishu. Chats appear here on their own.",
+      "tokenHint": ""
+    },
+    "lark": {
+      "name": "Lark",
+      "setup": "Scan a QR code in the Lark app",
+      "invite": "Open a group, then Settings, Group bots, Add bot, and pick {{bot}}. To start a DM, search for {{bot}} in Lark. Chats appear here on their own.",
       "tokenHint": ""
     },
     "telegram": {
@@ -127,5 +139,17 @@
       "invite": "Add {{bot}} to a group from its member list, or message {{bot}} directly in WeChat. Chats appear here on their own.",
       "tokenHint": ""
     }
+  },
+  "kinds": {
+    "own": "Own account",
+    "delegate": "Delegate"
+  },
+  "unlinked": {
+    "title": "Connected, no agent",
+    "description": "Rome has access to these accounts, but no agent speaks through them, so Rome does not listen to their messages. Link an agent to start.",
+    "yours": "your account",
+    "pick": "Link an agent",
+    "link": "Link an agent to {{bot}}",
+    "suggested": "{{agent}} (suggested)"
   }
 }
