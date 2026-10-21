@@ -74,7 +74,7 @@ describe("ChannelRecordsRepository", () => {
     expect(records.all()).toHaveLength(1);
   });
 
-  it("deletes a released bot's channel, and a re-added bot starts fresh linked to main", () => {
+  it("deletes a released bot's channel, and a re-added bot starts fresh with no agent", () => {
     const records = repository();
     const db = testDb!.db;
     records.claim(db, { id: "c1", service: "feishu" }, NOW);
@@ -86,7 +86,7 @@ describe("ChannelRecordsRepository", () => {
     // A live agent session may still hold the deleted id, so this run mints
     // another one.
     const readded = records.claim(db, { id: "c2", service: "feishu" }, NOW);
-    expect(readded).toMatchObject({ connectionId: "c2", agent: "core:main" });
+    expect(readded).toMatchObject({ connectionId: "c2", agent: null });
     expect(readded.id).toMatch(UUID);
   });
 
@@ -214,7 +214,7 @@ describe("ChannelRecordsRepository", () => {
     const restarted = new ChannelRecordsRepository(db);
     expect(restarted.claim(db, { id: "c2", service: "feishu" }, NOW)).toMatchObject({
       id: "feishu",
-      agent: "core:main",
+      agent: null,
     });
   });
 
@@ -454,14 +454,16 @@ describe("ChannelRecordsRepository", () => {
     ).toEqual(["a-kept"]);
   });
 
-  it("links main to a linkable service's first account only", () => {
+  it("starts every new account with no agent, and with the one asked only where it takes one", () => {
     const records = repository();
     const db = testDb!.db;
 
-    expect(records.claim(db, { id: "c1", service: "telegram" }, NOW).agent).toBe("core:main");
-    expect(records.claim(db, { id: "c2", service: "telegram_user" }, NOW).agent).toBe("core:main");
-    expect(records.claim(db, { id: "c3", service: "telegram" }, NOW).agent).toBeNull();
-    expect(records.claim(db, { id: "c4", service: "webchat" }, NOW).agent).toBeNull();
+    expect(records.claim(db, { id: "c1", service: "telegram" }, NOW).agent).toBeNull();
+    expect(records.claim(db, { id: "c2", service: "telegram_user" }, NOW).agent).toBeNull();
+    expect(records.claim(db, { id: "c3", service: "telegram" }, NOW, "core:main").agent).toBe(
+      "core:main",
+    );
+    expect(records.claim(db, { id: "c4", service: "webchat" }, NOW, "core:main").agent).toBeNull();
     expect(records.claim(db, { id: "c5", service: "agents" }, NOW).agent).toBeNull();
   });
 
@@ -564,6 +566,7 @@ describe("ChannelRecordsRepository", () => {
     const db = testDb!.db;
     records.claim(db, { id: "c1", service: "telegram" }, NOW);
     const later = records.claim(db, { id: "c2", service: "telegram" }, NOW).id;
+    records.link("telegram", "main");
 
     expect(records.link(later, "main")).toMatchObject({ agent: "core:main" });
     expect(records.byId("telegram")?.agent).toBe("core:main");

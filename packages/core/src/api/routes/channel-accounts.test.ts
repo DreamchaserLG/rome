@@ -143,7 +143,7 @@ describe("channel account routes", () => {
       body: "{}",
     });
     expect(empty.status).toBe(400);
-    expect(records.byId("feishu")?.agent).toBe("core:main");
+    expect(records.byId("feishu")?.agent).toBeNull();
   });
 
   it("links main like any agent, by its canonical id", async () => {
@@ -176,7 +176,7 @@ describe("channel account routes", () => {
     const { records, link, db } = setup({ main: "core:main" });
     records.claim(db, { id: "c1", service: "telegram" }, NOW);
     records.claim(db, { id: "c2", service: "telegram_user" }, NOW);
-    records.link("telegram_user", null);
+    records.link("telegram", "main");
 
     expect((await link("telegram_user", "main")).status).toBe(200);
     expect(records.byId("telegram")?.agent).toBe("core:main");

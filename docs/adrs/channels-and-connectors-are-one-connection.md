@@ -145,3 +145,11 @@ Services that take no agent keep their row when their Connection goes, and their
 
 - **Keep the released channel as a retired record.** Rejected by the guardian: an account that is disconnected is removed, and its chats go with it.
 - **Mint an opaque id for every account after the first, so a deleted channel's id is never used again.** Rejected because it needs a record of every id ever minted, which is the retired row by another name.
+
+## Amendment (2026-10-21): Rome never picks an account's agent
+
+A newly connected account of a linkable service has no agent, so it is silent until the guardian links one. Connecting an account and linking its agent are two operations, and no step can make them one, so an account always passes through a state with no agent. The 2026-10-16 amendment's "a linkable service's first channel is linked to main when it is made" is withdrawn, and so is the same rule in the 2026-10-20 amendment. An account already connected keeps the agent it has. The boot pass that records a channel for a Connection from before channels were recorded links main, since that account answered as main before accounts took agents, as migration `0081` kept main for the channels recorded then. Where the dashboard asks for an agent is the dashboard's choice.
+
+### Alternatives
+
+- **Link main to a service's first account.** Rejected by the guardian: Rome choosing an agent nobody asked for is confusing.
