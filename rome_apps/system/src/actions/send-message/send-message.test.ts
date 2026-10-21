@@ -306,6 +306,94 @@ describe("send_message connection choice", () => {
   });
 });
 
+describe("send_message to an account with an opaque id", () => {
+  const FIRST = "6f1d2c3b-0000-4000-8000-000000000001";
+  const SECOND = "6f1d2c3b-0000-4000-8000-000000000002";
+
+  function accounts(...names: string[]): ChannelsService {
+    return {
+      list: rs.fn(async () => [
+        { name: "telegram", platform: "telegram", sendable: false },
+        ...names.map((name) => ({ name, platform: "telegram", sendable: true })),
+      ]),
+      send: rs.fn(async (_channel, chatId) => ({ chatId })),
+      query: async () => [],
+    };
+  }
+
+  it("sends as the account its id names", async () => {
+    const adapter = accounts(FIRST, SECOND);
+
+    await executeSendMessage(adapter, { channel: SECOND, threadId: "42", text: "hi" });
+
+    expect(adapter.send).toHaveBeenCalledWith(
+      SECOND,
+      "42",
+      expect.objectContaining({ text: "hi" }),
+    );
+  });
+
+  it("refuses a platform name that is not an account's id", async () => {
+    const adapter = accounts(FIRST);
+
+    await expect(
+      executeSendMessage(adapter, { channel: "telegram", threadId: "42", text: "hi" }),
+    ).rejects.toThrow('No Talk connection registered for "telegram"');
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("resolves to: guardian through the link People keys by platform", async () => {
+    const adapter = accounts(FIRST);
+    const personMappingRepo = {
+      findByBondLevel: rs.fn(async () => [
+        { channelMappings: [{ channel: "telegram", channelUserId: "1001" }] },
+      ]),
+    };
+
+    await executeSendMessage(
+      adapter,
+      { channel: FIRST, to: "guardian", text: "hi" },
+      { personMappingRepo },
+    );
+
+    expect(adapter.send).toHaveBeenCalledWith(
+      FIRST,
+      "1001",
+      expect.objectContaining({ text: "hi" }),
+    );
+  });
+
+  // People files a signed-in Telegram's links under its own key, not under
+  // the platform, until links are keyed by platform.
+  it("resolves to: guardian under the key People files the account's links by", async () => {
+    const adapter = accounts(FIRST);
+    const personMappingRepo = {
+      findByBondLevel: rs.fn(async () => [
+        {
+          channelMappings: [
+            { channel: "telegram", channelUserId: "1001" },
+            { channel: "telegram_user", channelUserId: "2002" },
+          ],
+        },
+      ]),
+      linkKeyOf: rs.fn(async () => "telegram_user"),
+    };
+
+    await executeSendMessage(
+      adapter,
+      { channel: FIRST, to: "guardian", text: "hi" },
+      { personMappingRepo },
+    );
+
+    expect(personMappingRepo.linkKeyOf).toHaveBeenCalledWith(FIRST);
+    expect(adapter.send).toHaveBeenCalledWith(
+      FIRST,
+      "2002",
+      expect.objectContaining({ text: "hi" }),
+    );
+  });
+});
+
 describe("send_message conversation recording", () => {
   it("stores a confirmed out-of-band delivery as a pending notification", async () => {
     const adapter = makeAdapter();
