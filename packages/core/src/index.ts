@@ -284,6 +284,7 @@ async function main() {
   // as a descriptor, a channel policy, or a person's link, reads it.
   const serviceOfChannel = (name: string) => channelRecords.serviceOf(name);
   const personMappingRepo = new PersonMappingRepository(db, serviceOfChannel);
+  const channelOfLink = (link: string) => channelRecords.channelOfLink(link);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -1567,7 +1568,7 @@ async function main() {
       personMappingRepo,
       outboxRepo,
       channels,
-      serviceOfChannel,
+      channelOfLink,
       accountNames,
       webchatRepo,
       webhookInvocationsRepo,

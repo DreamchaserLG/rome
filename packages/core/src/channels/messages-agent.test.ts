@@ -310,26 +310,25 @@ describe("agentMessages", () => {
     expect(there.map((entry) => entry.ref)).toEqual(["agent:m-elsewhere"]);
   });
 
-  // A link keyed by a service reaches each of Rome's accounts of it, and the
-  // transcript keys a conversation by the account's own channel id, which is
-  // opaque for any account but the service's first.
-  it("reads an account on each channel it is held on", async () => {
+  // A link keyed by a service names the service, and the transcript keys a
+  // conversation by the account's own channel id, which may be opaque.
+  it("reads an account under the channel it is stored under, and under none", async () => {
     await session(db, "s-opaque", { threadId: DIRECT, channel: "tg-opaque" });
     await message(db, "m-opaque", { sessionId: "s-opaque", role: "user", at: 450 });
 
     expect(await refs()).not.toContain("agent:m-opaque");
-    const page = await agentMessages(db).read({
-      accounts: [{ ...account, channels: [CHANNEL, "tg-opaque"] }],
+    const opaque = await agentMessages(db).read({
+      accounts: [{ ...account, storedUnder: "tg-opaque" }],
       limit: WHOLE_HISTORY,
     });
-    expect(page.map((entry) => [entry.ref, entry.source])).toEqual([
+    expect(opaque.map((entry) => [entry.ref, entry.source])).toEqual([
       ["agent:m-opaque", "tg-opaque"],
-      ["agent:m-later", CHANNEL],
-      ["agent:m-alt", CHANNEL],
-      ["agent:m-note", CHANNEL],
-      ["agent:m-reply", CHANNEL],
-      ["agent:m-hello", CHANNEL],
     ]);
+    const none = await agentMessages(db).read({
+      accounts: [{ ...account, storedUnder: null }],
+      limit: WHOLE_HISTORY,
+    });
+    expect(none).toEqual([]);
   });
 });
 

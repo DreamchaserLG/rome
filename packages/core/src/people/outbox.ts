@@ -228,8 +228,8 @@ async function heldBy(
   );
 }
 
-/** Written under the channel that sent, which is the row's own or another of
- *  its service's, so the line joins the conversation Rome holds there. */
+/** Written under the channel that sent, the one the row's link reaches, so
+ *  the line joins the conversation Rome holds there. */
 async function record(
   deps: OutboxDeps,
   row: OutboxRow,
@@ -324,8 +324,8 @@ export async function readOutbox(
  * the other. Predicting only the address we sent to left the row waiting on a
  * ref that would never appear, which is a send accepted and then stuck.
  *
- * The transcript form is generated over every channel the account is read on,
- * since the send went out on one of them and the row does not say which.
+ * The transcript form names the channel the account's conversation is stored
+ * under, which is the one the send went out on.
  *
  * All of them need the provider's id, so a channel offering `directMessaging`
  * has to return one from `send` — see the note there. A send accepted without
@@ -335,14 +335,16 @@ export async function readOutbox(
 function refsFor(row: OutboxRow, account: MessageAccount): string[] {
   const messageId = row.providerMessageId;
   if (messageId === null) return [];
-  return [
+  const refs = [
     `${row.conversationId}:${messageId}`,
     ...new Set(account.addresses.map((address) => `${address}:${messageId}`)),
-    ...heldOn(account).map((channel) => {
-      const sessionId = channelConversationId(channel, row.conversationId);
-      return `agent:${conversationPlatformMessageId(sessionId, messageId)}`;
-    }),
   ];
+  const channel = heldOn(account);
+  if (channel !== null) {
+    const sessionId = channelConversationId(channel, row.conversationId);
+    refs.push(`agent:${conversationPlatformMessageId(sessionId, messageId)}`);
+  }
+  return refs;
 }
 
 /** This row's account, with every address the channel folds onto it, the

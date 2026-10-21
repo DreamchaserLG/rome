@@ -152,11 +152,10 @@ function accountKeys(
 ): MessageScopeKey[] {
   const scope = new Map<string, MessageScopeKey>();
   for (const account of accounts) {
-    for (const held of heldOn(account)) {
-      if (channel !== undefined && held !== channel) continue;
-      for (const address of account.addresses) {
-        scope.set(`${held}\n${address}`, { channel: held, key: address });
-      }
+    const held = heldOn(account);
+    if (held === null || (channel !== undefined && held !== channel)) continue;
+    for (const address of account.addresses) {
+      scope.set(`${held}\n${address}`, { channel: held, key: address });
     }
   }
   return [...scope.values()];

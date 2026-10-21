@@ -32,9 +32,10 @@ export function memoryMessages(held: readonly HeldMessage[]): AccountMessages {
 
   const full = (accounts: readonly MessageAccount[]): Message[] => {
     const scope = new Set(
-      accounts.flatMap((account) =>
-        heldOn(account).flatMap((held) => account.addresses.map((address) => pair(held, address))),
-      ),
+      accounts.flatMap((account) => {
+        const held = heldOn(account);
+        return held === null ? [] : account.addresses.map((address) => pair(held, address));
+      }),
     );
     return ranked((message) => scope.has(pair(message.channel, message.address)));
   };

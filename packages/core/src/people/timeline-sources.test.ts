@@ -172,41 +172,41 @@ describe("timelineAccounts", () => {
 });
 
 describe("timelineAccounts for a link keyed by a service", () => {
-  // The service's first channel carries its name. An account connected later,
-  // or first into an empty database with an opaque id, carries an id of its own.
-  const serviceOfChannel = (name: string) => (name.startsWith("tg-") ? "telegram" : name);
+  const channels = channelList({ telegram: null, "tg-opaque": null, "tg-second": null });
 
-  it("reads the account on every channel of the link's service", async () => {
-    const channels = channelList({ telegram: null, "tg-opaque": null, "tg-second": null });
-
-    const [accounts] = await timelineAccounts({ channels, serviceOfChannel }, [
-      [{ channel: "telegram", channelUserId: adaTelegram }],
-    ]);
+  it("reads the account under the service's only account's channel", async () => {
+    const [accounts] = await timelineAccounts(
+      { channels, channelOfLink: (link) => (link === "telegram" ? "tg-opaque" : link) },
+      [[{ channel: "telegram", channelUserId: adaTelegram }]],
+    );
 
     expect(accounts).toEqual([
-      {
-        channel: "telegram",
-        channels: ["telegram", "tg-opaque", "tg-second"],
-        addresses: [adaTelegram],
-      },
+      { channel: "telegram", storedUnder: "tg-opaque", addresses: [adaTelegram] },
+    ]);
+  });
+
+  it("reads it under no channel when the service has several accounts", async () => {
+    const [accounts] = await timelineAccounts(
+      { channels, channelOfLink: (link) => (link === "telegram" ? null : link) },
+      [
+        [
+          { channel: "telegram", channelUserId: adaTelegram },
+          { channel: "tg-second", channelUserId: "778002" },
+        ],
+      ],
+    );
+
+    expect(accounts).toEqual([
+      { channel: "telegram", storedUnder: null, addresses: [adaTelegram] },
+      { channel: "tg-second", addresses: ["778002"] },
     ]);
   });
 
   it("reads a service with only its own channel exactly as before", async () => {
-    const [accounts] = await timelineAccounts(
-      { channels: channelList({ telegram: null, whatsapp: null }), serviceOfChannel },
-      [[{ channel: "telegram", channelUserId: adaTelegram }]],
-    );
+    const [accounts] = await timelineAccounts({ channels, channelOfLink: (link) => link }, [
+      [{ channel: "telegram", channelUserId: adaTelegram }],
+    ]);
 
     expect(accounts).toEqual([{ channel: "telegram", addresses: [adaTelegram] }]);
-  });
-
-  it("keeps a link naming one channel's own id on that channel", async () => {
-    const [accounts] = await timelineAccounts(
-      { channels: channelList({ telegram: null, "tg-opaque": null }), serviceOfChannel },
-      [[{ channel: "tg-opaque", channelUserId: adaTelegram }]],
-    );
-
-    expect(accounts).toEqual([{ channel: "tg-opaque", addresses: [adaTelegram] }]);
   });
 });

@@ -52,6 +52,10 @@ type Exec = DrizzleDb | DrizzleTx;
  *  service's name, so a name with no record answers for itself. */
 export type ServiceOfChannel = (channel: string) => string;
 
+/** The one channel a person's link reaches, or null when it reaches none.
+ *  `ChannelRecordsRepository.channelOfLink` states the rule. */
+export type ChannelOfLink = (link: string) => string | null;
+
 function toRecord(row: typeof channels.$inferSelect): ChannelRecord {
   return {
     id: row.id,
@@ -96,6 +100,32 @@ export class ChannelRecordsRepository {
    *  records it: a service's first channel's id is the service's name. */
   serviceOf(id: string): string {
     return this.byId(id)?.service ?? id;
+  }
+
+  /**
+   * The channel a person's link keyed by `link` reaches. People keys a link by
+   * service, and Rome never picks among a service's accounts, so:
+   *
+   * - A link naming a channel whose service is another name (an opaque id)
+   *   reaches that channel.
+   * - A link naming a service reaches the service's one account: the one
+   *   channel of it a Connection backs. With none backed it reaches the
+   *   channel carrying the service's name, as for a service no record names.
+   * - With several backed, it reaches none, so null.
+   *
+   * Backed channels are counted rather than recorded ones, since a released
+   * row stays after its account is removed and is not an account.
+   */
+  channelOfLink(link: string): string | null {
+    const own = this.byId(link);
+    if (own && own.service !== link) return link;
+    const backed = this.db
+      .select({ id: channels.id })
+      .from(channels)
+      .where(and(eq(channels.service, link), isNotNull(channels.connectionId)))
+      .all();
+    if (backed.length === 0) return link;
+    return backed.length === 1 ? (backed[0]?.id ?? null) : null;
   }
 
   /** The id of the channel `connectionId` backs, or null for none. */

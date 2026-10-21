@@ -760,12 +760,13 @@ describe("People send API — delivery bookkeeping", () => {
 describe("People on an account whose channel id is opaque", () => {
   const OPAQUE = "0b5c6d1e-9a8f-4c3b-8e2d-7f6a5b4c3d2e";
   const ADA = "tg-ada";
+  let testDb: TestDb;
   let deps: TestDeps;
   let app: Hono;
   let personId: string;
 
   beforeEach(async () => {
-    const testDb = createTestDb();
+    testDb = createTestDb();
     const base = await buildTestDeps(testDb.db);
     testDb.db
       .insert(channelRows)
@@ -866,5 +867,33 @@ describe("People on an account whose channel id is opaque", () => {
     ]);
     const outboxRes = await app.request(`/people/${personId}/outbox`);
     expect(((await outboxRes.json()) as OutboxPage).messages).toEqual([]);
+  });
+
+  // Rome never picks among a service's accounts: with a second one connected,
+  // the link reaches neither, for sending or for history.
+  it("reaches none of two accounts of the service", async () => {
+    testDb.db
+      .insert(channelRows)
+      .values({
+        id: "tg-second",
+        service: "telegram",
+        platform: "telegram",
+        connectionId: "test:telegram-second",
+        createdAt: new Date(0),
+      })
+      .run();
+
+    expect((await person()).accounts).toMatchObject([
+      { channel: "telegram", channelUserId: ADA, send: "not-connected" },
+    ]);
+    const res = await app.request(`/people/${personId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "telegram", channelUserId: ADA, text: "hi Ada" }),
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()) as SendRefusal).toMatchObject({ send: "not-connected" });
+    expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
+    expect((await timeline()).entries).toEqual([]);
   });
 });
