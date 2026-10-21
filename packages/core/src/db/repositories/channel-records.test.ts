@@ -83,10 +83,12 @@ describe("ChannelRecordsRepository", () => {
 
     expect(records.claim(db, { id: "c1", service: "telegram" }, NOW).agent).toBeNull();
     expect(records.claim(db, { id: "c2", service: "telegram_user" }, NOW).agent).toBeNull();
-    expect(records.claim(db, { id: "c3", service: "feishu" }, NOW, "core:main").agent).toBe(
-      "core:main",
-    );
-    expect(records.claim(db, { id: "c4", service: "webchat" }, NOW, "core:main").agent).toBeNull();
+    expect(
+      records.claim(db, { id: "c3", service: "feishu" }, NOW, { agent: "core:main" }).agent,
+    ).toBe("core:main");
+    expect(
+      records.claim(db, { id: "c4", service: "webchat" }, NOW, { agent: "core:main" }).agent,
+    ).toBeNull();
     expect(records.claim(db, { id: "c5", service: "agents" }, NOW).agent).toBeNull();
   });
 

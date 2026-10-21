@@ -132,7 +132,7 @@ export class ChannelRecordsRepository {
     exec: Exec,
     connection: { id: string; service: string; domain?: string },
     now: Date,
-    agent: string | null = null,
+    { agent = null }: { agent?: string | null } = {},
   ): ChannelRecord {
     const held = exec.select().from(channels).where(eq(channels.connectionId, connection.id)).get();
     if (held) return toRecord(held);
