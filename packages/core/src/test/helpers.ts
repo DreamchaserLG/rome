@@ -720,6 +720,7 @@ export async function buildTestDeps(
     linkedInAccounts,
     channels,
     channelOfLink: (link: string) => channelRecords.channelOfLink(link),
+    sendersOfLink: (link: string) => channelRecords.sendersOfLink(link),
     accountNames,
     sentinelLogRepo,
     approvalsRepo,

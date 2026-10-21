@@ -155,6 +155,25 @@ describe("ChannelRecordsRepository", () => {
     expect(records.channelOfLink("telegram")).toBe("tg-second");
   });
 
+  it("lists the accounts a send to a link may go out from", () => {
+    const records = repository();
+    const db = testDb!.db;
+    // Nothing recorded: the link's own channel, as a send without `from` reaches.
+    expect(records.sendersOfLink("whatsapp")).toEqual(["whatsapp"]);
+
+    const first = records.claim(db, { id: "c1", service: "telegram" }, NOW).id;
+    const later = new Date(NOW.getTime() + 60_000);
+    const second = records.claim(db, { id: "c2", service: "telegram" }, later).id;
+    expect(records.sendersOfLink("telegram")).toEqual([first, second]);
+    // A link naming one account's own id lists that account alone.
+    expect(records.sendersOfLink(second)).toEqual([second]);
+
+    // A removed account sends nothing.
+    records.vacate(db, "c2");
+    expect(records.sendersOfLink("telegram")).toEqual([first]);
+    expect(records.sendersOfLink(second)).toEqual([]);
+  });
+
   it("reaches the service's own channel from a link while it is the only account", () => {
     const records = repository();
     const db = testDb!.db;

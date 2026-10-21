@@ -56,6 +56,10 @@ export type ServiceOfChannel = (channel: string) => string;
  *  `ChannelRecordsRepository.channelOfLink` states the rule. */
 export type ChannelOfLink = (link: string) => string | null;
 
+/** The ids of Rome's accounts a send to a person's link may go out from.
+ *  `ChannelRecordsRepository.sendersOfLink` states the rule. */
+export type SendersOfLink = (link: string) => string[];
+
 function toRecord(row: typeof channels.$inferSelect): ChannelRecord {
   return {
     id: row.id,
@@ -117,15 +121,28 @@ export class ChannelRecordsRepository {
    * row stays after its account is removed and is not an account.
    */
   channelOfLink(link: string): string | null {
+    const senders = this.sendersOfLink(link);
+    if (senders.length === 0) return link;
+    return senders.length === 1 ? (senders[0] ?? null) : null;
+  }
+
+  /**
+   * The ids of Rome's accounts a send to a person's link keyed by `link` may
+   * name to go out from, oldest first. A link naming a channel's own opaque id
+   * answers that channel while a Connection backs it. A link naming a service
+   * answers each channel of the service a Connection backs, or the channel
+   * carrying the service's name when none is, as for a service no record names.
+   */
+  sendersOfLink(link: string): string[] {
     const own = this.byId(link);
-    if (own && own.service !== link) return link;
+    if (own && own.service !== link) return own.connectionId === null ? [] : [link];
     const backed = this.db
       .select({ id: channels.id })
       .from(channels)
       .where(and(eq(channels.service, link), isNotNull(channels.connectionId)))
+      .orderBy(asc(channels.createdAt))
       .all();
-    if (backed.length === 0) return link;
-    return backed.length === 1 ? (backed[0]?.id ?? null) : null;
+    return backed.length === 0 ? [link] : backed.map((row) => row.id);
   }
 
   /** The id of the channel `connectionId` backs, or null for none. */

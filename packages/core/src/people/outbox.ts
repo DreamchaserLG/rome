@@ -91,16 +91,17 @@ export async function sendToAccount(
   account: { channel: string; channelUserId: string },
   text: string,
   id?: string,
+  from?: string,
 ): Promise<SendResult> {
   const replay = (message: OutboxMessage): SendResult =>
-    matchesSendRequest(message, { ...account, text })
+    matchesSendRequest(message, { ...account, text, ...(from === undefined ? {} : { from }) })
       ? { ok: true, message }
       : { ok: false, error: "That send id belongs to a different message" };
   if (id) {
     const existing = await deps.outboxRepo.findSend(id);
     if (existing) return replay(existing);
   }
-  const resolution = await resolveSendTarget(deps, account);
+  const resolution = await resolveSendTarget(deps, account, from);
   if (!resolution.ok) return { ok: false, send: resolution.send };
 
   const input = {
@@ -108,6 +109,7 @@ export async function sendToAccount(
     channelUserId: account.channelUserId,
     conversationId: resolution.target.conversationId,
     text,
+    from: resolution.target.channel,
   };
   const claimed = id ? await deps.outboxRepo.openOnce({ ...input, id }) : null;
   if (claimed && !claimed.created) return replay(claimed.message);
@@ -188,7 +190,9 @@ export async function retrySend(
   if (!(await heldBy(deps, accounts, id))) return null;
   const row = await deps.outboxRepo.reopen(id);
   if (row === null) return null;
-  const resolution = await resolveSendTarget(deps, row);
+  // From the account it went out from the first time, and no other. A row
+  // from before that was recorded resolves as it did when it was written.
+  const resolution = await resolveSendTarget(deps, row, row.from ?? undefined);
   if (!resolution.ok) {
     const error = `cannot send on ${row.channel}: ${resolution.send}`;
     await deps.outboxRepo.refused(row.id, error);
@@ -290,17 +294,25 @@ export async function readOutbox(
   const awaiting = rows.filter((row) => row.state === "unconfirmed");
   if (awaiting.length === 0) return rows.map((row) => wire(row, now));
 
-  const { entries } = await readPersonTimeline(stores, accounts, { limit: LANDING_WINDOW });
-  const arrived = new Set(entries.map((entry) => entry.ref));
+  // Each row is looked for under the account it went out from and nowhere
+  // else, so a message another of Rome's accounts holds under the same
+  // provider id cannot clear it. The reads are issued together, and a store
+  // answers them in one pass.
+  const arrived = await Promise.all(
+    awaiting.map(async (row) => {
+      const account = landingAccount(accounts, row);
+      const { entries } = await readPersonTimeline(stores, [account], { limit: LANDING_WINDOW });
+      const refs = new Set(entries.map((entry) => entry.ref));
+      return refsFor(row, account).some((ref) => refs.has(ref));
+    }),
+  );
 
   // A row the channel accepted but never named cannot be recognized when it
   // arrives, so waiting on it is waiting forever. Clearing it is the lesser
   // wrong, and the requirement that makes it unreachable is stated on
   // `ChannelDirectMessaging`.
   const landed = awaiting.filter(
-    (row) =>
-      row.providerMessageId === null ||
-      refsFor(row, accountOf(accounts, row)).some((ref) => arrived.has(ref)),
+    (row, index) => row.providerMessageId === null || arrived[index] === true,
   );
   await Promise.all(landed.map((row) => deps.outboxRepo.remove(row.id)));
 
@@ -324,8 +336,8 @@ export async function readOutbox(
  * the other. Predicting only the address we sent to left the row waiting on a
  * ref that would never appear, which is a send accepted and then stuck.
  *
- * The transcript form names the channel the account's conversation is stored
- * under, which is the one the send went out on.
+ * The transcript form names the channel the send went out on, which
+ * `landingAccount` reads the account under.
  *
  * All of them need the provider's id, so a channel offering `directMessaging`
  * has to return one from `send` — see the note there. A send accepted without
@@ -348,12 +360,13 @@ function refsFor(row: OutboxRow, account: MessageAccount): string[] {
 }
 
 /** This row's account, with every address the channel folds onto it, the
- *  row's own included. Falls back to that one alone on the row's channel for a
- *  channel that folds nothing. */
-function accountOf(accounts: readonly MessageAccount[], row: OutboxRow): MessageAccount {
+ *  row's own included, read under the channel the row went out from. Falls
+ *  back to the row's own address for a channel that folds nothing, and to the
+ *  account's own channel for a row from before the channel was recorded. */
+function landingAccount(accounts: readonly MessageAccount[], row: OutboxRow): MessageAccount {
   const account = accounts.find(
     (candidate) =>
       candidate.channel === row.channel && candidate.addresses.includes(row.channelUserId),
-  );
-  return account ?? { channel: row.channel, addresses: [row.channelUserId] };
+  ) ?? { channel: row.channel, addresses: [row.channelUserId] };
+  return row.from === null ? account : { ...account, storedUnder: row.from };
 }

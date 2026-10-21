@@ -68,8 +68,9 @@ export type RefusedState = Exclude<AccountSendState, "yes">;
 async function sendStateOf(
   deps: SendDeps,
   account: SendAccount,
+  from?: string,
 ): Promise<{ state: RefusedState } | { state: "yes"; target: SendTarget }> {
-  const name = (deps.channelOfLink ?? ((link: string) => link))(account.channel);
+  const name = from ?? (deps.channelOfLink ?? ((link: string) => link))(account.channel);
   // A link that reaches no one channel names a service Rome holds several
   // accounts of. No Connection answers for the link as such, and connecting
   // or removing an account is what settles it, so it reads as not connected.
@@ -97,8 +98,18 @@ async function sendStateOf(
   return { state: "yes", target: { channel: channel.name, send, conversationId } };
 }
 
-export async function resolveSendTarget(deps: SendDeps, account: SendAccount): Promise<Resolution> {
-  const resolved = await sendStateOf(deps, account);
+/**
+ * The target a send to `account` goes out on. `from` names the channel of
+ * Rome's account it goes out from, and no other is tried. The caller has
+ * checked it is one of `SendersOfLink` for the account's link. Absent, the
+ * account's link has to reach one channel (`channelOfLink`).
+ */
+export async function resolveSendTarget(
+  deps: SendDeps,
+  account: SendAccount,
+  from?: string,
+): Promise<Resolution> {
+  const resolved = await sendStateOf(deps, account, from);
   return resolved.state === "yes"
     ? { ok: true, target: resolved.target }
     : { ok: false, send: resolved.state };

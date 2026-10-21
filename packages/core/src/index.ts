@@ -285,6 +285,7 @@ async function main() {
   const serviceOfChannel = (name: string) => channelRecords.serviceOf(name);
   const personMappingRepo = new PersonMappingRepository(db, serviceOfChannel);
   const channelOfLink = (link: string) => channelRecords.channelOfLink(link);
+  const sendersOfLink = (link: string) => channelRecords.sendersOfLink(link);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -1569,6 +1570,7 @@ async function main() {
       outboxRepo,
       channels,
       channelOfLink,
+      sendersOfLink,
       accountNames,
       webchatRepo,
       webhookInvocationsRepo,
