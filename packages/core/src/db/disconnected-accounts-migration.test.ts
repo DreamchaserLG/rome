@@ -178,6 +178,22 @@ describe("delete disconnected accounts migration", () => {
         })),
       )
       .run();
+    // A send to the account asked from webchat.
+    db.insert(approvals)
+      .values({
+        id: "ap-send",
+        type: "action_execution",
+        status: "pending",
+        requestedBy: "main",
+        description: "d",
+        payload: {
+          channelContext: { channel: "webchat", threadId: "w1" },
+          actionName: "system:send_message",
+          args: { channel: "telegram", threadId: "t1", text: "hi" },
+        },
+        createdAt: NOW,
+      })
+      .run();
 
     db.insert(romeSessions)
       .values({
@@ -241,7 +257,11 @@ describe("delete disconnected accounts migration", () => {
           .all()
           .map((row) => [row.id, row.status]),
       ),
-    ).toEqual({ "ap-telegram": "rejected", "ap-telegram_user": "pending" });
+    ).toEqual({
+      "ap-send": "rejected",
+      "ap-telegram": "rejected",
+      "ap-telegram_user": "pending",
+    });
     expect(
       Object.fromEntries(
         db

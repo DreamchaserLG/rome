@@ -382,6 +382,19 @@ describe("ChannelRecordsRepository", () => {
     records.claim(db, { id: "c1", service: "telegram" }, NOW);
     records.claim(db, { id: "c2", service: "telegram_user" }, NOW);
     const action = (channel: string) => ({ channelContext: { channel, threadId: "t1" } });
+    // A send to the account asked from webchat, directly or under another action.
+    const send = (actionName: string, channel: string) => ({
+      ...action("webchat"),
+      actionName,
+      args: { channel, threadId: "t1", text: "hi" },
+    });
+    const nested = (channel: string) => ({
+      ...action("webchat"),
+      actionName: "notes:lookup",
+      args: {},
+      rootActionName: "system:send_message",
+      rootArgs: { channel, threadId: "t1", text: "hi" },
+    });
     db.insert(approvals)
       .values(
         [
@@ -391,6 +404,15 @@ describe("ChannelRecordsRepository", () => {
           ["failed", "action_execution", "approved", "failed", action("telegram")],
           ["reply", "outgoing_message", "pending", "idle", { channel: "telegram", threadId: "t1" }],
           ["other", "action_execution", "pending", "idle", action("telegram_user")],
+          ["send", "action_execution", "pending", "idle", send("send_message", "telegram")],
+          ["nested", "action_execution", "pending", "idle", nested("telegram")],
+          [
+            "send-other",
+            "action_execution",
+            "pending",
+            "idle",
+            send("system:send_message", "telegram_user"),
+          ],
         ].map(([id, type, status, executionState, payload]) => ({
           id: id as string,
           type: type as "action_execution" | "outgoing_message",
@@ -420,6 +442,9 @@ describe("ChannelRecordsRepository", () => {
       failed: "rejected/failed",
       reply: "rejected/idle",
       other: "pending/idle",
+      send: "rejected/idle",
+      nested: "rejected/idle",
+      "send-other": "pending/idle",
     });
   });
 

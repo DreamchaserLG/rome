@@ -95,6 +95,15 @@ function onChannel(column: SQLiteColumn, id: string) {
 /** The action a routine sends a message with, under either name it is stored by. */
 const SEND_ACTIONS = ["system:send_message", "send_message"];
 
+/** An approval whose action, or the action it runs under, sends on channel
+ *  `id`, wherever the approval was asked from. */
+function sendsOn(id: string, action: string, channel: string) {
+  return and(
+    sql`json_extract(${approvals.payload}, ${action}) IN ('system:send_message', 'send_message')`,
+    sql`json_extract(${approvals.payload}, ${channel}) = ${id}`,
+  );
+}
+
 /** The shape of an id `claim` mints when a service's name is taken. */
 const MINTED_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -122,8 +131,8 @@ function recordedThrough(id: string) {
  * What would act on the channel later stops, so it acts on no channel that
  * takes this id next: a routine that sends on it is turned off, and an
  * approval still waiting is rejected. That is an action asked from one of its
- * conversations that has not run, or failed and could be retried, or a reply
- * to send there. Migration 0084 runs the same changes for the channels left
+ * conversations, or a send to it asked from anywhere, that has not run or
+ * failed and could be retried, or a reply to send there. Migration 0084 runs the same changes for the channels left
  * unbacked before this.
  */
 function deleteRecorded(exec: Exec, id: string): string[] {
@@ -210,7 +219,11 @@ function deleteRecorded(exec: Exec, id: string): string[] {
               inArray(approvals.executionState, ["queued", "failed"]),
             ),
           ),
-          sql`json_extract(${approvals.payload}, '$.channelContext.channel') = ${id}`,
+          or(
+            sql`json_extract(${approvals.payload}, '$.channelContext.channel') = ${id}`,
+            sendsOn(id, "$.actionName", "$.args.channel"),
+            sendsOn(id, "$.rootActionName", "$.rootArgs.channel"),
+          ),
         ),
         and(
           eq(approvals.type, "outgoing_message"),
