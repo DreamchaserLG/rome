@@ -321,9 +321,8 @@ describe("agentMessages", () => {
       accounts: [{ ...account, storedUnder: "tg-opaque" }],
       limit: WHOLE_HISTORY,
     });
-    expect(opaque.map((entry) => [entry.ref, entry.source])).toEqual([
-      ["agent:m-opaque", "tg-opaque"],
-    ]);
+    // Named by the account's own channel, the link's key, as a reader asked.
+    expect(opaque.map((entry) => [entry.ref, entry.source])).toEqual([["agent:m-opaque", CHANNEL]]);
     const none = await agentMessages(db).read({
       accounts: [{ ...account, storedUnder: null }],
       limit: WHOLE_HISTORY,

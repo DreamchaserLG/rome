@@ -39,7 +39,8 @@ export interface MessageAccount {
    * `channel`: a link keyed by a service names the service, and a store keys a
    * message by the channel it arrived on. Null when the link reaches no one
    * channel, and a store then reads nothing for the account. Absent,
-   * `channel`.
+   * `channel`. Either way an entry read for the account carries `channel` as
+   * its `source`, so a reader matches it against the account it asked about.
    */
   storedUnder?: string | null;
 }

@@ -844,7 +844,9 @@ describe("People on an account whose channel id is opaque", () => {
   it("shows the account's conversation on the person's timeline", async () => {
     const entries = (await timeline()).entries;
     expect(entries.map((entry) => entry.body)).toEqual(["hello from Ada"]);
-    expect(entries[0]?.source).toBe(OPAQUE);
+    // Named by the link's key, which is the account's channel on the wire, so
+    // a client's per-account view of the timeline holds it.
+    expect(entries[0]?.source).toBe("telegram");
   });
 
   it("sends on the opaque account and sees the message land in its conversation", async () => {
@@ -862,8 +864,16 @@ describe("People on an account whose channel id is opaque", () => {
     // than one under the service's name.
     const entries = (await timeline()).entries;
     expect(entries.map((entry) => [entry.body, entry.source])).toEqual([
-      ["hi Ada", OPAQUE],
-      ["hello from Ada", OPAQUE],
+      ["hi Ada", "telegram"],
+      ["hello from Ada", "telegram"],
+    ]);
+    const held = testDb.db
+      .select({ sessionId: romeAgentMessages.sessionId })
+      .from(romeAgentMessages)
+      .all();
+    expect(held.map((row) => row.sessionId)).toEqual([
+      channelConversationId(OPAQUE, ADA),
+      channelConversationId(OPAQUE, ADA),
     ]);
     const outboxRes = await app.request(`/people/${personId}/outbox`);
     expect(((await outboxRes.json()) as OutboxPage).messages).toEqual([]);

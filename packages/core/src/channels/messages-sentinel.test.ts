@@ -152,7 +152,9 @@ describe("sentinelLogMessages", () => {
       accounts: [{ ...account, storedUnder: "tg-opaque" }],
       limit: WHOLE_HISTORY,
     });
-    expect(entries.map((entry) => entry.ref)).toEqual(["sentinel:opaque"]);
+    expect(entries.map((entry) => [entry.ref, entry.source])).toEqual([
+      ["sentinel:opaque", CHANNEL],
+    ]);
   });
 });
 
