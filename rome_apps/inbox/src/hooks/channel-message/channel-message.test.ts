@@ -599,6 +599,28 @@ describe("ChannelMessageHook", () => {
       expect(begin).not.toHaveBeenCalled();
     });
 
+    it("downloads a declined message's files on a host without the recorder", async () => {
+      ruled("mention");
+      const materialize = rs.fn(async () => [
+        { type: "image" as const, url: "file-id", localPath: "/tmp/photo.jpg" },
+      ]);
+      harness.features.set(TELEGRAM_ID, { inboundMedia: { materialize } });
+
+      await harness.emit(
+        TELEGRAM_ID,
+        message({ addressing: "ambient", attachments: [{ type: "image", url: "file-id" }] }),
+      );
+
+      expect(harness.run).toHaveBeenCalledWith(
+        "message_handler",
+        expect.objectContaining({
+          answer: false,
+          attachments: [{ type: "image", url: "file-id", localPath: "/tmp/photo.jpg" }],
+        }),
+        expect.anything(),
+      );
+    });
+
     it.each([
       ["an ambient message under every message", "all", "ambient"],
       ["a mention under mentions only", "mention", "mention"],

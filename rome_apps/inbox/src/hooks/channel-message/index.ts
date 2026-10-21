@@ -188,12 +188,13 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         }
         return;
       }
-      // A host that predates `recordChatMessage` stores it through `message_handler`.
+      // A host that predates `recordChatMessage` stores it through
+      // `message_handler`, with its files downloaded as before.
       await this.runTurn(
         message,
         service,
         connectionId,
-        message.attachments,
+        await this.materialize(channel, message),
         Promise.resolve(null),
         {
           routedAgentName,
@@ -204,20 +205,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       return;
     }
 
-    let attachments = message.attachments;
-    // Through the channel's Connection, which is `ref`'s.
-    const inboundMedia = channel.inbound?.media ?? null;
-    if (inboundMedia && attachments.length > 0) {
-      try {
-        attachments = await inboundMedia.materialize(message);
-      } catch (err) {
-        log.error("failed to materialize incoming attachments", {
-          service,
-          messageId: message.messageId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
+    const attachments = await this.materialize(channel, message);
 
     const activity = Promise.resolve()
       .then(
@@ -244,6 +232,26 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       routedAgentName,
       accountAgentName: accountAgent,
     });
+  }
+
+  /** The message's files saved to disk through the channel's Connection,
+   *  which is the event's, or as they arrived when saving fails. */
+  private async materialize(
+    channel: Channel,
+    message: InboundEvent["message"],
+  ): Promise<InboundEvent["message"]["attachments"]> {
+    const inboundMedia = channel.inbound?.media ?? null;
+    if (!inboundMedia || message.attachments.length === 0) return message.attachments;
+    try {
+      return await inboundMedia.materialize(message);
+    } catch (err) {
+      log.error("failed to materialize incoming attachments", {
+        service: channel.name,
+        messageId: message.messageId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return message.attachments;
+    }
   }
 
   private async runTurn(
