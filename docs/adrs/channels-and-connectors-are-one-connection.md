@@ -140,3 +140,14 @@ A newly connected account of a linkable service has no agent, so it is silent un
 ### Alternatives
 
 - **Link main to a service's first account.** Rejected by the guardian: Rome choosing an agent nobody asked for is confusing.
+
+## Amendment (2026-10-21): a disconnected account is deleted
+
+When a linkable service's Connection is removed, its channel row is deleted with what was recorded through it: the conversations on the channel and their messages, the agent sessions that served them, its outbox, and its sentinel triage log. A conversation under a deleted one stays, with no parent. A released channel of a linkable service is not kept, so the 2026-10-20 amendment's "a released channel and its history stay stored, reached by nothing" is withdrawn. Nothing keeps the deleted id. When it was the service's name, the service's next account takes the name again and starts with no history, since the rows went with the account. Rows a turn still running at the disconnect writes afterwards stay under the id. Rows left by accounts disconnected before this stay as they are.
+
+Services that take no agent keep their row when their Connection goes, and their next Connection takes it back.
+
+### Alternatives
+
+- **Keep the released channel as a retired record.** Rejected by the guardian: an account that is disconnected is removed, and its chats go with it.
+- **Also clean up rows written after the delete, and the rows earlier disconnects left.** Rejected because they are few, and cleaning them up takes a migration, a boot sweep and key matching that cost more than the stored rows.
