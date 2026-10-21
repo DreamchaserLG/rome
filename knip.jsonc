@@ -22,7 +22,10 @@
     // template, so its imports resolve against the generated app's manifest
     // rather than this workspace.
     "packages/app-template/template/**",
-    "packages/app-template/workflow/**"
+    "packages/app-template/workflow/**",
+    // Standalone benchmarks, each its own pnpm root with its own package.json,
+    // so the root manifest does not list their dependencies.
+    "scripts/bench/**"
   ],
 
   // Host tools the runtime shells out to, installed in the container image or
