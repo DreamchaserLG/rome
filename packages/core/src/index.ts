@@ -209,6 +209,7 @@ import {
   parseLegacyArtifactBindings,
 } from "./apps/artifact-id.js";
 import { ConnectionRegistry, DrizzleGrantLedger } from "./connections/index.js";
+import { startExpiringCredentialRenewal } from "./connections/expiring-renewal.js";
 import { SetupManager } from "./connections/setup/manager.js";
 import { AGENTS_SERVICE } from "./connections/integrations/agents.js";
 import { autoConnectEmail } from "./connections/integrations/email.js";
@@ -1389,6 +1390,9 @@ async function main() {
   );
   await ensureZeroGrantConnections(connectionRegistry);
   connectionRegistry.startCapabilities();
+  // Renew hourly OAuth tokens (Shopify) before they lapse: nothing reports a
+  // token the connector reads from its custody file as rejected.
+  const stopExpiringCredentialRenewal = startExpiringCredentialRenewal(connectionRegistry);
 
   try {
     await writeAppRuntimeStatus(refreshRuntimeAppStatus());
@@ -1804,6 +1808,7 @@ async function main() {
       }
     }
 
+    stopExpiringCredentialRenewal();
     try {
       await connectionRegistry.stopAll();
       shutdownLog.info("connection registry stopped");
