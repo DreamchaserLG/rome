@@ -2105,6 +2105,24 @@ describe("WebChatRepository", () => {
       await expect(repo.getMessages("sess-empty-batch")).resolves.toEqual([]);
     });
 
+    it("writes nothing into a deleted conversation when the batch requires it", async () => {
+      await repo.createSession("sess-required", "Required");
+      const batch = (sessionId: string) => ({
+        messageId: `msg-${sessionId}`,
+        sessionId,
+        turnId: "turn-required",
+        startSeq: 0,
+        blocks: [{ type: "turn_start", turnId: "turn-required" }],
+        requireConversation: true,
+      });
+
+      await repo.appendTraceBlocks(batch("sess-required"));
+      await repo.appendTraceBlocks(batch("sess-gone"));
+
+      await expect(repo.getMessages("sess-required")).resolves.toHaveLength(1);
+      await expect(repo.getMessages("sess-gone")).resolves.toEqual([]);
+    });
+
     it("deleteSession and deleteMessagesBySession remove trace block rows", async () => {
       const countBlocks = async (sessionId: string) => {
         const rows = await testDb.db

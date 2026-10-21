@@ -108,7 +108,8 @@ const MINTED_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
  * conversation id as well, since both spell the channel, so rows a turn wrote
  * after its conversation went are deleted too. A subagent conversation
  * carries its parent's channel, so it is one of the channel's conversations
- * and goes with it. Any other conversation whose parent goes stays, with no
+ * and goes with it. Its id does not spell the channel, so its recorder writes
+ * nothing once its conversation is gone. Any other conversation whose parent goes stays, with no
  * parent. Migration 0084 runs the same deletes for the channels left unbacked
  * before this.
  */
@@ -367,7 +368,8 @@ export class ChannelRecordsRepository {
 
   /**
    * Delete what is recorded under a channel id no row holds: a linkable
-   * service's name, or an id `claim` minted. Such rows are what a turn still
+   * service's name, or an id `claim` minted that a conversation, outbox,
+   * triage or transcript row records. Such rows are what a turn still
    * running when its account was disconnected wrote after the deletes, and
    * what was recorded through an account disconnected before channels were
    * recorded. Run at boot after every Connection has its channel, before any
@@ -388,7 +390,24 @@ export class ChannelRecordsRepository {
       this.db.selectDistinct({ id: outboundMessages.channel }).from(outboundMessages).all(),
       this.db.selectDistinct({ id: sentinelLog.channel }).from(sentinelLog).all(),
     ].flat();
-    for (const { id } of named) if (id && MINTED_ID.test(id)) recorded.add(id);
+    // A transcript row of a channel conversation spells its channel in its
+    // conversation id, and a late one may have no conversation row.
+    const channelOf = (column: SQLiteColumn) => sql<string>`substr(${column}, 9, 36)`;
+    const transcripts = [
+      this.db
+        .selectDistinct({ id: channelOf(romeAgentMessages.sessionId) })
+        .from(romeAgentMessages)
+        .where(startsWith(romeAgentMessages.sessionId, "channel:"))
+        .all(),
+      this.db
+        .selectDistinct({ id: channelOf(romeAgentTraceBlocks.sessionId) })
+        .from(romeAgentTraceBlocks)
+        .where(startsWith(romeAgentTraceBlocks.sessionId, "channel:"))
+        .all(),
+    ].flat();
+    for (const { id } of [...named, ...transcripts]) {
+      if (id && MINTED_ID.test(id)) recorded.add(id);
+    }
     const orphaned = [...recorded].filter((id) => !held.has(id));
     this.db.transaction((tx) => {
       for (const id of orphaned) deleteRecorded(tx, id);

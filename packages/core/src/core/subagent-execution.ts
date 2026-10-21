@@ -244,6 +244,7 @@ export function createSubagentExecutionService(deps: {
         existingSessionId: child.sessionId,
         threadContext: context.threadContext,
         persistTranscript: true,
+        requireConversation: true,
       });
 
       void (async () => {

@@ -178,6 +178,30 @@ describe("ChannelRecordsRepository", () => {
     ).toEqual(["s-feishu"]);
   });
 
+  it("sweeps a late transcript row under a deleted minted id that nothing else records", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", service: "feishu" }, NOW);
+    const minted = records.claim(db, { id: "c2", service: "feishu" }, NOW).id;
+    records.vacate(db, "c2");
+    db.insert(romeAgentMessages)
+      .values({
+        id: "late",
+        sessionId: `channel:${minted}:t1`,
+        role: "assistant",
+        content: "[]",
+        createdAt: NOW,
+      })
+      .run();
+    db.insert(romeAgentTraceBlocks)
+      .values({ messageId: "late", seq: 0, sessionId: `channel:${minted}:t1`, content: "{}" })
+      .run();
+
+    expect(new ChannelRecordsRepository(db).sweep()).toContain(minted);
+    expect(db.select().from(romeAgentMessages).all()).toEqual([]);
+    expect(db.select().from(romeAgentTraceBlocks).all()).toEqual([]);
+  });
+
   it("gives a deleted channel's id to a re-added bot after a restart", () => {
     const records = repository();
     const db = testDb!.db;

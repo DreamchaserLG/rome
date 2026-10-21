@@ -49,6 +49,9 @@ export interface AgentTraceRecorderInput {
    * falls back to the ambient action context.
    */
   trigger?: RomeAgentTraceTriggerMetadata;
+  /** Record nothing once the conversation is deleted. A subagent's goes
+   *  with the account it was asked through, while its turn may still run. */
+  requireConversation?: boolean;
 }
 
 export interface RomeSessionIdInput {
@@ -168,6 +171,7 @@ export class AgentTraceRecorder {
       sessionId,
       turnId: this.input.turnId,
       startSeq,
+      requireConversation: this.input.requireConversation,
       blocks,
       trigger,
       transcriptMessages,

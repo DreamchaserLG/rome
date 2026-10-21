@@ -2154,6 +2154,9 @@ export class WebChatRepository {
     blocks: unknown[];
     trigger?: RomeAgentTraceTriggerMetadata;
     transcriptMessages?: RomeAgentTranscriptMessageInput[];
+    /** Write nothing once the conversation row is gone, checked in the same
+     *  transaction as the writes. */
+    requireConversation?: boolean;
   }): Promise<void> {
     if (input.blocks.length === 0) return;
 
@@ -2173,6 +2176,16 @@ export class WebChatRepository {
     // call must stay awaited so a future async driver can't turn this into a
     // fire-and-forget write (same contract as deleteSession).
     await this.db.transaction((tx) => {
+      if (
+        input.requireConversation &&
+        !tx
+          .select({ id: romeSessions.id })
+          .from(romeSessions)
+          .where(eq(romeSessions.id, input.sessionId))
+          .get()
+      ) {
+        return;
+      }
       const now = new Date();
       const insertTranscriptMessages = (messages: RomeAgentTranscriptMessageInput[]) => {
         for (const message of messages) {
