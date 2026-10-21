@@ -321,6 +321,32 @@ describe("AgentTraceRecorder", () => {
     expect(transcript.map((message) => message.role)).toEqual(["user", "trace"]);
   });
 
+  it("writes nothing more once its conversation is deleted mid-turn", async () => {
+    const recorder = new AgentTraceRecorder({
+      webchatRepo: repo,
+      agentName: "sentinel",
+      channelThreadKey: "sentinel:telegram:t1",
+      turnId: "turn-deleted",
+      actionContext: { actionName: "inbox:message_handler", executionId: "exec-deleted" },
+    });
+    await recorder.record({
+      type: "turn_start",
+      turnId: "turn-deleted",
+      sessionId: "provider-session-deleted",
+      userPrompt: "hello",
+    });
+    // The account is disconnected while the turn runs.
+    await repo.deleteSession("action:exec-deleted:sentinel");
+
+    await recorder.record({ type: "result", content: "done" });
+
+    const rows = await testDb.db
+      .select()
+      .from(romeAgentMessages)
+      .where(eq(romeAgentMessages.sessionId, "action:exec-deleted:sentinel"));
+    expect(rows).toEqual([]);
+  });
+
   it("does not duplicate webchat transcript rows for existing sessions", async () => {
     await repo.createSession("sess-webchat", "Webchat");
     const recorder = new AgentTraceRecorder({

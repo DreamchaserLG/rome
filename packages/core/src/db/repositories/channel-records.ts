@@ -128,7 +128,7 @@ function recordedThrough(id: string) {
  * to send there. Migration 0084 runs the same changes for the channels left
  * unbacked before this.
  */
-function deleteRecorded(exec: Exec, id: string): void {
+function deleteRecorded(exec: Exec, id: string): string[] {
   const conversations = exec
     .select({ id: romeSessions.id })
     .from(romeSessions)
@@ -179,7 +179,7 @@ function deleteRecorded(exec: Exec, id: string): void {
   exec.delete(sentinelLog).where(eq(sentinelLog.channel, id)).run();
   // A routine that sends on the channel would send through whichever account
   // takes this id next.
-  exec
+  const routinesOff = exec
     .update(routines)
     .set({ enabled: false })
     .where(
@@ -188,7 +188,9 @@ function deleteRecorded(exec: Exec, id: string): void {
         sql`json_extract(${routines.args}, '$.channel') = ${id}`,
       ),
     )
-    .run();
+    .returning({ id: routines.id })
+    .all()
+    .map((row) => row.id);
   exec
     .update(approvals)
     .set({
@@ -220,6 +222,7 @@ function deleteRecorded(exec: Exec, id: string): void {
       ),
     )
     .run();
+  return routinesOff;
 }
 
 /** The service a channel belongs to. A service's first channel carries the
@@ -359,21 +362,23 @@ export class ChannelRecordsRepository {
   /** Release the channel `connectionId` backs. A linkable service's channel
    *  is deleted with everything recorded through it. Any other service's row
    *  and id stay for its next Connection, and its link goes: an agent stays
-   *  linked only where it can still answer. */
-  vacate(exec: Exec, connectionId: string): void {
+   *  linked only where it can still answer. Returns the ids of the routines
+   *  turned off, for the caller to stop their live triggers. */
+  vacate(exec: Exec, connectionId: string): string[] {
     this.ids.clear();
     const row = exec.select().from(channels).where(eq(channels.connectionId, connectionId)).get();
     if (row && LINKABLE_SERVICES.has(row.service)) {
-      deleteRecorded(exec, row.id);
+      const routinesOff = deleteRecorded(exec, row.id);
       exec.delete(channels).where(eq(channels.id, row.id)).run();
       this.deleted.add(row.id);
-      return;
+      return routinesOff;
     }
     exec
       .update(channels)
       .set({ connectionId: null, agent: null })
       .where(eq(channels.connectionId, connectionId))
       .run();
+    return [];
   }
 
   /**

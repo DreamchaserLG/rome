@@ -373,7 +373,18 @@ async function main() {
       if (!talks(record.service)) return;
       channelRecords.claim(tx, { ...record, domain: domainOf(profile) }, record.createdAt);
     },
-    onRemove: (tx, id) => channelRecords.vacate(tx, id),
+    onRemove: (tx, id) => {
+      // A routine that sent on the account is off in the store, and its live
+      // trigger stops too. Removal runs after the engine is built.
+      for (const routineId of channelRecords.vacate(tx, id)) {
+        routineEngine.deactivate(routineId).catch((error: unknown) => {
+          log.warn("failed to stop a disconnected account's routine", {
+            routineId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+    },
   });
   const channelOf = recordedChannelOf(channelRecords, talks);
   const pairingAdmission = createPairingAdmission({

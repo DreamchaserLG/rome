@@ -276,7 +276,7 @@ describe("ChannelRecordsRepository", () => {
         .run();
     }
 
-    records.vacate(db, "c1");
+    expect(records.vacate(db, "c1")).toEqual(["r-telegram"]);
 
     expect(
       Object.fromEntries(
