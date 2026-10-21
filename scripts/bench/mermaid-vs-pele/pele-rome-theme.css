@@ -6,8 +6,10 @@
   --pele-fg: var(--foreground);
   --pele-muted: var(--muted-foreground);
   --pele-line: var(--muted-foreground);
-  --pele-surface: var(--surface-muted);
-  --pele-surface-alt: var(--muted);
+  /* Node and subgraph fills follow the surface and surface-muted pair that Rome
+     gives Mermaid, so boxes read the same in either renderer. */
+  --pele-surface: var(--surface);
+  --pele-surface-alt: var(--surface-muted);
   --pele-border: var(--border-strong);
   --pele-accent: var(--primary);
   --pele-critical: var(--destructive);
