@@ -35,11 +35,11 @@ function pairingAccount(
     : code;
 }
 
-/** The docs page that explains pairing for a service. */
-function pairingGuidePage(service: string): string {
-  if (service === "feishu") return "lark";
-  if (service === "slack_bot") return "slack";
-  return service;
+/** The docs page that explains pairing for a connection kind. */
+function pairingGuidePage(connectionKind: string): string {
+  if (connectionKind === "feishu") return "lark";
+  if (connectionKind === "slack_bot") return "slack";
+  return connectionKind;
 }
 
 function pairingSuccess(
@@ -54,15 +54,15 @@ function pairingSuccess(
 export function createPairingAdmission(deps: {
   approvalsRepo: ApprovalsRepository;
   personMappingRepo: PersonMappingRepository;
-  talkGrants: (service: string) => readonly string[];
+  talkGrants: (connectionKind: string) => readonly string[];
   /** The Connections pairing replies go out on. */
   registry: Pick<ConnectionRegistry, "get">;
 }): Admission {
-  return async (connectionId, service, message) => {
-    const channel = pairingPayloadSchema.shape.channel.safeParse(service);
+  return async (connectionId, connectionKind, message) => {
+    const channel = pairingPayloadSchema.shape.channel.safeParse(connectionKind);
     if (!channel.success) return true;
     const pairingChannel = channel.data;
-    if (service === "telegram" && !/^[1-9][0-9]*$/.test(message.senderId)) return false;
+    if (connectionKind === "telegram" && !/^[1-9][0-9]*$/.test(message.senderId)) return false;
     // Replies go out in the background: the decision never depends on them,
     // and admission takes a conversation's messages one at a time, so a send
     // that hangs must not hold up the next message.
@@ -71,12 +71,12 @@ export function createPairingAdmission(deps: {
     // agent's first answer. Approval is recorded before the send, so only the
     // order of the two bot messages is at stake.
     const reply = (text: string): void => {
-      sendOn(deps.registry, connectionId, message.conversationId, text).catch(() => {
+      sendOn(deps.registry, connectionId, message.chatId, text).catch(() => {
         // Provider errors may include the rejected request body. Do not log them.
         log.error("pairing reply failed", { connectionId, senderId: message.senderId });
       });
     };
-    const guidance = `🔗 Pair ${pairingAccount(service, message.senderId, message.senderDisplayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nLearn more in the [Pairing Guide](https://romeos.cc/docs/rome/${pairingGuidePage(service)}).`;
+    const guidance = `🔗 Pair ${pairingAccount(connectionKind, message.senderId, message.senderDisplayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nLearn more in the [Pairing Guide](https://romeos.cc/docs/rome/${pairingGuidePage(connectionKind)}).`;
     const directed =
       message.thread?.kind === "dm" ||
       ["mention", "reply", "bot_thread"].includes(message.addressing ?? "ambient");
@@ -92,7 +92,7 @@ export function createPairingAdmission(deps: {
               displayName: message.senderDisplayName ?? message.senderId,
               username: message.senderUsername,
             },
-            deps.talkGrants(service),
+            deps.talkGrants(connectionKind),
           );
           if (request?.guide) reply(guidance);
           return false;
@@ -111,7 +111,7 @@ export function createPairingAdmission(deps: {
         if (result.outcome === "resolved" && result.approval.status === "approved") {
           reply(
             pairingSuccess(
-              service,
+              connectionKind,
               message.senderId,
               message.senderDisplayName,
               message.senderUsername,
@@ -125,7 +125,10 @@ export function createPairingAdmission(deps: {
         }
         return false;
       }
-      const person = await deps.personMappingRepo.findByChannelUser(service, message.senderId);
+      const person = await deps.personMappingRepo.findByChannelUser(
+        connectionKind,
+        message.senderId,
+      );
       if (person && person.id !== STRANGER_PERSON_ID) return true;
       if (!directed) return false;
       const request = deps.approvalsRepo.requestAuthorizedPairing(
@@ -135,9 +138,9 @@ export function createPairingAdmission(deps: {
           channelUserId: message.senderId,
           displayName: message.senderDisplayName ?? message.senderId,
           username: message.senderUsername,
-          ...(message.thread?.kind === "dm" ? { conversationId: message.conversationId } : {}),
+          ...(message.thread?.kind === "dm" ? { chatId: message.chatId } : {}),
         },
-        deps.talkGrants(service),
+        deps.talkGrants(connectionKind),
       );
       if (request?.guide) {
         reply(guidance);
@@ -177,16 +180,16 @@ export async function notifyPairingResolution(
   const payload = pairingPayload(approval);
   if (!payload || approval.status !== "approved") return;
   try {
-    const conversationId =
-      (payload.conversationId as ChatId | undefined) ??
+    const chatId =
+      (payload.chatId as ChatId | undefined) ??
       (await registry
         .get(payload.connectionId)
         .withTalker((talker) => talker.directMessaging?.chatFor(payload.channelUserId)));
-    if (!conversationId) throw new Error("Direct conversation unavailable");
+    if (!chatId) throw new Error("Direct conversation unavailable");
     await sendOn(
       registry,
       payload.connectionId,
-      conversationId,
+      chatId,
       pairingSuccess(payload.channel, payload.channelUserId, payload.displayName, payload.username),
     );
   } catch {
@@ -201,8 +204,8 @@ export async function notifyPairingResolution(
 async function sendOn(
   registry: Pick<ConnectionRegistry, "get">,
   connectionId: string,
-  conversationId: ChatId,
+  chatId: ChatId,
   text: string,
 ): Promise<void> {
-  await sendThrough(registry.get(connectionId), conversationId, { text });
+  await sendThrough(registry.get(connectionId), chatId, { text });
 }

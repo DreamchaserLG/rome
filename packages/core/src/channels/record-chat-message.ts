@@ -95,8 +95,8 @@ export function createChatMessageRecorder(deps: ChatMessageRecorderDeps): Record
 
     const chat = await deps.chats.ensureChannelChat({
       channel: service,
-      threadId: message.conversationId,
-      parentThreadId: message.parentConversationId || undefined,
+      threadId: message.chatId,
+      parentThreadId: message.parentChatId || undefined,
       threadName: message.thread?.name,
       threadType,
       agentName: initialAgent(routedAgentName, deps.hasAgent),

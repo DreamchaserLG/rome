@@ -7,14 +7,14 @@ import { createTestDb, type TestDb } from "../test/helpers.js";
 import { appendAttachmentPathsToPrompt as inboxAppendAttachmentPaths } from "../../../../rome_apps/inbox/src/actions/message-handler/index.js";
 import { appendAttachmentPathsToPrompt, createChatMessageRecorder } from "./record-chat-message.js";
 
-const REF = { connectionId: "connection:feishu", conversationId: "group-1" as ChatId };
+const REF = { connectionId: "connection:feishu", chatId: "group-1" as ChatId };
 
 function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
   return {
     channel: "feishu",
     direction: "inbound",
     messageId: "om-1",
-    conversationId: "group-1" as ChatId,
+    chatId: "group-1" as ChatId,
     senderId: "ou-alice",
     senderDisplayName: "Alice",
     text: "lunch at noon?",
@@ -133,11 +133,11 @@ describe("createChatMessageRecorder", () => {
 
   it("opens a native thread's parent chat and stores the row on the thread", async () => {
     await record()({
-      ref: { ...REF, conversationId: "thread-1" as ChatId },
+      ref: { ...REF, chatId: "thread-1" as ChatId },
       service: "feishu",
       message: message({
-        conversationId: "thread-1" as ChatId,
-        parentConversationId: "group-1" as ChatId,
+        chatId: "thread-1" as ChatId,
+        parentChatId: "group-1" as ChatId,
         thread: { kind: "topic", name: "Lunch" },
       }),
       routedAgentName: "sales:agent",

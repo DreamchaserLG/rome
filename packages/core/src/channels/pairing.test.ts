@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { ChannelSend } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
-import { createTestDb, type TestDb, identityServiceOf } from "../test/helpers.js";
+import { createTestDb, type TestDb, identityConnectionKindOf } from "../test/helpers.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import {
@@ -58,7 +58,7 @@ describe("channel pairing approvals", () => {
       .insert(connections)
       .values({
         id: "connection",
-        service,
+        connectionKind: service,
         label: service,
         createdAt: new Date(),
       })
@@ -76,7 +76,7 @@ describe("channel pairing approvals", () => {
     testDb = createTestDb();
     repo = new ApprovalsRepository(
       testDb.db,
-      new PersonMappingRepository(testDb.db, identityServiceOf),
+      new PersonMappingRepository(testDb.db, identityConnectionKindOf),
       () => key,
     );
     testDb.db
@@ -99,9 +99,9 @@ describe("channel pairing approvals", () => {
         : channel === "discord"
           ? "<@123> (`123`)"
           : '<at user_id="ou_123">ou_123</at> (`ou_123`)';
-    const send = rs.fn<Send>(async (_connection, conversationId) => ({
+    const send = rs.fn<Send>(async (_connection, chatId) => ({
       messageId: "sent",
-      conversationId,
+      chatId,
     }));
     const chatFor = rs.fn(async () => "private-chat" as ChatId);
     const feature = rs.fn(() => ({ chatFor }));
@@ -109,7 +109,7 @@ describe("channel pairing approvals", () => {
     const admit = createPairingAdmission({
       talkGrants,
       approvalsRepo: repo,
-      personMappingRepo: new PersonMappingRepository(testDb.db, identityServiceOf),
+      personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
       registry,
     });
     await admit("connection", channel, {
@@ -117,7 +117,7 @@ describe("channel pairing approvals", () => {
       direction: "inbound",
       senderId: id,
       senderUsername: channel === "telegram" ? "actualuser" : undefined,
-      conversationId: "group" as ChatId,
+      chatId: "group" as ChatId,
       messageId: "request",
       text: "hello",
       attachments: [],
@@ -126,7 +126,7 @@ describe("channel pairing approvals", () => {
       addressing: "mention",
     });
     const request = (await repo.findPending())[0];
-    expect(pairingPayload(request)?.conversationId).toBeUndefined();
+    expect(pairingPayload(request)?.chatId).toBeUndefined();
     const result = await repo.resolvePending(request.id, "approve", "owner");
     if (result.outcome !== "resolved") throw new Error("Approval failed");
     send.mockClear();
@@ -151,7 +151,7 @@ describe("channel pairing approvals", () => {
     const admit = createPairingAdmission({
       talkGrants,
       approvalsRepo: repo,
-      personMappingRepo: new PersonMappingRepository(testDb.db, identityServiceOf),
+      personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
       registry,
     });
 
@@ -159,7 +159,7 @@ describe("channel pairing approvals", () => {
       channel: "telegram",
       direction: "inbound",
       senderId: "123",
-      conversationId: "group" as ChatId,
+      chatId: "group" as ChatId,
       messageId: "request",
       text: "hello",
       attachments: [],
@@ -177,14 +177,14 @@ describe("channel pairing approvals", () => {
     "feishu",
   ] as const)("%s ignores an ambient group message from a stranger that looks like a pairing code", async (channel) => {
     seedConnection(channel);
-    const send = rs.fn<Send>(async (_connection, conversationId) => ({
+    const send = rs.fn<Send>(async (_connection, chatId) => ({
       messageId: "sent",
-      conversationId,
+      chatId,
     }));
     const admit = createPairingAdmission({
       talkGrants,
       approvalsRepo: repo,
-      personMappingRepo: new PersonMappingRepository(testDb.db, identityServiceOf),
+      personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
       registry: registryOf(send),
     });
 
@@ -192,7 +192,7 @@ describe("channel pairing approvals", () => {
       channel,
       direction: "inbound",
       senderId: channel === "feishu" ? "ou_123" : "123",
-      conversationId: "group" as ChatId,
+      chatId: "group" as ChatId,
       messageId: "chatter",
       text: "RP-1234ABCD",
       attachments: [],
@@ -219,19 +219,19 @@ describe("channel pairing approvals", () => {
     seedConnection(channel);
     const send = rs.fn<Send>(async () => ({
       messageId: "sent",
-      conversationId: "dm" as ChatId,
+      chatId: "dm" as ChatId,
     }));
     await createPairingAdmission({
       talkGrants,
       approvalsRepo: repo,
-      personMappingRepo: new PersonMappingRepository(testDb.db, identityServiceOf),
+      personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
       registry: registryOf(send),
     })("connection", channel, {
       channel,
       direction: "inbound",
       senderId: id,
       senderDisplayName: name,
-      conversationId: "dm" as ChatId,
+      chatId: "dm" as ChatId,
       messageId: "request",
       text: "hello",
       attachments: [],
@@ -253,7 +253,7 @@ describe("channel pairing approvals", () => {
     expect(
       await new ApprovalsRepository(
         testDb.db,
-        new PersonMappingRepository(testDb.db, identityServiceOf),
+        new PersonMappingRepository(testDb.db, identityConnectionKindOf),
         () => key,
       ).pairingCode(first.approval.id),
     ).toBe(code);
@@ -279,7 +279,7 @@ describe("channel pairing approvals", () => {
     if (result.outcome !== "resolved") throw new Error("Approval failed");
     const send = rs.fn<Send>(async () => ({
       messageId: "sent",
-      conversationId: "dm" as ChatId,
+      chatId: "dm" as ChatId,
     }));
     const registry = registryOf(send, () => ({
       chatFor: async () => "dm" as ChatId,
@@ -317,7 +317,7 @@ describe("channel pairing approvals", () => {
   ] as const)("%s requires dismissed accounts to pair before admission", async (channel) => {
     seedConnection(channel);
     const accountId = channel === "feishu" ? "ou_123" : "123";
-    const people = new PersonMappingRepository(testDb.db, identityServiceOf);
+    const people = new PersonMappingRepository(testDb.db, identityConnectionKindOf);
     testDb.db
       .insert(persons)
       .values({
@@ -331,7 +331,7 @@ describe("channel pairing approvals", () => {
     await people.addChannelMapping(STRANGER_PERSON_ID, channel, accountId, "Alice");
     const send = rs.fn<Send>(async () => ({
       messageId: "sent",
-      conversationId: "dm" as ChatId,
+      chatId: "dm" as ChatId,
     }));
     const registry = registryOf(send);
     const admit = createPairingAdmission({
@@ -345,7 +345,7 @@ describe("channel pairing approvals", () => {
       direction: "inbound",
       senderId: accountId,
       senderDisplayName: "Alice",
-      conversationId: "dm" as ChatId,
+      chatId: "dm" as ChatId,
       messageId: "request",
       text: "hello",
       attachments: [],
@@ -391,7 +391,7 @@ describe("channel pairing approvals", () => {
     const input = { ...identity, connectionId: "connection", channelUserId: "123" };
     const previous = repo.requestAuthorizedPairing(input, ["bot"])!;
     const code = (await repo.pairingCode(previous.approval.id))!;
-    const people = new PersonMappingRepository(testDb.db, identityServiceOf);
+    const people = new PersonMappingRepository(testDb.db, identityConnectionKindOf);
     let resume!: () => void;
     let entered!: () => void;
     const paused = new Promise<void>((resolve) => {
@@ -415,7 +415,7 @@ describe("channel pairing approvals", () => {
       direction: "inbound",
       senderId: "123",
       senderDisplayName: "Alice",
-      conversationId: "dm" as ChatId,
+      chatId: "dm" as ChatId,
       messageId: "racing",
       text: "hello",
       attachments: [],
@@ -540,7 +540,7 @@ describe("channel pairing approvals", () => {
     const load = rs.fn(() => key);
     const cached = new ApprovalsRepository(
       testDb.db,
-      new PersonMappingRepository(testDb.db, identityServiceOf),
+      new PersonMappingRepository(testDb.db, identityConnectionKindOf),
       load,
     );
     const id = cached.requestPairing(identity)!.approval.id;
@@ -631,13 +631,13 @@ describe("channel pairing approvals", () => {
     seedConnection(service);
     const send = rs.fn<Send>(async () => ({
       messageId: "sent",
-      conversationId: "dm" as ChatId,
+      chatId: "dm" as ChatId,
     }));
     const registry = registryOf(send);
     const admit = createPairingAdmission({
       talkGrants,
       approvalsRepo: repo,
-      personMappingRepo: new PersonMappingRepository(testDb.db, identityServiceOf),
+      personMappingRepo: new PersonMappingRepository(testDb.db, identityConnectionKindOf),
       registry,
     });
     const id = service === "feishu" ? "ou_123" : "123";
@@ -653,7 +653,7 @@ describe("channel pairing approvals", () => {
       senderId: id,
       senderDisplayName: "Owner",
       senderUsername: service === "telegram" ? "realowner" : undefined,
-      conversationId: "dm" as ChatId,
+      chatId: "dm" as ChatId,
       messageId: "one",
       text: "hello",
       attachments: [],
