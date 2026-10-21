@@ -7,8 +7,10 @@ import type {
   ChannelMessageHookDeps,
   ConversationId,
   ConversationSettingsControl,
+  ConversationSettingsSnapshot,
   InboundEvent,
   ChannelActivitySession,
+  MessageAddressing,
 } from "@rome-os/app-runtime";
 
 const log = createAppLogger("channel-message-hook");
@@ -23,6 +25,25 @@ const AGENTS_CHANNEL = "agents";
  * a turn that hangs; this keeps a silent chat visible. The turn is not stopped.
  */
 export const SLOW_TURN_MS = 10 * 60_000;
+
+function addressingOf(message: InboundEvent["message"]): MessageAddressing {
+  return message.addressing ?? (message.thread?.kind === "dm" ? "direct" : "ambient");
+}
+
+/**
+ * Whether the conversation's reply rule (`activation.mode`) lets Rome answer
+ * the message. It decides answering only: a message it declines is still
+ * recorded. A conversation whose service does not enforce the rule answers
+ * every message.
+ */
+export function replyRuleAnswers(
+  snapshot: Pick<ConversationSettingsSnapshot, "supportedFields" | "effective">,
+  message: InboundEvent["message"],
+): boolean {
+  if (!snapshot.supportedFields.includes("activation.mode")) return true;
+  if (snapshot.effective.activation.mode === "all") return true;
+  return addressingOf(message) !== "ambient";
+}
 
 export class ChannelMessageHook implements ChannelMessageHookInterface {
   /** Unsubscribe functions by channel name, one per channel this hook holds. */
@@ -97,9 +118,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     // A program sends on `agents`, not a person, so `/stop` there is text for
     // the model, and `message_handler` decides whether Rome answers it.
     if (service !== AGENTS_CHANNEL && isStopCommand(message.text)) {
-      const addressing =
-        message.addressing ?? (message.thread?.kind === "dm" ? "direct" : "ambient");
-      if (addressing === "ambient") {
+      if (addressingOf(message) === "ambient") {
         log.debug("ignoring group stop command not directed at the bot", {
           service,
           messageId: message.messageId,
@@ -167,6 +186,16 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       }
     }
 
+    if (!replyRuleAnswers(snapshot, message)) {
+      // Recorded so the agent sees it, without a turn or a typing indicator.
+      void this.runTurn(message, service, connectionId, attachments, Promise.resolve(null), {
+        routedAgentName,
+        accountAgentName: accountAgent,
+        answer: false,
+      });
+      return;
+    }
+
     const activity = Promise.resolve()
       .then(
         () =>
@@ -200,7 +229,11 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     connectionId: string,
     attachments: InboundEvent["message"]["attachments"],
     activity: Promise<ChannelActivitySession | null>,
-    agents: { routedAgentName: string | undefined; accountAgentName: string | undefined },
+    route: {
+      routedAgentName: string | undefined;
+      accountAgentName: string | undefined;
+      answer?: false;
+    },
   ): Promise<void> {
     const slowTurnMs = this.options.slowTurnMs ?? SLOW_TURN_MS;
     const slow = setTimeout(() => {
@@ -228,7 +261,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           attachments,
           messageId: message.messageId,
           replyTo: message.replyTo,
-          ...agents,
+          ...route,
         },
         {
           initiator: `connection:${connectionId}`,

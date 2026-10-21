@@ -27,6 +27,7 @@ A conversation is the thread a [message](#message) was said in, named by the pla
 - A direct conversation is addressed by the person on it. A group conversation is addressed by the group and by nobody on it, so no account names one and no read scoped by an account reaches one.
 - A conversation belongs to the one of [Rome's accounts](#romes-accounts) it was seen through. Two of Rome's accounts are free to spell an id the same way and mean two different threads.
 - What a conversation holds and what passed between Rome and a person are two questions to one store, not two histories: Rome answers both from the record it already keeps for that account.
+- A conversation's reply rule decides whether Rome answers, and nothing else. Under a rule of mentions only, Rome answers a group message directed at its account (a mention, a reply, or a thread it started). Every other message from a linked account is still recorded in the conversation and reaches the agent as context on its next turn, but starts no turn. Only Discord and Feishu groups have a reply rule.
 
 **Not to be confused with:**
 

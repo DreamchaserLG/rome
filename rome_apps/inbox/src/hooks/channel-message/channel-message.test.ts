@@ -10,7 +10,7 @@ import type {
   ChannelActivity,
   ChannelInboundMedia,
 } from "@rome-os/app-runtime";
-import { ChannelMessageHook, createHook, MissingChannelsError } from "./index.js";
+import { ChannelMessageHook, createHook, MissingChannelsError, replyRuleAnswers } from "./index.js";
 
 const TELEGRAM_ID = "connection:telegram";
 const WHATSAPP_ID = "connection:whatsapp";
@@ -442,6 +442,57 @@ describe("ChannelMessageHook", () => {
     expect(harness.subscribes).toHaveBeenCalledTimes(8);
   });
 
+  describe("under a reply rule", () => {
+    // A group on a service that enforces `activation.mode`, as Discord and Feishu do.
+    const ruled = (mode: "mention" | "all") =>
+      harness.get.mockImplementation(async ({ connectionId, conversationId }) => {
+        const base = snapshot(connectionId, conversationId);
+        return {
+          ...base,
+          supportedFields: ["enabled", "activation.mode"],
+          effective: { ...base.effective, activation: { ...base.effective.activation, mode } },
+        };
+      });
+    const activityOn = () => {
+      const begin = rs.fn(async () => ({ update: rs.fn(), finish: rs.fn() }));
+      harness.features.set(TELEGRAM_ID, { activity: { begin } });
+      return begin;
+    };
+
+    it("records an ambient message under mentions only, without a turn or typing", async () => {
+      ruled("mention");
+      const begin = activityOn();
+
+      await harness.emit(TELEGRAM_ID, message({ addressing: "ambient" }));
+
+      expect(harness.run).toHaveBeenCalledWith(
+        "message_handler",
+        expect.objectContaining({ messageId: "message-1", answer: false }),
+        expect.anything(),
+      );
+      expect(begin).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["an ambient message under every message", "all", "ambient"],
+      ["a mention under mentions only", "mention", "mention"],
+    ] as const)("answers %s", async (_name, mode, addressing) => {
+      ruled(mode);
+      const begin = activityOn();
+
+      await harness.emit(TELEGRAM_ID, message({ addressing }));
+
+      expect(harness.run.mock.calls[0]?.[1]).not.toHaveProperty("answer");
+      await rs.waitFor(() => expect(begin).toHaveBeenCalledTimes(1));
+    });
+
+    it("answers an ambient message on a service that does not enforce the rule", async () => {
+      await harness.emit(TELEGRAM_ID, message({ addressing: "ambient" }));
+
+      expect(harness.run.mock.calls[0]?.[1]).not.toHaveProperty("answer");
+    });
+  });
+
   describe("on accounts that take an agent", () => {
     // feishu-2 takes a link, and telegram stands for a channel that takes none.
     let linked: string | null;
@@ -554,5 +605,37 @@ describe("ChannelMessageHook", () => {
         chatStop: async () => ({ status: "idle" }),
       } as unknown as Parameters<typeof createHook>[0]),
     ).toThrow(MissingChannelsError);
+  });
+});
+
+describe("replyRuleAnswers", () => {
+  const settings = (supportedFields: string[], mode: "mention" | "all") =>
+    ({
+      ...snapshot(TELEGRAM_ID, "chat-1" as ConversationId),
+      supportedFields,
+      effective: {
+        ...snapshot(TELEGRAM_ID, "chat-1" as ConversationId).effective,
+        activation: { mode, botMessages: "ignore", whenOthersMentioned: "ignore" },
+      },
+    }) as Parameters<typeof replyRuleAnswers>[0];
+
+  it("declines only an ambient message where mentions-only is enforced", () => {
+    const enforced = settings(["activation.mode"], "mention");
+    expect(replyRuleAnswers(enforced, message({ addressing: "ambient" }))).toBe(false);
+    expect(replyRuleAnswers(enforced, message({ addressing: undefined }))).toBe(false);
+    for (const addressing of ["direct", "mention", "reply", "bot_thread"] as const) {
+      expect(replyRuleAnswers(enforced, message({ addressing }))).toBe(true);
+    }
+  });
+
+  it("reads a dm with no addressing as direct", () => {
+    const enforced = settings(["activation.mode"], "mention");
+    expect(replyRuleAnswers(enforced, message({ thread: { kind: "dm" } }))).toBe(true);
+  });
+
+  it("answers everything under every message, or where the rule is not enforced", () => {
+    const ambient = message({ addressing: "ambient" });
+    expect(replyRuleAnswers(settings(["activation.mode"], "all"), ambient)).toBe(true);
+    expect(replyRuleAnswers(settings(["session.reset"], "mention"), ambient)).toBe(true);
   });
 });
