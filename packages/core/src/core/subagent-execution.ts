@@ -131,8 +131,14 @@ export function createSubagentExecutionService(deps: {
           agentName: isCoreMainAgentId(name) ? null : name,
           projectName: parentSession?.projectName,
           projectPath: parentSession?.projectPath,
-          sourceChannel: parentSession?.sourceChannel,
-          sourceThreadId: parentSession?.sourceThreadId,
+          // A parent whose account was disconnected mid-turn is gone, and its
+          // turn's thread still names the channel the child belongs to.
+          sourceChannel: parentSession
+            ? parentSession.sourceChannel
+            : context.threadContext?.channel,
+          sourceThreadId: parentSession
+            ? parentSession.sourceThreadId
+            : context.threadContext?.threadId,
           sourceThreadName: parentSession?.sourceThreadName,
           sourceThreadType: parentSession?.sourceThreadType,
           parentSessionId: context.parentSessionId,

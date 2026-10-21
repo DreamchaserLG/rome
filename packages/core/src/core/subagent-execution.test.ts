@@ -232,6 +232,45 @@ describe("SubagentExecutionService", () => {
     });
   });
 
+  it("keeps a fresh Child on its turn's channel when the Parent is gone", async () => {
+    const child = fakeChildSession("child-orphan", ["child-turn"]);
+    const childManager = {
+      acquire: rs.fn(async () => child.session),
+      acquireBySessionId: rs.fn(),
+      peek: rs.fn(),
+      recordConversation: rs.fn(async () => undefined),
+      shutdown: rs.fn(async () => undefined),
+    } as unknown as AgentSessionManager;
+    const service = createSubagentExecutionService({
+      webchatRepo: repo,
+      activeRegistry: createActiveSubagentRegistry(),
+      turnStreams: createAgentTurnStreamRegistry(),
+    });
+
+    const execution = await service.startSubagent(
+      "researcher",
+      { prompt: "one" },
+      {
+        parentSessionId: "channel:telegram:t1",
+        parentAgentSessionId: "parent-runtime-1",
+        parentTurnId: "parent-turn-1",
+        parentToolUseId: "tool-1",
+        parentAgentName: "main",
+        parentChannelThreadKey: "telegram:t1",
+        threadContext: { channel: "telegram", threadId: "t1" },
+        childManager,
+        workingDir: "/tmp/project-a",
+      },
+    );
+    child.releases[0].resolve();
+    await execution.completion;
+
+    await expect(repo.getSession("child-orphan")).resolves.toMatchObject({
+      sourceChannel: "telegram",
+      sourceThreadId: "t1",
+    });
+  });
+
   it("resumes only an existing Child owned by the same Parent", async () => {
     await repo.ensureRomeSession({
       id: "child-resume",
