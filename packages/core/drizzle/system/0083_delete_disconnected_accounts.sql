@@ -1,7 +1,8 @@
 -- A disconnected account of a linkable service is deleted with what was
 -- recorded through it. Delete the channels already left unbacked, their
--- conversations and messages, and the agent sessions that served them, so a
--- later account minted under the same id inherits none of it.
+-- conversations and messages, the agent sessions that served them, their
+-- outbox and their triage log, so a later account minted under the same id
+-- inherits none of it.
 DELETE FROM `session_turn_checkpoints` WHERE `session_id` IN (SELECT `id` FROM `sessions` WHERE `conversation_id` IN (SELECT `id` FROM `rome_sessions` WHERE `source_channel` IN (SELECT `id` FROM `channels` WHERE `connection_id` IS NULL AND `service` IN ('feishu', 'telegram', 'discord', 'telegram_user'))) OR EXISTS (SELECT 1 FROM `channels` AS `c` WHERE `c`.`connection_id` IS NULL AND `c`.`service` IN ('feishu', 'telegram', 'discord', 'telegram_user') AND (substr(`sessions`.`channel_thread_key`, 1, length(`c`.`id`) + 1) = `c`.`id` || ':' OR substr(`sessions`.`channel_thread_key`, 1, length(`c`.`id`) + 10) = 'sentinel:' || `c`.`id` || ':')));--> statement-breakpoint
 DELETE FROM `sessions` WHERE `conversation_id` IN (SELECT `id` FROM `rome_sessions` WHERE `source_channel` IN (SELECT `id` FROM `channels` WHERE `connection_id` IS NULL AND `service` IN ('feishu', 'telegram', 'discord', 'telegram_user'))) OR EXISTS (SELECT 1 FROM `channels` AS `c` WHERE `c`.`connection_id` IS NULL AND `c`.`service` IN ('feishu', 'telegram', 'discord', 'telegram_user') AND (substr(`sessions`.`channel_thread_key`, 1, length(`c`.`id`) + 1) = `c`.`id` || ':' OR substr(`sessions`.`channel_thread_key`, 1, length(`c`.`id`) + 10) = 'sentinel:' || `c`.`id` || ':'));--> statement-breakpoint
 DELETE FROM `rome_agent_trace_blocks` WHERE `session_id` IN (SELECT `id` FROM `rome_sessions` WHERE `source_channel` IN (SELECT `id` FROM `channels` WHERE `connection_id` IS NULL AND `service` IN ('feishu', 'telegram', 'discord', 'telegram_user')));--> statement-breakpoint
@@ -12,4 +13,5 @@ DELETE FROM `shared_chats` WHERE `session_id` IN (SELECT `id` FROM `rome_session
 UPDATE `rome_sessions` SET `parent_session_id` = NULL WHERE `parent_session_id` IN (SELECT `id` FROM `rome_sessions` WHERE `source_channel` IN (SELECT `id` FROM `channels` WHERE `connection_id` IS NULL AND `service` IN ('feishu', 'telegram', 'discord', 'telegram_user')));--> statement-breakpoint
 DELETE FROM `rome_sessions` WHERE `source_channel` IN (SELECT `id` FROM `channels` WHERE `connection_id` IS NULL AND `service` IN ('feishu', 'telegram', 'discord', 'telegram_user'));--> statement-breakpoint
 DELETE FROM `outbound_messages` WHERE `channel` IN (SELECT `id` FROM `channels` WHERE `connection_id` IS NULL AND `service` IN ('feishu', 'telegram', 'discord', 'telegram_user'));--> statement-breakpoint
+DELETE FROM `sentinel_log` WHERE `channel` IN (SELECT `id` FROM `channels` WHERE `connection_id` IS NULL AND `service` IN ('feishu', 'telegram', 'discord', 'telegram_user'));--> statement-breakpoint
 DELETE FROM `channels` WHERE `connection_id` IS NULL AND `service` IN ('feishu', 'telegram', 'discord', 'telegram_user');

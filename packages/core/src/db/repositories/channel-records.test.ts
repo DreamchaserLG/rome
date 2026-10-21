@@ -5,6 +5,7 @@ import {
   outboundMessages,
   romeAgentMessages,
   romeSessions,
+  sentinelLog,
   sessions,
   sessionTurnCheckpoints,
 } from "../schema.js";
@@ -65,8 +66,24 @@ describe("ChannelRecordsRepository", () => {
     records.vacate(db, "c1");
     expect(records.byId("feishu")).toBeNull();
 
+    // A live agent session may still hold the deleted id, so this run mints
+    // another one.
     const readded = records.claim(db, { id: "c2", service: "feishu" }, NOW);
-    expect(readded).toMatchObject({ id: "feishu", connectionId: "c2", agent: "core:main" });
+    expect(readded).toMatchObject({ connectionId: "c2", agent: "core:main" });
+    expect(readded.id).toMatch(UUID);
+  });
+
+  it("gives a deleted channel's id to a re-added bot after a restart", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", service: "feishu" }, NOW);
+    records.vacate(db, "c1");
+
+    const restarted = new ChannelRecordsRepository(db);
+    expect(restarted.claim(db, { id: "c2", service: "feishu" }, NOW)).toMatchObject({
+      id: "feishu",
+      agent: "core:main",
+    });
   });
 
   it("deletes what was recorded through a released bot, and nothing of another account", () => {
@@ -102,6 +119,17 @@ describe("ChannelRecordsRepository", () => {
           state: "failed",
           createdAt: NOW,
           updatedAt: NOW,
+        })
+        .run();
+      db.insert(sentinelLog)
+        .values({
+          id: `s-${id}`,
+          messageId: `p-${id}`,
+          channel,
+          channelUserId: "u1",
+          text: "hello",
+          action: "replied",
+          createdAt: NOW,
         })
         .run();
     }
@@ -154,6 +182,7 @@ describe("ChannelRecordsRepository", () => {
     ).toBeNull();
     expect(ids(db.select().from(romeAgentMessages).all())).toEqual(["m-kept"]);
     expect(ids(db.select().from(outboundMessages).all())).toEqual(["o-kept"]);
+    expect(ids(db.select().from(sentinelLog).all())).toEqual(["s-kept"]);
     expect(ids(db.select().from(sessions).all())).toEqual(["a-kept"]);
     expect(
       db

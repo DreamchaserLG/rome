@@ -9,6 +9,7 @@ import {
   romeAgentMessages,
   romeAgentTraceBlocks,
   romeSessions,
+  sentinelLog,
   sessions,
   sessionTurnCheckpoints,
   sharedChats,
@@ -74,7 +75,8 @@ function firstAccountAgent(exec: Exec, service: string): string | null {
 
 /**
  * Delete channel `id` and what was recorded through it: its conversations with
- * their messages, and the agent sessions that served them. An agent session is
+ * their messages, the agent sessions that served them, its outbox and its
+ * triage log. An agent session is
  * found by its conversation and by its key, which spells the channel, so a
  * later channel minted under the same id resumes none of them. Subagent
  * conversations whose parent goes stay, with no parent. Migration 0083 runs
@@ -123,6 +125,7 @@ function deleteChannel(exec: Exec, id: string): void {
     .run();
   exec.delete(romeSessions).where(eq(romeSessions.sourceChannel, id)).run();
   exec.delete(outboundMessages).where(eq(outboundMessages.channel, id)).run();
+  exec.delete(sentinelLog).where(eq(sentinelLog.channel, id)).run();
   exec.delete(channels).where(eq(channels.id, id)).run();
 }
 
@@ -158,6 +161,12 @@ export class ChannelRecordsRepository {
    *  moves a Connection empties it (a link moves none), and nothing is cached
    *  while a transaction is open, so a rolled-back write leaves no id behind. */
   private readonly ids = new Map<string, string | null>();
+  /** The ids of channels this repository deleted. A live agent session keeps
+   *  its provider context in memory under a key that spells its channel, and a
+   *  turn still running when its account is disconnected keeps it past the
+   *  idle sweep. So no channel is minted under such an id until Rome restarts,
+   *  when no live session is left to hold one. */
+  private readonly deleted = new Set<string>();
 
   constructor(private readonly db: DrizzleDb) {}
 
@@ -233,8 +242,9 @@ export class ChannelRecordsRepository {
     }
 
     const serviceIdTaken =
+      this.deleted.has(service) ||
       exec.select({ id: channels.id }).from(channels).where(eq(channels.id, service)).get() !==
-      undefined;
+        undefined;
     const id = serviceIdTaken ? randomUUID() : service;
     const row = {
       id,
@@ -257,6 +267,7 @@ export class ChannelRecordsRepository {
     const row = exec.select().from(channels).where(eq(channels.connectionId, connectionId)).get();
     if (row && LINKABLE_SERVICES.has(row.service)) {
       deleteChannel(exec, row.id);
+      this.deleted.add(row.id);
       return;
     }
     exec

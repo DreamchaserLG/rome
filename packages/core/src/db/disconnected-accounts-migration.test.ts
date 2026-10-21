@@ -10,6 +10,7 @@ import {
   outboundMessages,
   romeAgentMessages,
   romeSessions,
+  sentinelLog,
   sessions,
   sessionTurnCheckpoints,
 } from "./schema.js";
@@ -87,6 +88,17 @@ describe("delete disconnected accounts migration", () => {
           updatedAt: NOW,
         })
         .run();
+      db.insert(sentinelLog)
+        .values({
+          id: `s-${id}`,
+          messageId: `p-${id}`,
+          channel,
+          channelUserId: "u1",
+          text: "hello",
+          action: "replied",
+          createdAt: NOW,
+        })
+        .run();
     }
     db.insert(romeSessions)
       .values({
@@ -135,6 +147,7 @@ describe("delete disconnected accounts migration", () => {
     expect(ids(db.select().from(romeSessions).all())).toEqual(["child", "live", "mail"]);
     expect(ids(db.select().from(romeAgentMessages).all())).toEqual(["m-live", "m-mail"]);
     expect(ids(db.select().from(outboundMessages).all())).toEqual(["o-live", "o-mail"]);
+    expect(ids(db.select().from(sentinelLog).all())).toEqual(["s-live", "s-mail"]);
     expect(ids(db.select().from(sessions).all())).toEqual(["a-live", "a-mail"]);
     expect(
       db
