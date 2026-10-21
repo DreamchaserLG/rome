@@ -235,6 +235,51 @@ describe("ChannelRecordsRepository", () => {
     expect(db.select().from(romeAgentMessages).all()).toEqual([]);
   });
 
+  it("sweeps a late agent session under a deleted minted id that only its key spells", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", service: "feishu" }, NOW);
+    const minted = records.claim(db, { id: "c2", service: "feishu" }, NOW).id;
+    records.vacate(db, "c2");
+    db.insert(sessions)
+      .values({
+        id: "late",
+        agentName: "main",
+        channelThreadKey: `${minted}:t1`,
+        createdAt: NOW,
+        lastActiveAt: NOW,
+        status: "active",
+      })
+      .run();
+
+    expect(new ChannelRecordsRepository(db).sweep()).toContain(minted);
+    expect(db.select().from(sessions).all()).toEqual([]);
+  });
+
+  it("keeps an agent's ad-hoc sessions when its name starts like an absent account's", () => {
+    const records = repository();
+    const db = testDb!.db;
+    db.insert(sessions)
+      .values({
+        id: "adhoc",
+        agentName: "telegram:helper",
+        channelThreadKey: "telegram:helper:0b5e2c1a-1d2f-4c3b-9a8e-7f6d5c4b3a21",
+        createdAt: NOW,
+        lastActiveAt: NOW,
+        status: "active",
+      })
+      .run();
+
+    expect(records.sweep()).toContain("telegram");
+    expect(
+      db
+        .select()
+        .from(sessions)
+        .all()
+        .map((row) => row.id),
+    ).toEqual(["adhoc"]);
+  });
+
   it("gives a deleted channel's id to a re-added bot after a restart", () => {
     const records = repository();
     const db = testDb!.db;
@@ -446,16 +491,19 @@ describe("ChannelRecordsRepository", () => {
         createdAt: NOW,
       })
       .run();
-    for (const [id, key, conversationId] of [
-      ["a-gone", "telegram:t1", "gone"],
-      ["a-subagent", "telegram:t1:subagent:s1", null],
-      ["a-sentinel", "sentinel:telegram:t1", null],
-      ["a-kept", "telegram_user:t1", "kept"],
+    // An agent named like the service: its ad-hoc key starts like a channel's.
+    for (const [id, key, conversationId, agentName] of [
+      ["a-gone", "telegram:t1", "gone", "main"],
+      ["a-subagent", "telegram:t1:subagent:s1", null, "main"],
+      ["a-sentinel", "sentinel:telegram:t1", null, "main"],
+      ["a-kept", "telegram_user:t1", "kept", "main"],
+      ["a-adhoc", "telegram:helper:0b5e2c1a-1d2f-4c3b-9a8e-7f6d5c4b3a21", null, "telegram:helper"],
+      ["a-elsewhere", "telegram:helper:run", "kept", "main"],
     ] as const) {
       db.insert(sessions)
         .values({
           id,
-          agentName: "main",
+          agentName,
           channelThreadKey: key,
           conversationId,
           createdAt: NOW,
@@ -486,14 +534,15 @@ describe("ChannelRecordsRepository", () => {
     expect(ids(db.select().from(romeAgentMessages).all())).toEqual(["m-kept"]);
     expect(ids(db.select().from(outboundMessages).all())).toEqual(["o-kept"]);
     expect(ids(db.select().from(sentinelLog).all())).toEqual(["s-kept"]);
-    expect(ids(db.select().from(sessions).all())).toEqual(["a-kept"]);
+    expect(ids(db.select().from(sessions).all())).toEqual(["a-adhoc", "a-elsewhere", "a-kept"]);
     expect(
       db
         .select()
         .from(sessionTurnCheckpoints)
         .all()
-        .map((row) => row.sessionId),
-    ).toEqual(["a-kept"]);
+        .map((row) => row.sessionId)
+        .sort(),
+    ).toEqual(["a-adhoc", "a-elsewhere", "a-kept"]);
   });
 
   it("starts every new account with no agent, and with the one asked only where it takes one", () => {

@@ -132,17 +132,20 @@ describe("delete disconnected accounts migration", () => {
         createdAt: NOW,
       })
       .run();
-    for (const [id, key, conversationId] of [
-      ["a-gone", "telegram:t1", "gone"],
-      ["a-legacy", "telegram:t9", null],
-      ["a-sentinel", "sentinel:telegram:t1", null],
-      ["a-live", "telegram_user:t1", "live"],
-      ["a-mail", "email:t1", "mail"],
+    // An agent named like the service: its ad-hoc key starts like a channel's.
+    for (const [id, key, conversationId, agentName] of [
+      ["a-gone", "telegram:t1", "gone", "main"],
+      ["a-legacy", "telegram:t9", null, "main"],
+      ["a-sentinel", "sentinel:telegram:t1", null, "main"],
+      ["a-live", "telegram_user:t1", "live", "main"],
+      ["a-mail", "email:t1", "mail", "main"],
+      ["a-adhoc", "telegram:helper:0b5e2c1a-1d2f-4c3b-9a8e-7f6d5c4b3a21", null, "telegram:helper"],
+      ["a-elsewhere", "telegram:helper:run", "live", "main"],
     ] as const) {
       db.insert(sessions)
         .values({
           id,
-          agentName: "main",
+          agentName,
           channelThreadKey: key,
           conversationId,
           createdAt: NOW,
@@ -216,7 +219,12 @@ describe("delete disconnected accounts migration", () => {
     expect(ids(db.select().from(romeAgentMessages).all())).toEqual(["m-live", "m-mail"]);
     expect(ids(db.select().from(outboundMessages).all())).toEqual(["o-live", "o-mail"]);
     expect(ids(db.select().from(sentinelLog).all())).toEqual(["s-live", "s-mail"]);
-    expect(ids(db.select().from(sessions).all())).toEqual(["a-live", "a-mail"]);
+    expect(ids(db.select().from(sessions).all())).toEqual([
+      "a-adhoc",
+      "a-elsewhere",
+      "a-live",
+      "a-mail",
+    ]);
     expect(
       db
         .select()
@@ -224,7 +232,7 @@ describe("delete disconnected accounts migration", () => {
         .all()
         .map((row) => row.sessionId)
         .sort(),
-    ).toEqual(["a-live", "a-mail"]);
+    ).toEqual(["a-adhoc", "a-elsewhere", "a-live", "a-mail"]);
     expect(
       Object.fromEntries(
         db

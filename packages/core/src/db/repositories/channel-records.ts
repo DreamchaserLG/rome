@@ -69,10 +69,18 @@ function startsWith(column: SQLiteColumn, prefix: string) {
   return and(gte(column, prefix), lt(column, `${prefix.slice(0, -1)}${next}`));
 }
 
-/** An agent session whose key spells channel `id`, its sentinel's included. */
+/** An agent session whose key spells channel `id`, its sentinel's included.
+ *  An ad-hoc run's key is its agent's name and a fresh id
+ *  (`adhocSessionKey`), so an agent named like `telegram:helper` has keys
+ *  that start like a channel's. A key counts only when it is not its own
+ *  agent's ad-hoc key and its session serves no conversation off the channel. */
 function keyedTo(id: string) {
   return or(
-    startsWith(sessions.channelThreadKey, `${id}:`),
+    and(
+      startsWith(sessions.channelThreadKey, `${id}:`),
+      sql`substr(${sessions.channelThreadKey}, 1, length(${sessions.agentName}) + 1) <> ${sessions.agentName} || ':'`,
+      or(isNull(sessions.conversationId), onChannel(sessions.conversationId, id)),
+    ),
     startsWith(sessions.channelThreadKey, `sentinel:${id}:`),
   );
 }
@@ -448,7 +456,21 @@ export class ChannelRecordsRepository {
         .where(startsWith(sessions.channelThreadKey, "sentinel:"))
         .all(),
     ].flat();
-    for (const { id } of [...named, ...transcripts, ...sentinels]) {
+    // A late agent session may outlive its conversation and transcript. A
+    // minted id leads its key, and no agent's name is a bare UUID.
+    const keys = [
+      this.db
+        .selectDistinct({ id: channelOf(sessions.conversationId) })
+        .from(sessions)
+        .where(startsWith(sessions.conversationId, "channel:"))
+        .all(),
+      this.db
+        .selectDistinct({ id: sql<string>`substr(${sessions.channelThreadKey}, 1, 36)` })
+        .from(sessions)
+        .where(sql`substr(${sessions.channelThreadKey}, 37, 1) = ':'`)
+        .all(),
+    ].flat();
+    for (const { id } of [...named, ...transcripts, ...sentinels, ...keys]) {
       if (id && MINTED_ID.test(id)) recorded.add(id);
     }
     const orphaned = [...recorded].filter((id) => !held.has(id));
