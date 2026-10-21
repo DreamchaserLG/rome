@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import type { ApiConnection } from "@/lib/connections-api";
-import { buildEnvoys } from "./envoys-model";
+import { buildEnvoys, connectChoices } from "./envoys-model";
 
 function connection(overrides: Partial<ApiConnection> & { service: string }): ApiConnection {
   return {
@@ -125,5 +125,51 @@ describe("buildEnvoys", () => {
     expect(buildEnvoys([own(null)], []).unlinked.map((account) => account.kind)).toEqual([
       "delegate",
     ]);
+  });
+});
+
+describe("connectChoices", () => {
+  const placeholder = (service: string) =>
+    connection({ service, id: null, channel: null, grants: { bot: "unauthorized" } });
+
+  it("starts even a first account as a new one where the service offers several", () => {
+    const [choice] = connectChoices([
+      connection({
+        service: "telegram",
+        grants: { bot: "unauthorized" },
+        severalAccounts: true,
+        setups: { bot: "cid-old" },
+      }),
+    ]);
+    expect(choice).toMatchObject({ another: true, activeSetupCid: null, taken: false });
+  });
+
+  it("re-attaches the setup of a service that holds one account", () => {
+    const [choice] = connectChoices([
+      connection({
+        service: "telegram_user",
+        id: "left",
+        grants: { session: "unauthorized" },
+        setups: { session: "cid-live" },
+      }),
+    ]);
+    expect(choice).toMatchObject({ another: false, activeSetupCid: "cid-live", taken: false });
+  });
+
+  it("marks a service whose one account is connected as taken", () => {
+    const [choice] = connectChoices([
+      connection({ service: "telegram_user", grants: { session: "authorized" } }),
+    ]);
+    expect(choice).toMatchObject({ kind: "delegate", platform: "telegram", taken: true });
+  });
+
+  it("offers own accounts first and leaves out services core does not register", () => {
+    const choices = connectChoices([
+      placeholder("telegram_user"),
+      placeholder("discord"),
+      placeholder("feishu"),
+      placeholder("whatsapp"),
+    ]);
+    expect(choices.map((choice) => choice.service)).toEqual(["feishu", "discord", "telegram_user"]);
   });
 });
