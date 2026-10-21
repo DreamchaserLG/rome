@@ -122,8 +122,10 @@ function spelled(exec: Exec, id: string): boolean {
  * their messages, the agent sessions that served them, its outbox and its
  * triage log. Agent sessions are found by their key and messages by their
  * conversation id as well, since both spell the channel, so rows a turn wrote
- * after its conversation went are deleted too. Subagent
- * conversations whose parent goes stay, with no parent. Migration 0083 runs
+ * after its conversation went are deleted too. A subagent conversation
+ * carries its parent's channel, so it is one of the channel's conversations
+ * and goes with it. Any other conversation whose parent goes stays, with no
+ * parent. Migration 0083 runs
  * the same deletes for the channels left unbacked before this.
  */
 function deleteChannel(exec: Exec, id: string): void {
@@ -261,8 +263,17 @@ export class ChannelRecordsRepository {
    * name first. Failing that, it gets the service's name if no channel holds
    * it, and a fresh opaque id otherwise. A linkable service's only connected
    * account is linked to main, so a guardian's first account answers.
+   *
+   * A new account of a linkable service skips its service's name while
+   * anything stored still spells it. `existing` marks a Connection from before
+   * channels were recorded, whose history is its own under that name.
    */
-  claim(exec: Exec, connection: { id: string; service: string }, now: Date): ChannelRecord {
+  claim(
+    exec: Exec,
+    connection: { id: string; service: string },
+    now: Date,
+    { existing = false }: { existing?: boolean } = {},
+  ): ChannelRecord {
     const held = exec.select().from(channels).where(eq(channels.connectionId, connection.id)).get();
     if (held) return toRecord(held);
     this.ids.clear();
@@ -294,7 +305,7 @@ export class ChannelRecordsRepository {
       this.deleted.has(service) ||
       exec.select({ id: channels.id }).from(channels).where(eq(channels.id, service)).get() !==
         undefined ||
-      (LINKABLE_SERVICES.has(service) && spelled(exec, service));
+      (!existing && LINKABLE_SERVICES.has(service) && spelled(exec, service));
     const id = serviceIdTaken ? randomUUID() : service;
     const row = {
       id,

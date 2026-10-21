@@ -172,6 +172,17 @@ describe("ChannelRecordsRepository", () => {
         id: "child",
         name: "child",
         type: "subagent",
+        sourceChannel: "telegram",
+        parentSessionId: "gone",
+        activityAt: NOW,
+        createdAt: NOW,
+      })
+      .run();
+    db.insert(romeSessions)
+      .values({
+        id: "fork",
+        name: "fork",
+        type: "fork",
         parentSessionId: "gone",
         activityAt: NOW,
         createdAt: NOW,
@@ -210,9 +221,9 @@ describe("ChannelRecordsRepository", () => {
 
     const ids = (rows: Array<{ id: string }>) => rows.map((row) => row.id).sort();
     expect(ids(records.all())).toEqual(["telegram_user"]);
-    expect(ids(db.select().from(romeSessions).all())).toEqual(["child", "kept"]);
+    expect(ids(db.select().from(romeSessions).all())).toEqual(["fork", "kept"]);
     expect(
-      db.select().from(romeSessions).where(eq(romeSessions.id, "child")).get()?.parentSessionId,
+      db.select().from(romeSessions).where(eq(romeSessions.id, "fork")).get()?.parentSessionId,
     ).toBeNull();
     expect(ids(db.select().from(romeAgentMessages).all())).toEqual(["m-kept"]);
     expect(ids(db.select().from(outboundMessages).all())).toEqual(["o-kept"]);

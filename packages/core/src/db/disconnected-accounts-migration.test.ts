@@ -114,6 +114,17 @@ describe("delete disconnected accounts migration", () => {
         id: "child",
         name: "child",
         type: "subagent",
+        sourceChannel: "telegram",
+        parentSessionId: "gone",
+        activityAt: NOW,
+        createdAt: NOW,
+      })
+      .run();
+    db.insert(romeSessions)
+      .values({
+        id: "fork",
+        name: "fork",
+        type: "fork",
         parentSessionId: "gone",
         activityAt: NOW,
         createdAt: NOW,
@@ -153,7 +164,7 @@ describe("delete disconnected accounts migration", () => {
 
     const ids = (rows: Array<{ id: string }>) => rows.map((row) => row.id).sort();
     expect(ids(db.select().from(channels).all())).toEqual(["email", "telegram_user"]);
-    expect(ids(db.select().from(romeSessions).all())).toEqual(["child", "live", "mail"]);
+    expect(ids(db.select().from(romeSessions).all())).toEqual(["fork", "live", "mail"]);
     expect(ids(db.select().from(romeAgentMessages).all())).toEqual(["m-live", "m-mail"]);
     expect(ids(db.select().from(outboundMessages).all())).toEqual(["o-live", "o-mail"]);
     expect(ids(db.select().from(sentinelLog).all())).toEqual(["s-live", "s-mail"]);

@@ -21,6 +21,6 @@ export function claimChannels(
   if (unclaimed.length === 0) return;
   const now = new Date();
   db.transaction((tx) => {
-    for (const connection of unclaimed) records.claim(tx, connection, now);
+    for (const connection of unclaimed) records.claim(tx, connection, now, { existing: true });
   });
 }
