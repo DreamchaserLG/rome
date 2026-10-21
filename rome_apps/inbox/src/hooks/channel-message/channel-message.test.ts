@@ -487,6 +487,26 @@ describe("ChannelMessageHook", () => {
       await rs.waitFor(() => expect(begin).toHaveBeenCalledTimes(1));
     });
 
+    it("starts a turn only after the recordings before it are stored", async () => {
+      ruled("mention");
+      let stored!: () => void;
+      harness.run.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            stored = () => resolve({ status: "ok" as const });
+          }),
+      );
+
+      await harness.emit(TELEGRAM_ID, message({ messageId: "chatter", addressing: "ambient" }));
+      await harness.emit(TELEGRAM_ID, message({ messageId: "asked", addressing: "mention" }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(harness.run).toHaveBeenCalledTimes(1);
+      stored();
+      await rs.waitFor(() => expect(harness.run).toHaveBeenCalledTimes(2));
+      expect(harness.run.mock.calls[1]?.[1]).toMatchObject({ messageId: "asked" });
+    });
+
     it("answers an ambient message on a service that does not enforce the rule", async () => {
       await harness.emit(TELEGRAM_ID, message({ addressing: "ambient" }));
 
