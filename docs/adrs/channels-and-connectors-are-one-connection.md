@@ -124,3 +124,16 @@ Each channel keeps its stored platform, mapped from its service as the 2026-10-1
 ### Alternatives
 
 - **Keep the rule and let a guardian lift it per agent.** Rejected because the rule protects nothing: each channel answers only its own conversations, so an agent on two channels of one platform answers two separate sets of conversations, as main already does.
+
+## Amendment (2026-10-21): a disconnected account is deleted
+
+When a linkable service's Connection is removed, its channel row is deleted with what was recorded through it: the channel's conversations and their messages, the agent sessions that served them, and its outbox. A released channel of a linkable service is no longer kept, so the 2026-10-20 amendment's "a released channel and its history stay stored, reached by nothing" is withdrawn. Migration `0083` deletes the released channels already stored, with the same rows.
+
+The service's next Connection still starts fresh. Its channel takes the service's name when no channel holds it, so it can take the id a deleted channel had, and nothing stored spells that id any more. An agent session is found by its key as well as by its conversation, since its key spells the channel and a later channel under the same id must resume none of them. A subagent conversation whose parent conversation is deleted stays, with no parent, as migration `0078` left the subagents of the conversations it removed.
+
+Services that take no agent keep their row when their Connection goes, and their next Connection takes it back.
+
+### Alternatives
+
+- **Keep the released channel as a retired record.** Rejected by the guardian: an account that is disconnected is removed, and its chats go with it.
+- **Mint an opaque id for every account after the first, so a deleted channel's id is never used again.** Rejected because it needs a record of every id ever minted, which is the retired row by another name.

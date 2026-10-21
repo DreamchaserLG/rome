@@ -393,7 +393,7 @@
     "reconnect": "Reconnect",
     "disconnectConfirmTitle": "Disconnect {{name}}?",
     "disconnectConfirmTitleUnnamed": "Disconnect this account?",
-    "disconnectConfirmBody": "Rome loses access to the account and stops answering in its chats. If you connect it again, it starts with no chats.",
+    "disconnectConfirmBody": "Rome loses access to the account and deletes its chats and their messages. This can't be undone.",
     "status": {
       "connected": "Connected",
       "disconnected": "Disconnected",

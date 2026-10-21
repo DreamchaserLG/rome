@@ -1,9 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
-import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { platformOf } from "../../channels/platform.js";
-import { channels } from "../schema.js";
+import {
+  channels,
+  outboundMessages,
+  romeAgentMessages,
+  romeAgentTraceBlocks,
+  romeSessions,
+  sessions,
+  sessionTurnCheckpoints,
+  sharedChats,
+  webchatTurnFeedback,
+  webchatWorkspaceLayouts,
+} from "../schema.js";
 import { inTransaction, type DrizzleDb, type DrizzleTx } from "../index.js";
 
 /**
@@ -61,6 +72,60 @@ function firstAccountAgent(exec: Exec, service: string): string | null {
   return backed === undefined ? MAIN_AGENT_ID : null;
 }
 
+/**
+ * Delete channel `id` and what was recorded through it: its conversations with
+ * their messages, and the agent sessions that served them. An agent session is
+ * found by its conversation and by its key, which spells the channel, so a
+ * later channel minted under the same id resumes none of them. Subagent
+ * conversations whose parent goes stay, with no parent. Migration 0083 runs
+ * the same deletes for the channels left unbacked before this.
+ */
+function deleteChannel(exec: Exec, id: string): void {
+  const conversations = exec
+    .select({ id: romeSessions.id })
+    .from(romeSessions)
+    .where(eq(romeSessions.sourceChannel, id));
+  const keyed = (prefix: string) =>
+    sql`substr(${sessions.channelThreadKey}, 1, ${prefix.length}) = ${prefix}`;
+  const agentSessions = exec
+    .select({ id: sessions.id })
+    .from(sessions)
+    .where(
+      or(
+        inArray(sessions.conversationId, conversations),
+        keyed(`${id}:`),
+        keyed(`sentinel:${id}:`),
+      ),
+    );
+  exec
+    .delete(sessionTurnCheckpoints)
+    .where(inArray(sessionTurnCheckpoints.sessionId, agentSessions))
+    .run();
+  exec.delete(sessions).where(inArray(sessions.id, agentSessions)).run();
+  exec
+    .delete(romeAgentTraceBlocks)
+    .where(inArray(romeAgentTraceBlocks.sessionId, conversations))
+    .run();
+  exec.delete(romeAgentMessages).where(inArray(romeAgentMessages.sessionId, conversations)).run();
+  exec
+    .delete(webchatTurnFeedback)
+    .where(inArray(webchatTurnFeedback.sessionId, conversations))
+    .run();
+  exec
+    .delete(webchatWorkspaceLayouts)
+    .where(inArray(webchatWorkspaceLayouts.sessionId, conversations))
+    .run();
+  exec.delete(sharedChats).where(inArray(sharedChats.sessionId, conversations)).run();
+  exec
+    .update(romeSessions)
+    .set({ parentSessionId: null })
+    .where(inArray(romeSessions.parentSessionId, conversations))
+    .run();
+  exec.delete(romeSessions).where(eq(romeSessions.sourceChannel, id)).run();
+  exec.delete(outboundMessages).where(eq(outboundMessages.channel, id)).run();
+  exec.delete(channels).where(eq(channels.id, id)).run();
+}
+
 /** The service a channel belongs to. A service's first channel carries the
  *  service's name, so a name with no record answers for itself. */
 export type ServiceOfChannel = (channel: string) => string;
@@ -82,11 +147,11 @@ function toRecord(row: typeof channels.$inferSelect): ChannelRecord {
  * A channel's id is minted once and never changes, since every stored row
  * spells it. It is an opaque id, except that a service's first channel carries
  * the service's name, which is what data stored before channels were recorded
- * spells. A row stays when its Connection goes, so its id is never minted
- * again. An account of a linkable service starts fresh: the service's next
- * Connection gets a channel of its own. Another service's next Connection
- * takes the row back, since apps address that service's one channel by its
- * name.
+ * spells. When a linkable service's Connection goes, its row goes with every
+ * conversation and agent session recorded through it, so the service's next
+ * Connection starts fresh even when it takes the same id. Another service's
+ * row stays when its Connection goes, and that service's next Connection
+ * takes it back, since apps address that service's one channel by its name.
  */
 export class ChannelRecordsRepository {
   /** Channel id by Connection id, read on every port use. Every write that
@@ -183,10 +248,17 @@ export class ChannelRecordsRepository {
     return toRecord(row);
   }
 
-  /** Release the channel `connectionId` backs. The row and its id stay, and
-   *  its link goes: an agent stays linked only where it can still answer. */
+  /** Release the channel `connectionId` backs. A linkable service's channel
+   *  is deleted with everything recorded through it. Any other service's row
+   *  and id stay for its next Connection, and its link goes: an agent stays
+   *  linked only where it can still answer. */
   vacate(exec: Exec, connectionId: string): void {
     this.ids.clear();
+    const row = exec.select().from(channels).where(eq(channels.connectionId, connectionId)).get();
+    if (row && LINKABLE_SERVICES.has(row.service)) {
+      deleteChannel(exec, row.id);
+      return;
+    }
     exec
       .update(channels)
       .set({ connectionId: null, agent: null })

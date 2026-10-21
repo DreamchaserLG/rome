@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { eq } from "drizzle-orm";
-import { channels } from "../schema.js";
+import {
+  channels,
+  outboundMessages,
+  romeAgentMessages,
+  romeSessions,
+  sessions,
+  sessionTurnCheckpoints,
+} from "../schema.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import {
   ChannelNotLinkable,
@@ -49,20 +56,110 @@ describe("ChannelRecordsRepository", () => {
     expect(records.all()).toHaveLength(1);
   });
 
-  it("gives a re-added bot a fresh channel, linked to main as the only account", () => {
+  it("deletes a released bot's channel, and a re-added bot starts fresh linked to main", () => {
     const records = repository();
     const db = testDb!.db;
     records.claim(db, { id: "c1", service: "feishu" }, NOW);
     records.link("feishu", "sales:agent");
 
     records.vacate(db, "c1");
-    expect(records.byId("feishu")).toMatchObject({ connectionId: null, agent: null });
+    expect(records.byId("feishu")).toBeNull();
 
     const readded = records.claim(db, { id: "c2", service: "feishu" }, NOW);
-    expect(readded.id).toMatch(UUID);
-    expect(readded.agent).toBe("core:main");
-    // The released channel keeps its id, so no later account is given it.
-    expect(records.byId("feishu")).toMatchObject({ connectionId: null, agent: null });
+    expect(readded).toMatchObject({ id: "feishu", connectionId: "c2", agent: "core:main" });
+  });
+
+  it("deletes what was recorded through a released bot, and nothing of another account", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", service: "telegram" }, NOW);
+    records.claim(db, { id: "c2", service: "telegram_user" }, NOW);
+    for (const [id, channel] of [
+      ["gone", "telegram"],
+      ["kept", "telegram_user"],
+    ] as const) {
+      db.insert(romeSessions)
+        .values({
+          id,
+          name: id,
+          type: "channel",
+          sourceChannel: channel,
+          sourceThreadId: "t1",
+          createdAt: NOW,
+        })
+        .run();
+      db.insert(romeAgentMessages)
+        .values({ id: `m-${id}`, sessionId: id, role: "user", content: "[]", createdAt: NOW })
+        .run();
+      db.insert(outboundMessages)
+        .values({
+          id: `o-${id}`,
+          channel,
+          channelUserId: "u1",
+          conversationId: id,
+          text: "hi",
+          state: "failed",
+          createdAt: NOW,
+          updatedAt: NOW,
+        })
+        .run();
+    }
+    db.insert(romeSessions)
+      .values({
+        id: "child",
+        name: "child",
+        type: "subagent",
+        parentSessionId: "gone",
+        createdAt: NOW,
+      })
+      .run();
+    for (const [id, key, conversationId] of [
+      ["a-gone", "telegram:t1", "gone"],
+      ["a-subagent", "telegram:t1:subagent:s1", null],
+      ["a-sentinel", "sentinel:telegram:t1", null],
+      ["a-kept", "telegram_user:t1", "kept"],
+    ] as const) {
+      db.insert(sessions)
+        .values({
+          id,
+          agentName: "main",
+          channelThreadKey: key,
+          conversationId,
+          createdAt: NOW,
+          lastActiveAt: NOW,
+          status: "completed",
+        })
+        .run();
+      db.insert(sessionTurnCheckpoints)
+        .values({
+          sessionId: id,
+          turnId: "turn",
+          provider: "claude",
+          providerThreadId: "p",
+          checkpointId: "x",
+          createdAt: NOW,
+        })
+        .run();
+    }
+
+    records.vacate(db, "c1");
+
+    const ids = (rows: Array<{ id: string }>) => rows.map((row) => row.id).sort();
+    expect(ids(records.all())).toEqual(["telegram_user"]);
+    expect(ids(db.select().from(romeSessions).all())).toEqual(["child", "kept"]);
+    expect(
+      db.select().from(romeSessions).where(eq(romeSessions.id, "child")).get()?.parentSessionId,
+    ).toBeNull();
+    expect(ids(db.select().from(romeAgentMessages).all())).toEqual(["m-kept"]);
+    expect(ids(db.select().from(outboundMessages).all())).toEqual(["o-kept"]);
+    expect(ids(db.select().from(sessions).all())).toEqual(["a-kept"]);
+    expect(
+      db
+        .select()
+        .from(sessionTurnCheckpoints)
+        .all()
+        .map((row) => row.sessionId),
+    ).toEqual(["a-kept"]);
   });
 
   it("links main to a linkable service's first account only", () => {
@@ -215,9 +312,12 @@ describe("ChannelRecordsRepository", () => {
     const db = testDb!.db;
     records.claim(db, { id: "c1", service: "feishu" }, NOW);
     records.vacate(db, "c1");
+    db.insert(channels)
+      .values({ id: "telegram", service: "telegram", platform: "telegram", createdAt: NOW })
+      .run();
 
-    expect(() => records.link("nope", "sales:agent")).toThrow(ChannelRecordNotFound);
-    expect(() => records.link("feishu", "sales:agent")).toThrow(ChannelUnbacked);
+    expect(() => records.link("feishu", "sales:agent")).toThrow(ChannelRecordNotFound);
+    expect(() => records.link("telegram", "sales:agent")).toThrow(ChannelUnbacked);
   });
 
   it("refuses a link to a channel whose service takes none, and unlinks it", () => {

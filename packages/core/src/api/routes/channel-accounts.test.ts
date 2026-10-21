@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
+import { channels } from "../../db/schema.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { channelAccountsRoutes } from "./channel-accounts.js";
@@ -192,9 +193,10 @@ describe("channel account routes", () => {
   });
 
   it("answers 404 for a missing account and 409 for an unbacked one", async () => {
-    const { records, link, db } = setup();
-    records.claim(db, { id: "c1", service: "feishu" }, NOW);
-    records.vacate(db, "c1");
+    const { link, db } = setup();
+    db.insert(channels)
+      .values({ id: "feishu", service: "feishu", platform: "feishu", createdAt: NOW })
+      .run();
 
     expect((await link("nope", "sales:agent")).status).toBe(404);
     expect((await link("feishu", "sales:agent")).status).toBe(409);
