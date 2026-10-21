@@ -85,6 +85,7 @@ describe("ChannelRecordsRepository", () => {
           type: "channel",
           sourceChannel: channel,
           sourceThreadId: "t1",
+          activityAt: NOW,
           createdAt: NOW,
         })
         .run();
@@ -110,6 +111,7 @@ describe("ChannelRecordsRepository", () => {
         name: "child",
         type: "subagent",
         parentSessionId: "gone",
+        activityAt: NOW,
         createdAt: NOW,
       })
       .run();

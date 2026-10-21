@@ -68,6 +68,7 @@ describe("delete disconnected accounts migration", () => {
           type: "channel",
           sourceChannel: channel,
           sourceThreadId: "t1",
+          activityAt: NOW,
           createdAt: NOW,
         })
         .run();
@@ -93,6 +94,7 @@ describe("delete disconnected accounts migration", () => {
         name: "child",
         type: "subagent",
         parentSessionId: "gone",
+        activityAt: NOW,
         createdAt: NOW,
       })
       .run();
