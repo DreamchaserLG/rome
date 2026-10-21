@@ -1,0 +1,30 @@
+sequenceDiagram
+  autonumber
+  participant U as Guardian
+  participant W as Web dashboard
+  participant S as Hono server
+  participant A as Agent runner
+  participant T as Sentinel
+  participant C as Channel adapter
+  U->>W: Send message
+  W->>S: POST /api/webchat/turn
+  S->>A: start turn(sessionId)
+  activate A
+  loop Tool calls
+    A->>A: model step
+    alt needs approval
+      A->>T: check outbound action
+      T-->>A: held
+      A-->>W: approval request (SSE)
+      U->>W: Approve
+      W->>S: POST /api/approvals/:id
+      S->>T: release
+    else allowed
+      A->>C: send
+      C-->>A: receipt
+    end
+  end
+  A-->>S: turn complete
+  deactivate A
+  S-->>W: stream final message
+  Note over W,S: Checkpoint saved per turn

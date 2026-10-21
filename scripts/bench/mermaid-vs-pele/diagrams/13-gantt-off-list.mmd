@@ -1,0 +1,9 @@
+gantt
+  title Migration plan
+  dateFormat YYYY-MM-DD
+  section Prepare
+  Benchmark        :done, b1, 2026-10-20, 2d
+  Spike renderer   :active, s1, after b1, 3d
+  section Ship
+  Behind flag      :f1, after s1, 4d
+  Default on       :crit, d1, after f1, 2d

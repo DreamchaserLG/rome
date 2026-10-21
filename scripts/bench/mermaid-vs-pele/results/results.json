@@ -1,0 +1,355 @@
+{
+  "env": {
+    "mermaid": "11.15.0",
+    "streamdown": "1.0.2",
+    "pele": "1.8.0",
+    "browser": "Chromium 141.0.7390.37",
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz ×4",
+    "throttle": 1,
+    "runs": 5,
+    "date": "2026-10-21"
+  },
+  "sizes": {
+    "mermaid": {
+      "entry": {
+        "files": 1,
+        "raw": 27357,
+        "gzip": 10681,
+        "brotli": 9231
+      },
+      "total": {
+        "files": 92,
+        "raw": 3241506,
+        "gzip": 883637,
+        "brotli": 667539
+      }
+    },
+    "pele": {
+      "entry": {
+        "files": 1,
+        "raw": 9525,
+        "gzip": 4015,
+        "brotli": 3532
+      },
+      "total": {
+        "files": 57,
+        "raw": 693823,
+        "gzip": 262416,
+        "brotli": 214898
+      }
+    },
+    "pele-full": {
+      "entry": {
+        "files": 1,
+        "raw": 683357,
+        "gzip": 255601,
+        "brotli": 206675
+      },
+      "total": {
+        "files": 1,
+        "raw": 683357,
+        "gzip": 255601,
+        "brotli": 206675
+      }
+    }
+  },
+  "rows": [
+    {
+      "name": "01-test-smoke",
+      "mermaid": {
+        "load": 53.40000000002328,
+        "render": 66.89999999996508,
+        "total": 120,
+        "bytes": 793159,
+        "error": null
+      },
+      "pele": {
+        "load": 10.299999999988358,
+        "render": 31.900000000023283,
+        "total": 41.40000000002328,
+        "bytes": 138203,
+        "error": null
+      },
+      "mermaidWarm": 12.300000000046566,
+      "peleWarm": 0.024999999999636202
+    },
+    {
+      "name": "02-gallery-sentinel",
+      "mermaid": {
+        "load": 57.300000000046566,
+        "render": 80.90000000002328,
+        "total": 139.40000000002328,
+        "bytes": 793159,
+        "error": null
+      },
+      "pele": {
+        "load": 10.600000000034925,
+        "render": 32.100000000034925,
+        "total": 41.399999999965075,
+        "bytes": 138203,
+        "error": null
+      },
+      "mermaidWarm": 18.5,
+      "peleWarm": 0.0531250000003638
+    },
+    {
+      "name": "03-app-architecture",
+      "mermaid": {
+        "load": 53.79999999998836,
+        "render": 95.79999999998836,
+        "total": 160.39999999996508,
+        "bytes": 793159,
+        "error": null
+      },
+      "pele": {
+        "load": 9.700000000011642,
+        "render": 36.29999999998836,
+        "total": 46,
+        "bytes": 138203,
+        "error": null
+      },
+      "mermaidWarm": 35.100000000034925,
+      "peleWarm": 0.11874999999781721
+    },
+    {
+      "name": "04-sequence-chat-turn",
+      "mermaid": {
+        "load": 55.79999999998836,
+        "render": 73.90000000002328,
+        "total": 135.60000000003492,
+        "bytes": 773118,
+        "error": null
+      },
+      "pele": {
+        "load": 9.299999999988358,
+        "render": 27.29999999998836,
+        "total": 37.09999999997672,
+        "bytes": 112664,
+        "error": null
+      },
+      "mermaidWarm": 26.899999999965075,
+      "peleWarm": 0.10624999999708962
+    },
+    {
+      "name": "05-state-thread",
+      "mermaid": {
+        "load": 62.59999999997672,
+        "render": 157.79999999998836,
+        "total": 213.60000000003492,
+        "bytes": 767854,
+        "error": null
+      },
+      "pele": {
+        "load": 7.900000000023283,
+        "render": 30.399999999965075,
+        "total": 38.79999999998836,
+        "bytes": 126264,
+        "error": null
+      },
+      "mermaidWarm": 86.40000000002328,
+      "peleWarm": 0.3249999999970896
+    },
+    {
+      "name": "06-class-subsystems",
+      "mermaid": {
+        "load": 48.70000000001164,
+        "render": 156.09999999997672,
+        "total": 202.40000000002328,
+        "bytes": 781874,
+        "error": null
+      },
+      "pele": {
+        "load": 8.399999999965075,
+        "render": 33.59999999997672,
+        "total": 41.79999999998836,
+        "bytes": 131807,
+        "error": null
+      },
+      "mermaidWarm": 101.90000000002328,
+      "peleWarm": 0.2000000000007276
+    },
+    {
+      "name": "07-er-core-schema",
+      "mermaid": {
+        "load": 52.20000000001164,
+        "render": 158.10000000003492,
+        "total": 221.70000000001164,
+        "bytes": 756936,
+        "error": null
+      },
+      "pele": {
+        "load": 9.299999999988358,
+        "render": 32.40000000002328,
+        "total": 41,
+        "bytes": 110760,
+        "error": null
+      },
+      "mermaidWarm": 66.19999999995343,
+      "peleWarm": 0.17499999999563443
+    },
+    {
+      "name": "08-xychart-latency",
+      "mermaid": {
+        "load": 63.20000000001164,
+        "render": 37,
+        "total": 100.60000000003492,
+        "bytes": 693264,
+        "error": null
+      },
+      "pele": {
+        "load": 9,
+        "render": 19.100000000034925,
+        "total": 29,
+        "bytes": 51339,
+        "error": null
+      },
+      "mermaidWarm": 8.900000000023283,
+      "peleWarm": 0.03749999999854481
+    },
+    {
+      "name": "09-flowchart-large",
+      "mermaid": {
+        "load": 56.70000000001164,
+        "render": 207.79999999998836,
+        "total": 277.70000000001164,
+        "bytes": 793159,
+        "error": null
+      },
+      "pele": {
+        "load": 10.900000000023283,
+        "render": 52.59999999997672,
+        "total": 62.09999999997672,
+        "bytes": 138203,
+        "error": null
+      },
+      "mermaidWarm": 112.5,
+      "peleWarm": 2.7999999999883585
+    },
+    {
+      "name": "10-flowchart-styled",
+      "mermaid": {
+        "load": 56,
+        "render": 105.10000000003492,
+        "total": 160.29999999998836,
+        "bytes": 793159,
+        "error": null
+      },
+      "pele": {
+        "load": 9,
+        "render": 35.79999999998836,
+        "total": 44.79999999998836,
+        "bytes": 138203,
+        "error": null
+      },
+      "mermaidWarm": 35.20000000001164,
+      "peleWarm": 0.1749999999992724
+    },
+    {
+      "name": "11-flowchart-cjk",
+      "mermaid": {
+        "load": 55.70000000001164,
+        "render": 95.59999999997672,
+        "total": 152.79999999998836,
+        "bytes": 793159,
+        "error": null
+      },
+      "pele": {
+        "load": 9.199999999953434,
+        "render": 41.09999999997672,
+        "total": 51,
+        "bytes": 138203,
+        "error": null
+      },
+      "mermaidWarm": 30.600000000034925,
+      "peleWarm": 0.1031250000005457
+    },
+    {
+      "name": "12-pie-off-list",
+      "mermaid": {
+        "load": 56.5,
+        "render": 117.29999999998836,
+        "total": 171.40000000002328,
+        "bytes": 1342816,
+        "error": null
+      },
+      "pele": {
+        "load": 9.200000000011642,
+        "render": 15.5,
+        "total": 24.900000000023283,
+        "bytes": 45156,
+        "error": null
+      },
+      "mermaidWarm": 4.050000000017462,
+      "peleWarm": 0.018749999999954525
+    },
+    {
+      "name": "13-gantt-off-list",
+      "mermaid": {
+        "load": 54.600000000034925,
+        "render": 30.70000000001164,
+        "total": 87.59999999997672,
+        "bytes": 704298,
+        "error": null
+      },
+      "pele": {
+        "load": 9,
+        "render": 20.5,
+        "total": 28.70000000001164,
+        "bytes": 68361,
+        "error": null
+      },
+      "mermaidWarm": 5.599999999976717,
+      "peleWarm": 0.03359374999990905
+    },
+    {
+      "name": "14-mindmap-off-list",
+      "mermaid": {
+        "load": 53,
+        "render": 161,
+        "total": 222.70000000001164,
+        "bytes": 1204369,
+        "error": null
+      },
+      "pele": {
+        "load": 9.200000000011642,
+        "render": 19,
+        "total": 26.900000000023283,
+        "bytes": 59039,
+        "error": null
+      },
+      "mermaidWarm": 47.5,
+      "peleWarm": 0.04140624999990905
+    },
+    {
+      "name": "15-invalid-syntax",
+      "mermaid": {
+        "load": 52.29999999998836,
+        "render": 18,
+        "total": 68,
+        "bytes": 718259,
+        "error": "Parse error on line 3:\n...closed --> B  B -->| C\n----------------------^\nExpecting 'SQE', 'TAGEND', 'UNICODE_TEXT', 'TEXT', 'TAGSTART', got 'PIPE'"
+      },
+      "pele": {
+        "load": 9.299999999988358,
+        "render": 24.300000000046566,
+        "total": 32.90000000002328,
+        "bytes": 138203,
+        "error": "Parse error on line 3:\n  B -->| C\n-------^\nExpecting 'SQE', 'UNICODE_TEXT', 'TEXT', 'TAGSTART', got 'PIPE'"
+      },
+      "mermaidWarm": null,
+      "peleWarm": null
+    }
+  ],
+  "memory": {
+    "mermaid": {
+      "loaded": 1327904,
+      "rendered": 12357580,
+      "peak": 30451072
+    },
+    "pele": {
+      "loaded": 45184,
+      "rendered": 3685816,
+      "peak": 6366968
+    }
+  }
+}

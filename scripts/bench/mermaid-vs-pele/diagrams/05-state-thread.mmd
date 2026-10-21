@@ -1,0 +1,18 @@
+stateDiagram-v2
+  [*] --> Queued
+  Queued --> Working: worker picks up
+  Working --> Blocked: needs guardian input
+  Blocked --> Working: answered
+  Working --> ReviewReady: result posted
+  ReviewReady --> Working: changes requested
+  ReviewReady --> Done: accepted
+  Working --> Failed: error
+  Failed --> Queued: retry
+  state Working {
+    [*] --> Planning
+    Planning --> Acting
+    Acting --> Verifying
+    Verifying --> Acting: check failed
+    Verifying --> [*]
+  }
+  Done --> [*]

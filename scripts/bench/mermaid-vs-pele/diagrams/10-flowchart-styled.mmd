@@ -1,0 +1,15 @@
+%%{init: {"theme": "dark", "flowchart": {"curve": "basis"}}}%%
+flowchart LR
+  A([Inbound message]) --> B{Known person?}
+  B -->|yes| C[Load memory]
+  B -->|no| D[Create person]
+  D --> C
+  C --> E[[Agent turn]]
+  E --> F>Reply drafted]
+  classDef hot fill:#fde68a,stroke:#b45309,color:#78350f
+  classDef cold fill:#bfdbfe,stroke:#1d4ed8
+  class A,F hot
+  class D cold
+  style E stroke-width:3px,stroke-dasharray: 4 2
+  linkStyle 0 stroke:#ef4444
+  click C "https://example.com/memory" "Memory docs"

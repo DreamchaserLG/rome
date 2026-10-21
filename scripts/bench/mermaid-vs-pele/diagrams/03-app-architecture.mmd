@@ -1,0 +1,8 @@
+flowchart LR
+  GH[GitHub issues webhook] -->|connector_github_subscribe| Bus[Rome event bus]
+  Bus -->|routine| WH[issue-webhook]
+  WH -->|per-repo filter, detached| W[triage-issue worker]
+  Dash[Dashboard] -->|manual / batch| W
+  W --> C[classifier agent]
+  W -->|gh api: create + apply labels| GH2[GitHub issue]
+  W --> DB[(triage_results)]

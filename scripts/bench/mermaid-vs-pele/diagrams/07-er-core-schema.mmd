@@ -1,0 +1,44 @@
+erDiagram
+  PERSONS ||--o{ CHANNEL_MAPPINGS : "reached via"
+  PERSONS {
+    text id PK
+    text display_name
+    integer created_at
+  }
+  CHANNEL_MAPPINGS {
+    text id PK
+    text person_id FK
+    text channel
+    text external_id
+  }
+  SESSIONS ||--o{ SESSION_TURN_CHECKPOINTS : has
+  SESSIONS {
+    text id PK
+    text title
+    text status
+    integer updated_at
+  }
+  SESSION_TURN_CHECKPOINTS {
+    text id PK
+    text session_id FK
+    integer turn_index
+    blob state
+  }
+  SESSIONS ||--o{ OUTBOUND_MESSAGES : sends
+  OUTBOUND_MESSAGES ||--o| OUTBOUND_SEND_RECEIPTS : "confirmed by"
+  OUTBOUND_MESSAGES {
+    text id PK
+    text session_id FK
+    text channel
+    text body
+  }
+  OUTBOUND_SEND_RECEIPTS {
+    text message_id PK, FK
+    integer sent_at
+  }
+  OUTBOUND_MESSAGES ||--o| APPROVALS : "held for"
+  APPROVALS {
+    text id PK
+    text message_id FK
+    text decision
+  }

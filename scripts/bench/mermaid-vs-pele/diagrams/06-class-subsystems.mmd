@@ -1,0 +1,35 @@
+classDiagram
+  class AgentRunner {
+    -PromptBuilder prompts
+    -ActionRegistry actions
+    +runTurn(sessionId: string) Promise~TurnResult~
+    +cancel(sessionId: string) void
+  }
+  class ActionRegistry {
+    -Map~string, Action~ actions
+    +register(action: Action) void
+    +invoke(name: string, input: unknown) Promise~unknown~
+  }
+  class Action {
+    <<interface>>
+    +name: string
+    +schema: ZodType
+    +execute(input) Promise~unknown~
+  }
+  class EventBus {
+    +publish(event: RomeEvent) void
+    +subscribe(topic: string, handler) Unsubscribe
+  }
+  class ChannelAdapter {
+    <<abstract>>
+    +send(message: Outbound) Promise~Receipt~
+    +onInbound(handler) void
+  }
+  class WhatsAppAdapter
+  class LinkedInAdapter
+  AgentRunner --> ActionRegistry
+  AgentRunner ..> EventBus : publishes
+  ActionRegistry o-- "*" Action
+  ChannelAdapter <|-- WhatsAppAdapter
+  ChannelAdapter <|-- LinkedInAdapter
+  EventBus --> ChannelAdapter : routes outbound

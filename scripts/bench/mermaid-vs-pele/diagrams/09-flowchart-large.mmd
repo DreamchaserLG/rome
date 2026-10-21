@@ -1,0 +1,53 @@
+flowchart TD
+  subgraph Clients
+    Web[Web dashboard]
+    Desk[Desktop shell]
+    Mob[Mobile]
+  end
+  subgraph Core["@rome/core"]
+    API[Hono API]
+    Auth{Guardian auth?}
+    Runner[Agent runner]
+    Prompt[Prompt builder]
+    Actions[Action registry]
+    Bus[Event bus]
+    Sentinel{Sentinel}
+    Repo[(SQLite repositories)]
+    Sched[Scheduler]
+  end
+  subgraph Channels
+    WA[WhatsApp]
+    LI[LinkedIn]
+    Mail[Email]
+    Chat[Webchat]
+  end
+  subgraph Apps["rome_apps/*"]
+    AppRT[App runtime]
+    AppDB[(App DB)]
+    AppWeb[App web UI]
+  end
+  Web --> API
+  Desk --> API
+  Mob --> API
+  API --> Auth
+  Auth -->|yes| Runner
+  Auth -->|no| Reject[401]
+  Runner --> Prompt
+  Runner --> Actions
+  Actions --> Bus
+  Actions --> Repo
+  Sched --> Bus
+  Bus --> Sentinel
+  Sentinel -->|approved| WA
+  Sentinel -->|approved| LI
+  Sentinel -->|approved| Mail
+  Sentinel -->|held| Queue[Approval queue]
+  Queue --> Web
+  Chat --> Runner
+  Bus --> AppRT
+  AppRT --> AppDB
+  AppRT --> Actions
+  AppWeb --> API
+  Repo --> Backup[Nightly backup]
+  Runner -.-> Obs[rome-obs traces]
+  Actions -.-> Obs

@@ -1,0 +1,5 @@
+# Standalone root so the bench's dependencies stay out of the main workspace
+# lockfile. pnpm stops at the nearest pnpm-workspace.yaml.
+packages: []
+allowBuilds:
+  esbuild: true
