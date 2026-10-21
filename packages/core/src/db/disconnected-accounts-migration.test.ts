@@ -195,6 +195,27 @@ describe("delete disconnected accounts migration", () => {
       })
       .run();
 
+    // An app named `sentinel` with an agent named after the service.
+    db.insert(romeSessions)
+      .values({
+        id: "app-run",
+        name: "sentinel:telegram:0b5e2c1a-1d2f-4c3b-9a8e-7f6d5c4b3a21",
+        type: "action",
+        agentName: "sentinel:telegram",
+        activityAt: NOW,
+        createdAt: NOW,
+      })
+      .run();
+    db.insert(sessions)
+      .values({
+        id: "a-app",
+        agentName: "sentinel:telegram",
+        channelThreadKey: "sentinel:telegram:0b5e2c1a-1d2f-4c3b-9a8e-7f6d5c4b3a21",
+        createdAt: NOW,
+        lastActiveAt: NOW,
+        status: "active",
+      })
+      .run();
     db.insert(romeSessions)
       .values({
         id: "triage",
@@ -231,12 +252,13 @@ describe("delete disconnected accounts migration", () => {
 
     const ids = (rows: Array<{ id: string }>) => rows.map((row) => row.id).sort();
     expect(ids(db.select().from(channels).all())).toEqual(["email", "telegram_user"]);
-    expect(ids(db.select().from(romeSessions).all())).toEqual(["fork", "live", "mail"]);
+    expect(ids(db.select().from(romeSessions).all())).toEqual(["app-run", "fork", "live", "mail"]);
     expect(ids(db.select().from(romeAgentMessages).all())).toEqual(["m-live", "m-mail"]);
     expect(ids(db.select().from(outboundMessages).all())).toEqual(["o-live", "o-mail"]);
     expect(ids(db.select().from(sentinelLog).all())).toEqual(["s-live", "s-mail"]);
     expect(ids(db.select().from(sessions).all())).toEqual([
       "a-adhoc",
+      "a-app",
       "a-elsewhere",
       "a-live",
       "a-mail",

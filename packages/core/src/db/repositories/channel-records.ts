@@ -81,8 +81,19 @@ function keyedTo(id: string) {
       sql`substr(${sessions.channelThreadKey}, 1, length(${sessions.agentName}) + 1) <> ${sessions.agentName} || ':'`,
       or(isNull(sessions.conversationId), onChannel(sessions.conversationId, id)),
     ),
-    startsWith(sessions.channelThreadKey, `sentinel:${id}:`),
+    and(
+      startsWith(sessions.channelThreadKey, `sentinel:${id}:`),
+      notAdhoc(sessions.channelThreadKey, sessions.agentName),
+    ),
   );
+}
+
+/** Not an ad-hoc run's key or name, `<app>:<agent>:<uuid>`. An app named
+ *  `sentinel` may have an agent named after a service, so its runs spell
+ *  `sentinel:telegram:…` as the inbox's triage runs do. The inbox runs its
+ *  sentinel under a bare name, which the check leaves alone. */
+function notAdhoc(key: SQLiteColumn, agent: SQLiteColumn) {
+  return sql`NOT (coalesce(instr(${agent}, ':'), 0) > 0 AND substr(${key}, 1, length(${agent}) + 1) = ${agent} || ':')`;
 }
 
 /** A message row of a conversation on channel `id`, by the conversation id
@@ -113,7 +124,11 @@ const MINTED_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 function recordedThrough(id: string) {
   return or(
     eq(romeSessions.sourceChannel, id),
-    and(eq(romeSessions.type, "action"), startsWith(romeSessions.name, `sentinel:${id}:`)),
+    and(
+      eq(romeSessions.type, "action"),
+      startsWith(romeSessions.name, `sentinel:${id}:`),
+      notAdhoc(romeSessions.name, romeSessions.agentName),
+    ),
   );
 }
 

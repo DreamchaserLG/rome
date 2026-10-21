@@ -293,7 +293,7 @@ describe("ChannelRecordsRepository", () => {
     });
   });
 
-  it("deletes the sentinel's triage runs on a deleted account, by the key the inbox runs it under", async () => {
+  it("deletes the sentinel's triage runs on a deleted account, by the key the inbox runs it under, and no app agent's run", async () => {
     const records = repository();
     const db = testDb!.db;
     records.claim(db, { id: "c1", service: "telegram" }, NOW);
@@ -314,6 +314,31 @@ describe("ChannelRecordsRepository", () => {
         userPrompt: "hello from a stranger",
       });
     }
+    // An app named `sentinel` with an agent named after the service: its
+    // ad-hoc run spells `sentinel:telegram:…` but is no triage run.
+    const adhocKey = "sentinel:telegram:0b5e2c1a-1d2f-4c3b-9a8e-7f6d5c4b3a21";
+    await new AgentTraceRecorder({
+      webchatRepo: webchat,
+      agentName: "sentinel:telegram",
+      channelThreadKey: adhocKey,
+      turnId: "turn-app",
+      actionContext: { actionName: "sentinel:run", executionId: "exec-app" },
+    }).record({
+      type: "turn_start",
+      turnId: "turn-app",
+      sessionId: "provider-app",
+      userPrompt: "hello",
+    });
+    db.insert(sessions)
+      .values({
+        id: "a-app",
+        agentName: "sentinel:telegram",
+        channelThreadKey: adhocKey,
+        createdAt: NOW,
+        lastActiveAt: NOW,
+        status: "active",
+      })
+      .run();
 
     records.vacate(db, "c1");
 
@@ -322,8 +347,16 @@ describe("ChannelRecordsRepository", () => {
         .select()
         .from(romeSessions)
         .all()
+        .map((row) => row.id)
+        .sort(),
+    ).toEqual(["action:exec-app:sentinel:telegram", "action:exec-telegram_user:sentinel"]);
+    expect(
+      db
+        .select()
+        .from(sessions)
+        .all()
         .map((row) => row.id),
-    ).toEqual(["action:exec-telegram_user:sentinel"]);
+    ).toEqual(["a-app"]);
     expect(
       db
         .select()
