@@ -1,0 +1,26 @@
+/* Maps Rome's semantic theme tokens onto Pele's CSS variables. Pele reads these
+   at paint time, so a theme or mode switch repaints diagrams without
+   re-rendering them, and OKLCH token values work as they are. */
+.pele {
+  --pele-bg: var(--surface);
+  --pele-fg: var(--foreground);
+  --pele-muted: var(--muted-foreground);
+  --pele-line: var(--muted-foreground);
+  --pele-surface: var(--surface-muted);
+  --pele-surface-alt: var(--muted);
+  --pele-border: var(--border-strong);
+  --pele-accent: var(--primary);
+  --pele-critical: var(--destructive);
+  --pele-error: var(--destructive);
+  --pele-font: var(--font-sans);
+  --pele-font-mono: var(--font-mono);
+  --pele-radius: 6px;
+  --pele-series-1: var(--primary);
+  --pele-series-2: var(--running);
+  --pele-series-3: var(--success);
+  --pele-series-4: var(--warning);
+  --pele-series-5: var(--destructive);
+  --pele-series-6: var(--info-fg);
+  --pele-series-7: var(--subtle-foreground);
+  --pele-series-8: var(--border-strong);
+}

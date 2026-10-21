@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "bench": "node bench.mjs"
+    "bench": "node bench.mjs",
+    "themes": "node themes.mjs"
   },
   "dependencies": {
     "@streamdown/mermaid": "1.0.2",

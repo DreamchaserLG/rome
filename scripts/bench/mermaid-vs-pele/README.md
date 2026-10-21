@@ -12,6 +12,7 @@ pnpm install
 pnpm bench                       # 5 cold runs per cell, no CPU throttling
 pnpm bench --cpu-throttle 4      # same, with Chromium's 4x CPU slowdown
 pnpm bench --only flowchart      # diagrams whose file name contains "flowchart"
+pnpm themes                      # side-by-side screenshots under each dashboard theme
 ```
 
 Set `CHROME` to a Chromium or Chrome binary when Playwright's own browser is not installed. In the cloud dev container that is `CHROME=/opt/pw-browsers/chromium`.
@@ -73,3 +74,17 @@ Pele rendered all 14 valid diagrams, and rejected the invalid one with the same 
 - **Mindmaps draw as a horizontal tree.** Mermaid draws a radial mindmap with filled nodes. The content is the same.
 
 Pele themes from CSS variables, so the dashboard could point them at Rome's design tokens and let the browser resolve them. Mermaid needs the sRGB palette the dashboard computes today, because its color parser cannot read OKLCH.
+
+## Themes
+
+`pnpm themes` renders the valid diagrams under each dashboard theme (Ember, Ash, Slate) in light and dark, and writes one side-by-side screenshot per theme and mode to `out-themes/`. It bundles Rome's own theme code from `packages/web` and `packages/ui`, so both renderers get the palette the dashboard ships:
+
+- Mermaid gets the config Rome's Markdown builds: `theme: "base"` plus the theme variables `readMarkdownMermaidTheme` derives from the built-in sRGB palette.
+- Pele gets [`pele-rome-theme.css`](pele-rome-theme.css), which points its CSS variables at Rome's semantic tokens.
+
+What the screenshots show:
+
+- **Mermaid's dark modes have unreadable parts today.** Rome's theme variables do not cover everything the base theme derives, so in dark mode the composite state box, the alternating ER table rows, and the whole xychart keep light fills, and their text is hard or impossible to read. Pele has none of these, because every color it draws comes from the mapped tokens.
+- **Mermaid's pie slices are near-identical.** The base theme derives slice colors from the surface tokens. Pele uses `--pele-series-*`, mapped to Rome's status colors.
+- **A theme switch costs Mermaid a re-render; Pele repaints from CSS.** Re-rendering the 14 diagrams took 0.7 to 1.2 s per switch, see [`results/themes.md`](results/themes.md). Pele's SVG is rendered once and reused for every theme.
+- **`classDef` fills ignore the mode in both.** `10-flowchart-styled` hard-codes light fills, so in dark mode both renderers draw light text on a light fill. The agent prompt already asks for no color rules.
