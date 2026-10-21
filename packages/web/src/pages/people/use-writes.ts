@@ -74,7 +74,12 @@ export interface PeopleWrites {
     personId: string,
     account: AccountRef,
     text: string,
-    options: { id: string; onAccepted: (message: OutboxMessage) => void },
+    options: {
+      id: string;
+      /** The id of Rome's account the message goes out from. */
+      from: string;
+      onAccepted: (message: OutboxMessage) => void;
+    },
   ): Promise<WriteOutcome<OutboxMessage, SendRefusal>>;
   /**
    * Try a failed send again, under its own outbox id.
@@ -157,7 +162,11 @@ export function usePeopleWrites(): PeopleWrites {
       setBond: (personId, bondLevel) => settling(() => updatePerson(personId, { bondLevel }, t)),
       say: (personId, account, text, options) =>
         settling(async () => {
-          const outcome = await sendMessage(personId, { ...ref(account), text, id: options.id }, t);
+          const outcome = await sendMessage(
+            personId,
+            { ...ref(account), text, id: options.id, from: options.from },
+            t,
+          );
           if (outcome.ok) options.onAccepted(outcome.value);
           return outcome;
         }),

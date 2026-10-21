@@ -1,7 +1,13 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, SendHorizontal } from "lucide-react";
-import { canSend, type LinkedAccount, type PersonResource } from "@rome/api-types/people";
+import {
+  accountRef,
+  canSend,
+  type LinkedAccount,
+  type PersonResource,
+} from "@rome/api-types/people";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,10 +17,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { fetchConnections } from "@/lib/connections-api";
 import { PAGE_FLOOR } from "@/shell/PageShell";
+import { CONNECTIONS_KEY, romeAccountNames } from "../envoys/envoys-model";
 import { ChannelGlyph, channelLabel } from "./channel-meta";
 import { sendRefusalKey, type RefusedSendState } from "./send-copy";
-import { accountHandle } from "./send-model";
+import { accountHandle, chosenSender, senderChoice, type SenderChoice } from "./send-model";
 
 /**
  * The composer: one message, to one account the guardian can see it is going
@@ -35,6 +43,12 @@ import { accountHandle } from "./send-model";
  * account can be written to. Inside an account view the view is the target, so a
  * second choice would be asking the guardian to say the same thing twice.
  *
+ * Both ends of a send are on that line: "From" names which of Rome's accounts
+ * the message goes out from, and "To" the person's account. With one account
+ * of Rome's to send from it is shown, and with several the guardian picks one
+ * before Send is offered, since Rome never picks among its own accounts
+ * (`senderChoice`). The request always names it.
+ *
  * An account that cannot be written to shows why instead of a text box. The
  * reason is the state the server declared, rendered through `./send-copy.ts` —
  * no sentence crosses the wire, so every locale reads the same way.
@@ -52,9 +66,13 @@ export function Composer({
   /** Offered where there is something to pick: the merged view. Null inside an
    *  account view, where the view already names the target. */
   onChangeTarget: ((account: LinkedAccount) => void) | null;
-  onSend: (account: LinkedAccount, text: string) => void;
+  onSend: (account: LinkedAccount, text: string, from: string) => void;
 }) {
   const { t } = useTranslation("people");
+  const senderName = useRomeAccountName();
+  // The guardian's pick per person's account, so switching the target never
+  // carries a pick over to an account it was not made for.
+  const [picked, setPicked] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState("");
   const draftRef = useRef("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -83,21 +101,36 @@ export function Composer({
     return <Note>{refusalText(t, target.send, target.channel)}</Note>;
   }
 
+  const choice = senderChoice(target);
+  if (choice.kind === "none") {
+    return <Note>{t("send.noSender", { channel: channelLabel(t, target.channel) })}</Note>;
+  }
+  const targetRef = accountRef(target);
+  const from = chosenSender(choice, picked[targetRef] ?? null);
+
   const options = person.accounts.filter(canSend);
   const text = draft.trim();
   function submit() {
     const message = draftRef.current.trim();
-    if (target === null || message === "") return;
+    if (target === null || from === null || message === "") return;
     // Clear synchronously so repeated submit events cannot send the same draft.
     draftRef.current = "";
     setDraft("");
-    onSend(target, message);
+    onSend(target, message, from);
     inputRef.current?.focus();
   }
 
   return (
     <Floor>
-      <p className="mb-2 flex items-center gap-2 text-aux text-muted-foreground">
+      <p className="mb-2 flex flex-wrap items-center gap-2 text-aux text-muted-foreground">
+        <span>{t("send.from")}</span>
+        <SenderSlot
+          channel={target.channel}
+          choice={choice}
+          value={from}
+          name={senderName}
+          onChange={(id) => setPicked((current) => ({ ...current, [targetRef]: id }))}
+        />
         <span>{t("send.to")}</span>
         {onChangeTarget && options.length > 1 ? (
           <TargetMenu options={options} value={target} onChange={onChangeTarget} />
@@ -123,7 +156,7 @@ export function Composer({
           placeholder={t("detail.composerPlaceholder", { name: person.displayName })}
           aria-label={t("detail.composerLabel")}
         />
-        <Button type="button" size="sm" disabled={text === ""} onClick={submit}>
+        <Button type="button" size="sm" disabled={text === "" || from === null} onClick={submit}>
           <SendHorizontal data-icon="inline-start" aria-hidden="true" />
           {t("send.submit")}
         </Button>
@@ -140,6 +173,69 @@ function refusalText(
   channel: string,
 ): string {
   return t(sendRefusalKey(send), { channel: channelLabel(t, channel) });
+}
+
+/** What the dashboard calls each of Rome's accounts: the name Envoys shows for
+ *  it, else the channel's name, while the Connections feed has not answered. */
+function useRomeAccountName(): (id: string) => string {
+  const { t } = useTranslation("people");
+  const connections = useQuery({
+    queryKey: CONNECTIONS_KEY,
+    queryFn: async () => (await fetchConnections()) ?? [],
+    staleTime: 60_000,
+  });
+  const names = useMemo(() => romeAccountNames(connections.data ?? []), [connections.data]);
+  return (id) => names.get(id) ?? channelLabel(t, id);
+}
+
+/** The account a send goes out from: shown when there is one, and picked from
+ *  a menu with nothing preselected when there are several. */
+function SenderSlot({
+  channel,
+  choice,
+  value,
+  name,
+  onChange,
+}: {
+  channel: string;
+  choice: Exclude<SenderChoice, { kind: "none" }>;
+  value: string | null;
+  name: (id: string) => string;
+  onChange: (id: string) => void;
+}) {
+  const { t } = useTranslation("people");
+  if (choice.kind === "one") {
+    return (
+      <Badge variant="muted" className="min-w-0">
+        <ChannelGlyph channel={channel} />
+        <span className="truncate">{name(choice.from)}</span>
+      </Badge>
+    );
+  }
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Badge variant="muted" asChild>
+          <button
+            type="button"
+            className="min-w-0 cursor-pointer outline-none transition-colors hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 aria-expanded:text-foreground"
+          >
+            <ChannelGlyph channel={channel} />
+            <span className="truncate">{value === null ? t("send.pickFrom") : name(value)}</span>
+            <ChevronDown aria-hidden="true" />
+          </button>
+        </Badge>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" side="top">
+        {choice.options.map((id) => (
+          <DropdownMenuItem key={id} onSelect={() => onChange(id)}>
+            <ChannelGlyph channel={channel} />
+            <span>{name(id)}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 /** One chip's worth of target: the channel's glyph and name, and the handle.

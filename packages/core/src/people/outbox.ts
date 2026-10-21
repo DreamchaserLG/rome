@@ -90,11 +90,11 @@ export async function sendToAccount(
   deps: OutboxDeps,
   account: { channel: string; channelUserId: string },
   text: string,
+  from: string,
   id?: string,
-  from?: string,
 ): Promise<SendResult> {
   const replay = (message: OutboxMessage): SendResult =>
-    matchesSendRequest(message, { ...account, text, ...(from === undefined ? {} : { from }) })
+    matchesSendRequest(message, { ...account, text, from })
       ? { ok: true, message }
       : { ok: false, error: "That send id belongs to a different message" };
   if (id) {

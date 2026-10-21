@@ -97,6 +97,8 @@ function personResource(person: PersonFixture): PersonResource {
       // names a channel and not an address, so it cannot say which of two
       // accounts on one channel was the recent one.
       latestAt: accountTimeline(a)[0]?.timestamp ?? null,
+      // The mock holds one of Rome's accounts per service, named after it.
+      from: [a.channel],
     })),
     // Timeline entries, not records: the contract pins a person's count to the
     // history GET /api/people/:id/messages pages.
@@ -338,12 +340,18 @@ function isDismissableRow(row: OutboxRow, now: number): boolean {
   return row.state === "unconfirmed" && now - row.attemptedAt >= SETTLES_WITHIN_MS;
 }
 
-function openRow(account: AccountRef, text: string, id: string = crypto.randomUUID()): OutboxRow {
+function openRow(
+  account: AccountRef,
+  text: string,
+  id: string = crypto.randomUUID(),
+  from: string = account.channel,
+): OutboxRow {
   const row: OutboxRow = {
     id,
     channel: account.channel,
     channelUserId: account.channelUserId,
     text,
+    from,
     timestamp: Math.floor(Date.now() / 1000),
     state: "sending",
     ref: null,
@@ -611,6 +619,13 @@ export const peopleHandlers = [
         { status: 400 },
       );
     }
+    // The mock's one account on the service, as the person read lists it.
+    if (parsed.request.from !== parsed.request.channel) {
+      return HttpResponse.json(
+        { error: "Rome holds no account by that id that can send to this account" },
+        { status: 400 },
+      );
+    }
 
     pruneSendReceipts(Date.now());
     const active = outbox.find((row) => row.id === parsed.request.id);
@@ -636,7 +651,9 @@ export const peopleHandlers = [
     }
 
     return HttpResponse.json(
-      outboxMessage(openRow(parsed.request, parsed.request.text, parsed.request.id)),
+      outboxMessage(
+        openRow(parsed.request, parsed.request.text, parsed.request.id, parsed.request.from),
+      ),
       {
         status: 202,
       },

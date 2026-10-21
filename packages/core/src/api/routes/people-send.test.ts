@@ -39,6 +39,15 @@ import { SEND_IDEMPOTENCY_RETENTION_MS } from "@rome/api-types/people";
 // it.
 
 const TG = "tg-send-target";
+
+/** `body` with `from` set to the channel it names, where it names none: on a
+ *  service with one account, the channel named after the service is that
+ *  account. */
+function withFrom(body: unknown): unknown {
+  if (typeof body !== "object" || body === null || "from" in body) return body;
+  const channel = (body as { channel?: unknown }).channel;
+  return typeof channel === "string" ? { ...body, from: channel } : body;
+}
 const OTHER_TG = "tg-someone-else";
 
 describe("People send API", () => {
@@ -64,11 +73,13 @@ describe("People send API", () => {
     });
   });
 
+  /** A send from Rome's account on the channel named, unless the body names
+   *  another or is not an object. */
   const send = (body: unknown, id = personId) =>
     app.request(`/people/${id}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(withFrom(body)),
     });
 
   const outbox = async (id = personId): Promise<OutboxMessage[]> => {
@@ -173,13 +184,26 @@ describe("People send API", () => {
     const res = await readOnlyApp.request(`/people/${personId}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ channel: "telegram", channelUserId: TG, text: "hello" }),
+      body: JSON.stringify({
+        channel: "telegram",
+        channelUserId: TG,
+        text: "hello",
+        from: "telegram",
+      }),
     });
 
     expect(res.status).toBe(409);
     // The same state the person read carries, so a client that raced a
     // disconnect renders the reason it would already have shown.
     expect((await res.json()) as SendRefusal).toMatchObject({ send: "unsupported" });
+  });
+
+  it("refuses a send that names no account to send from", async () => {
+    // `from` is present and undefined, so the helper adds none and JSON drops it.
+    const res = await send({ channel: "telegram", channelUserId: TG, text: "hi", from: undefined });
+
+    expect(res.status).toBe(400);
+    expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
   });
 
   it("refuses a body naming no account or no text", async () => {
@@ -408,7 +432,12 @@ describe("People send API — delivery bookkeeping", () => {
     const res = await app.request(`/people/${personId}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ channel: "whatsapp", channelUserId: LID, text: "sent to the lid" }),
+      body: JSON.stringify({
+        channel: "whatsapp",
+        channelUserId: LID,
+        text: "sent to the lid",
+        from: "whatsapp",
+      }),
     });
     expect(res.status).toBe(202);
     const sent = (await res.json()) as OutboxMessage;
@@ -444,7 +473,12 @@ describe("People send API — delivery bookkeeping", () => {
     const res = await app.request(`/people/${personId}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ channel: "whatsapp", channelUserId: LID, text: "went out anyway" }),
+      body: JSON.stringify({
+        channel: "whatsapp",
+        channelUserId: LID,
+        text: "went out anyway",
+        from: "whatsapp",
+      }),
     });
 
     expect(res.status).toBe(202);
@@ -491,6 +525,7 @@ describe("People send API — delivery bookkeeping", () => {
         channel: "telegram",
         channelUserId: "tg-elsewhere",
         text: "theirs",
+        from: "telegram",
       }),
     });
     const res = await app.request(`/people/${otherId}/outbox`);
@@ -545,6 +580,7 @@ describe("People send API — delivery bookkeeping", () => {
         channel: "telegram",
         channelUserId: "tg-unmirrored",
         text: "delivered but unseen",
+        from: "telegram",
       }),
     });
 
@@ -601,7 +637,12 @@ describe("People send API — delivery bookkeeping", () => {
       app.request(`/people/${tgPersonId}/messages`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ channel: "telegram", channelUserId: "tg-unmirrored", text }),
+        body: JSON.stringify({
+          channel: "telegram",
+          channelUserId: "tg-unmirrored",
+          text,
+          from: "telegram",
+        }),
       });
     const readRow = async (): Promise<OutboxMessage | undefined> => {
       const res = await app.request(`/people/${tgPersonId}/outbox`);
@@ -675,7 +716,12 @@ describe("People send API — delivery bookkeeping", () => {
     await app.request(`/people/${personId}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ channel: "whatsapp", channelUserId: LID, text: "contested" }),
+      body: JSON.stringify({
+        channel: "whatsapp",
+        channelUserId: LID,
+        text: "contested",
+        from: "whatsapp",
+      }),
     });
     const [failed] = await outbox();
 
@@ -711,7 +757,12 @@ describe("People send API — delivery bookkeeping", () => {
     await app.request(`/people/${personId}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ channel: "whatsapp", channelUserId: LID, text: "retry me once" }),
+      body: JSON.stringify({
+        channel: "whatsapp",
+        channelUserId: LID,
+        text: "retry me once",
+        from: "whatsapp",
+      }),
     });
     const [failed] = await outbox();
 
@@ -747,7 +798,12 @@ describe("People send API — delivery bookkeeping", () => {
       .request(`/people/${personId}/messages`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ channel: "whatsapp", channelUserId: LID, text: "no thread" }),
+        body: JSON.stringify({
+          channel: "whatsapp",
+          channelUserId: LID,
+          text: "no thread",
+          from: "whatsapp",
+        }),
       });
 
     expect(res.status).toBe(409);
@@ -854,7 +910,12 @@ describe("People on an account whose channel id is opaque", () => {
     const res = await app.request(`/people/${personId}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ channel: "telegram", channelUserId: ADA, text: "hi Ada" }),
+      body: JSON.stringify({
+        channel: "telegram",
+        channelUserId: ADA,
+        text: "hi Ada",
+        from: OPAQUE,
+      }),
     });
 
     expect(res.status).toBe(202);
@@ -881,8 +942,8 @@ describe("People on an account whose channel id is opaque", () => {
   });
 
   // Rome never picks among a service's accounts: with a second one connected,
-  // the link reaches neither, for sending or for history.
-  it("reaches none of two accounts of the service", async () => {
+  // a send names one of them, and the link reads the history of neither.
+  it("picks neither of two accounts of the service on its own", async () => {
     testDb.db
       .insert(channelRows)
       .values({
@@ -890,20 +951,21 @@ describe("People on an account whose channel id is opaque", () => {
         service: "telegram",
         platform: "telegram",
         connectionId: "test:telegram-second",
-        createdAt: new Date(0),
+        createdAt: new Date(60_000),
       })
       .run();
 
+    // One of the two can send, so the account can be written to once a send
+    // names it.
     expect((await person()).accounts).toMatchObject([
-      { channel: "telegram", channelUserId: ADA, send: "not-connected" },
+      { channel: "telegram", channelUserId: ADA, send: "yes", from: [OPAQUE, "tg-second"] },
     ]);
     const res = await app.request(`/people/${personId}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ channel: "telegram", channelUserId: ADA, text: "hi Ada" }),
     });
-    expect(res.status).toBe(409);
-    expect((await res.json()) as SendRefusal).toMatchObject({ send: "not-connected" });
+    expect(res.status).toBe(400);
     expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
     expect((await timeline()).entries).toEqual([]);
   });
@@ -958,7 +1020,7 @@ describe("People on an account whose channel id is opaque", () => {
     it("sends from a named account of two, and refuses a send that names none", async () => {
       connectSecond();
 
-      expect((await post({ text: "which one?" })).status).toBe(409);
+      expect((await post({ text: "which one?" })).status).toBe(400);
       const res = await post({ text: "from the first", from: OPAQUE });
       expect(res.status).toBe(202);
       expect(((await res.json()) as OutboxMessage).from).toBe(OPAQUE);

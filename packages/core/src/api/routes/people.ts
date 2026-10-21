@@ -183,11 +183,8 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     // The account the message goes out from has to be one of Rome's accounts
     // on the link's service that can send to this account. Rome never
     // substitutes another for it.
-    // TODO(people-send-from dashboard PR): require `from` once the dashboard
-    // sends it. Until then a send without it goes out from the service's only
-    // account, and is refused while the service has several.
     const from = parsed.request.from;
-    if (from !== undefined && !deps.sendersOfLink(parsed.request.channel).includes(from)) {
+    if (!deps.sendersOfLink(parsed.request.channel).includes(from)) {
       return c.json(
         { error: "Rome holds no account by that id that can send to this account" },
         400,
@@ -198,8 +195,8 @@ export function peopleRoutes(deps: ApiDeps): Hono {
       deps,
       parsed.request,
       parsed.request.text,
-      parsed.request.id,
       from,
+      parsed.request.id,
     );
     if (!result.ok && "error" in result) return c.json({ error: result.error }, 409);
     return result.ok

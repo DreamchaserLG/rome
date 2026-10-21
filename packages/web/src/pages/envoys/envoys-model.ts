@@ -58,6 +58,19 @@ function accountName(connection: ApiConnection): string | null {
   return null;
 }
 
+/** What the dashboard calls each of Rome's accounts, by channel id: the name
+ *  people see on the platform, else the platform's name. A Connection that
+ *  backs no channel names none. */
+export function romeAccountNames(connections: readonly ApiConnection[]): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const connection of connections) {
+    if (connection.id === null || !connection.channel) continue;
+    const platform = connection.platform ?? platformOf(connection.service);
+    names.set(connection.channel, accountName(connection) ?? serviceLabel(platform));
+  }
+  return names;
+}
+
 /** The grant through which an account is connected, if any. */
 function connectedGrant(connection: ApiConnection): string | null {
   const grant = Object.entries(connection.grants).find(([, state]) => state !== "unauthorized");

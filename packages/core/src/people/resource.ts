@@ -18,7 +18,6 @@ import type { AccountNames } from "../channels/account-names.js";
 import type { Channels } from "../channels/channel.js";
 import type { MessageAccount } from "../channels/messages.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { SendersOfLink } from "../db/repositories/channel-records.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { readActivity } from "./activity.js";
 import { readSendStates, type SendDeps } from "./send.js";
@@ -29,9 +28,6 @@ export interface PeopleReadDeps extends SendDeps {
   personMappingRepo: Pick<PersonMappingRepository, "findAllWithMappings" | "findById">;
   channels: Channels;
   accountNames: Pick<AccountNames, "displayNames">;
-  /** Rome's accounts a send to each link may go out from. Absent, a link's
-   *  own channel. */
-  sendersOfLink?: SendersOfLink;
 }
 
 /** A person as the repository reads them: the row and the accounts linked to

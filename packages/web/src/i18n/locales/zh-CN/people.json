@@ -128,6 +128,9 @@
   },
   "send": {
     "to": "发送至",
+    "from": "发自",
+    "pickFrom": "选择账号",
+    "noSender": "你的 {{channel}} 账号都无法发送给此账号。",
     "segments": {
       "label": "账号",
       "all": "全部",

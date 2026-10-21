@@ -13,10 +13,10 @@
 // contract offers surfaces a preselected account; it is a default rendered on
 // screen, not a decision taken off it.
 //
-// Nor does Rome pick among its own accounts of one service. A link names the
-// service, and reaches the service's account only while the service has one
-// (`ChannelOfLink`). With several, a send to the link is refused rather than
-// sent from an account nobody chose.
+// Nor does Rome pick among its own accounts of one service. A send names the
+// one it goes out from, and Rome never substitutes another. Where nothing
+// names one, a retry of a row from before rows recorded it, a link reaches the
+// service's account only while the service has one (`ChannelOfLink`).
 //
 // Whether a channel can be sent to at all is the channel's own declaration:
 // its `send` port's `direct`. A channel whose sending cannot reach an account
@@ -26,7 +26,7 @@
 import type { ChatId } from "@rome-os/app-runtime";
 import type { AccountSendState } from "@rome/api-types/people";
 import { ChannelNotConnected, type ChannelSend, type Channels } from "../channels/channel.js";
-import type { ChannelOfLink } from "../db/repositories/channel-records.js";
+import type { ChannelOfLink, SendersOfLink } from "../db/repositories/channel-records.js";
 
 export interface SendAccount {
   channel: string;
@@ -38,6 +38,9 @@ export interface SendDeps {
   /** The one channel each link reaches. Absent, a link reaches the channel it
    *  names, which holds only while no service has a later channel. */
   channelOfLink?: ChannelOfLink;
+  /** Rome's accounts a send to each link may name to go out from. Absent, a
+   *  link's own channel. */
+  sendersOfLink?: SendersOfLink;
 }
 
 /** A resolved target: the channel it is on, that channel's send port, and the
@@ -115,20 +118,45 @@ export async function resolveSendTarget(
     : { ok: false, send: resolved.state };
 }
 
+/** How near to sending each refusal is: a read reports the nearest of the
+ *  accounts a send may go out from. */
+const NEARNESS: Record<RefusedState, number> = {
+  "not-connected": 0,
+  unsupported: 1,
+  "no-conversation": 2,
+};
+
 /**
- * Whether Rome can send to each of the given accounts, positionally.
+ * Whether Rome can send to each of the given accounts, positionally: `yes`
+ * when any of Rome's accounts a send may name as `from` (`sendersOfLink`) can,
+ * and otherwise the refusal of the one that came nearest. A send still names
+ * one, so this says whether there is one to name, and never which.
  *
  * Only `conversationFor` can reach a provider, and it is asked once per
- * account — cheap on the channels in play, and the reason a channel that keys
- * threads separately has to be priced before it is added to a listing read. A
- * listing must not fail because one account of one person could not be priced.
+ * account and account it may go out from — cheap on the channels in play, and
+ * the reason a channel that keys threads separately has to be priced before
+ * it is added to a listing read. A listing must not fail because one account
+ * of one person could not be priced.
  */
 export async function readSendStates(
   deps: SendDeps,
   accounts: readonly SendAccount[],
 ): Promise<AccountSendState[]> {
+  const sendersOf = deps.sendersOfLink ?? ((link: string) => [link]);
   return await Promise.all(
-    accounts.map(async (account) => (await sendStateOf(deps, account)).state),
+    accounts.map(async (account): Promise<AccountSendState> => {
+      const states = await Promise.all(
+        sendersOf(account.channel).map(
+          async (from) => (await sendStateOf(deps, account, from)).state,
+        ),
+      );
+      if (states.includes("yes")) return "yes";
+      let nearest: RefusedState = "not-connected";
+      for (const state of states) {
+        if (state !== "yes" && NEARNESS[state] > NEARNESS[nearest]) nearest = state;
+      }
+      return nearest;
+    }),
   );
 }
 

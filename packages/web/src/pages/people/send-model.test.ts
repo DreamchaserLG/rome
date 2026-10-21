@@ -5,9 +5,11 @@ import {
   ALL_ACCOUNTS,
   accountHandle,
   accountSegments,
+  chosenSender,
   segmentAccount,
   segmentEntries,
   segmentOutbox,
+  senderChoice,
 } from "./send-model";
 
 // The shape of the person page's two views. What is under test is the one rule
@@ -170,5 +172,34 @@ describe("the account a composer opens on", () => {
 
   it("is null when nothing is sendable, which is a reason to render and not an empty box", () => {
     expect(defaultSendAccount([account({ channel: "linkedin", send: "unsupported" })])).toBeNull();
+  });
+});
+
+describe("senderChoice", () => {
+  it("shows the one account of Rome's that can send, already chosen", () => {
+    const choice = senderChoice(account({ channel: "telegram", from: ["telegram"] }));
+    expect(choice).toEqual({ kind: "one", from: "telegram" });
+    expect(chosenSender(choice, null)).toBe("telegram");
+  });
+
+  it("chooses none of several, and takes the guardian's pick only among them", () => {
+    const choice = senderChoice(account({ channel: "telegram", from: ["telegram", "tg-b"] }));
+    expect(choice).toEqual({ kind: "pick", options: ["telegram", "tg-b"] });
+    expect(chosenSender(choice, null)).toBeNull();
+    expect(chosenSender(choice, "tg-b")).toBe("tg-b");
+    expect(chosenSender(choice, "tg-gone")).toBeNull();
+  });
+
+  it("offers nothing to send from when no account of Rome's can", () => {
+    const choice = senderChoice(account({ channel: "telegram", from: [] }));
+    expect(choice).toEqual({ kind: "none" });
+    expect(chosenSender(choice, "telegram")).toBeNull();
+  });
+
+  it("sends from the link's own channel when the read predates `from`", () => {
+    expect(senderChoice(account({ channel: "whatsapp" }))).toEqual({
+      kind: "one",
+      from: "whatsapp",
+    });
   });
 });

@@ -81,7 +81,12 @@ describe("LinkedIn replies through People", () => {
     app.request(`/people/${person}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ channel: "linkedin", channelUserId: MEMBER, text: reply.text }),
+      body: JSON.stringify({
+        channel: "linkedin",
+        channelUserId: MEMBER,
+        text: reply.text,
+        from: "linkedin",
+      }),
     });
   const outbox = async () =>
     (await (await app.request(`/people/${person}/outbox`)).json()) as OutboxPage;

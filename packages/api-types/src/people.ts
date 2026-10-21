@@ -1266,10 +1266,9 @@ export interface SendMessageRequest {
   /**
    * The id of Rome's account the message goes out from, one of the person's
    * account's `LinkedAccount.from`. Rome never substitutes another account
-   * for it. Absent, the send goes out from the service's only account and is
-   * refused while the service has several.
+   * for it.
    */
-  from?: string;
+  from: string;
 }
 
 export function parseSendMessageRequest(
@@ -1288,13 +1287,12 @@ export function parseSendMessageRequest(
   const channelUserId = typeof raw.channelUserId === "string" ? raw.channelUserId.trim() : "";
   const text = typeof raw.text === "string" ? raw.text.trim() : "";
   const from = typeof raw.from === "string" ? raw.from.trim() : "";
-  if (raw.from !== undefined && (!from || !isChannelIdentifier(from))) {
-    return { error: "from must name one of Rome's accounts" };
-  }
   if (!channel) return { error: "channel is required" };
   if (!isChannelIdentifier(channel)) return { error: "channel must not contain ':'" };
   if (!channelUserId) return { error: "channelUserId is required" };
   if (!text) return { error: "text is required" };
+  if (!from) return { error: "from is required" };
+  if (!isChannelIdentifier(from)) return { error: "from must not contain ':'" };
   if (text.length > SEND_MESSAGE_MAX_LENGTH) {
     return { error: `text must be at most ${SEND_MESSAGE_MAX_LENGTH} characters` };
   }
@@ -1304,19 +1302,20 @@ export function parseSendMessageRequest(
       channel,
       channelUserId,
       text,
-      ...(raw.from === undefined ? {} : { from }),
+      from,
     },
   };
 }
 
-/** A repeated send id may only refer to its original account and text, and,
- *  when the request names the account it goes out from, that account. */
+/** A repeated send id may only refer to its original account, text, and the
+ *  account it went out from. A receipt from before rows recorded that account
+ *  carries none, and matches on the rest. */
 export function matchesSendRequest(message: OutboxMessage, request: SendMessageRequest): boolean {
   return (
     message.channel === request.channel &&
     message.channelUserId === request.channelUserId &&
     message.text === request.text &&
-    (request.from === undefined || message.from === request.from)
+    (message.from == null || message.from === request.from)
   );
 }
 

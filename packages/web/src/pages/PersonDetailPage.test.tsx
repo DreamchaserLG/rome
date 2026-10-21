@@ -142,6 +142,29 @@ const HELD_BY_ANOTHER: DirectoryAccount = {
   personName: "Mira Chen",
 };
 
+/** Wei reachable on Telegram alone, from whichever of Rome's accounts `from`
+ *  lists. */
+function withSenders(from: string[]): PersonResource {
+  return { ...PERSON, accounts: [{ ...PERSON.accounts[1]!, from }] };
+}
+
+/** One of Rome's accounts as `GET /api/connections` lists it, carrying the
+ *  name the platform knows it by. */
+function connection(channel: string, displayName: string, service = "telegram") {
+  return {
+    id: `conn-${channel}`,
+    service,
+    label: service,
+    channel,
+    platform: service,
+    grants: { bot: "authorized" },
+    display: { bot: { displayName } },
+    capabilities: {},
+    connect: null,
+    setups: {},
+  };
+}
+
 /** Whatever a write put on the wire, read back for assertions. */
 interface WriteBody {
   id?: string;
@@ -189,6 +212,9 @@ function mockApi(
     /** Rows already in the outbox when the page opens — how a send stranded by
      *  an earlier process reaches a reader. */
     outbox?: OutboxMessage[];
+    /** What `GET /api/connections` lists, which is where the composer finds
+     *  the name of each of Rome's accounts. */
+    connections?: unknown[];
   } = {},
 ) {
   const calls: FetchCall[] = [];
@@ -312,6 +338,7 @@ function mockApi(
         nextCursor: options.nextCursor ?? null,
       });
     }
+    if (path === "/api/connections") return json({ connections: options.connections ?? [] });
     if (url.includes("/api/accounts")) {
       return json(sliceAccountDirectory(options.accounts ?? []));
     }
@@ -952,6 +979,7 @@ describe("PersonDetailPage, sending", () => {
     expect(sent?.body).toMatchObject({
       channel: "whatsapp",
       channelUserId: "6591881123@s.whatsapp.net",
+      from: "whatsapp",
       text: "on my way",
     });
 
@@ -987,6 +1015,58 @@ describe("PersonDetailPage, sending", () => {
       calls.find((call) => call.method === "POST" && call.url.endsWith("/messages")),
     );
     expect(sent?.body).toMatchObject({ channel: "telegram", channelUserId: "418820113" });
+  });
+
+  it("names the one account a send goes out from, beside the account it goes to", async () => {
+    mockApi({ connections: [connection("whatsapp", "Rome Ops", "whatsapp")] });
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    // One account of Rome's can send, so it is shown rather than offered: a
+    // chip with the name Envoys gives it, and no menu.
+    expect(await screen.findByText("Rome Ops")).toBeTruthy();
+    expect(screen.getByText("From")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Choose an account/ })).toBeNull();
+  });
+
+  it("holds Send until the guardian picks which of several accounts to send from", async () => {
+    const user = userEvent.setup();
+    const calls = mockApi({
+      send: "land",
+      person: withSenders(["telegram", "tg-second"]),
+      connections: [connection("telegram", "Rome Bot One"), connection("tg-second", "Rome Desk")],
+    });
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    await user.type(screen.getByRole("textbox", { name: "Message text" }), "on my way");
+
+    // Nothing is preselected: the menu asks, and Send waits for the answer.
+    const trigger = screen.getByRole("button", { name: /Choose an account/ });
+    const submit = screen.getByRole("button", { name: "Send" }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+
+    await user.click(trigger);
+    await user.click(await screen.findByRole("menuitem", { name: /Rome Desk/ }));
+    expect(screen.getByRole("button", { name: /Rome Desk/ })).toBeTruthy();
+    expect(submit.disabled).toBe(false);
+
+    await user.click(submit);
+    const sent = await waitFor(() =>
+      calls.find((call) => call.method === "POST" && call.url.endsWith("/messages")),
+    );
+    expect(sent?.body).toMatchObject({ channel: "telegram", from: "tg-second" });
+  });
+
+  it("says why nothing can be sent when no account of Rome's can reach the person", async () => {
+    mockApi({ person: withSenders([]) });
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Wei Chen" });
+    expect(
+      await screen.findByText("None of your Telegram accounts can send to this account."),
+    ).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: "Message text" })).toBeNull();
   });
 
   it("keeps a refused send with the channel's words, and retries it under its own id", async () => {

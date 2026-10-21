@@ -110,3 +110,32 @@ export function segmentOutbox(
       )
     : [...messages];
 }
+
+/**
+ * Which of Rome's accounts a send to `account` goes out from, as the guardian
+ * has to see it before Send: the one account the person read lists, or a
+ * choice among several that nothing makes for them, or none at all.
+ *
+ * A core that predates `from` sends from the link's own channel, so a read
+ * without it answers that channel.
+ */
+export type SenderChoice =
+  | { kind: "none" }
+  | { kind: "one"; from: string }
+  | { kind: "pick"; options: readonly string[] };
+
+export function senderChoice(account: Pick<LinkedAccount, "channel" | "from">): SenderChoice {
+  const options = account.from ?? [account.channel];
+  const [only, ...rest] = options;
+  if (only === undefined) return { kind: "none" };
+  return rest.length === 0 ? { kind: "one", from: only } : { kind: "pick", options };
+}
+
+/** The account a send goes out from: the only one, or the one the guardian
+ *  picked when it is still among the choices, and otherwise null, which
+ *  leaves Send unavailable. */
+export function chosenSender(choice: SenderChoice, picked: string | null): string | null {
+  if (choice.kind === "one") return choice.from;
+  if (choice.kind === "pick" && picked !== null && choice.options.includes(picked)) return picked;
+  return null;
+}

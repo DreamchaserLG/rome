@@ -106,10 +106,10 @@ describe("People writes, against the contract's own handlers", () => {
 
 const RAY = "ray-oster";
 /** Ray's Telegram account, which the fixture ledger can be written to. */
-const RAY_TELEGRAM = { channel: "telegram", channelUserId: "418820113" };
+const RAY_TELEGRAM = { channel: "telegram", channelUserId: "418820113", from: "telegram" };
 /** Arvind's LinkedIn account: a live connection whose talker does no direct
  *  messaging, which is the `unsupported` refusal. */
-const ARVIND = { channel: "linkedin", channelUserId: "ACoAAArvind01" };
+const ARVIND = { channel: "linkedin", channelUserId: "ACoAAArvind01", from: "linkedin" };
 
 const readOutbox = (personId: string) =>
   fetchJson<OutboxPage>(`/api/people/${personId}/outbox`, { fallback: "outbox unavailable" });

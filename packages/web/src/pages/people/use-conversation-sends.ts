@@ -9,6 +9,8 @@ import { randomUUID } from "@/lib/random-uuid";
 
 interface LocalSend {
   id: string;
+  /** The id of Rome's account the send goes out from, kept for a retry. */
+  from: string;
   message: OutboxMessage;
 }
 
@@ -35,7 +37,7 @@ export function useConversationSends(personId: string, serverMessages: readonly 
     setRequests((current) => current.filter((request) => request.id !== id));
   }
 
-  async function attempt(id: string, account: AccountRef, text: string) {
+  async function attempt(id: string, account: AccountRef, text: string, from: string) {
     if (active.current.has(id)) return;
     active.current.add(id);
     setRequests((current) =>
@@ -51,6 +53,7 @@ export function useConversationSends(personId: string, serverMessages: readonly 
     try {
       const outcome = await writes.say(personId, account, text, {
         id,
+        from,
         onAccepted: (message) => {
           // Keep the server's answer visible while the refreshed reads settle.
           setRequests((current) =>
@@ -83,7 +86,7 @@ export function useConversationSends(personId: string, serverMessages: readonly 
 
   return {
     messages: requests.map((request) => request.message),
-    send(account: AccountRef, text: string) {
+    send(account: AccountRef, text: string, from: string) {
       const id = randomUUID();
       const message: OutboxMessage = {
         id,
@@ -94,15 +97,16 @@ export function useConversationSends(personId: string, serverMessages: readonly 
         state: "sending",
         ref: null,
         error: null,
+        from,
         dismissable: false,
       };
-      setRequests((current) => [{ id, message }, ...current]);
-      void attempt(id, account, text);
+      setRequests((current) => [{ id, from, message }, ...current]);
+      void attempt(id, account, text, from);
     },
     retry(id: string) {
       const request = requests.find((candidate) => candidate.id === id);
       if (request?.message.state === "failed") {
-        void attempt(id, request.message, request.message.text);
+        void attempt(id, request.message, request.message.text, request.from);
       }
     },
     discard,
