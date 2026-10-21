@@ -25,6 +25,7 @@ import type {
 import type { AddressBooks } from "./account-fold.js";
 import type { Pacer } from "./delivery/pacer.js";
 import type { DeliveryTransport } from "./delivery/types.js";
+import type { ServiceOfChannel } from "../db/repositories/channel-records.js";
 import type { Accounts } from "./accounts.js";
 import type { AccountMessages, Messages } from "./messages.js";
 
@@ -188,4 +189,20 @@ export function messageStores(channels: Channels): AccountMessages[] {
   return channels.flatMap((channel) =>
     channel.messages?.byAccount ? [channel.messages.byAccount] : [],
   );
+}
+
+/**
+ * The channels a person's link reaches, by the `channel` the link names, in
+ * the list's order. People keys a link by service, so a link naming a service
+ * reaches every channel of it: the one carrying the service's name, and each
+ * later account. A link naming a later channel's own id reaches that channel
+ * alone. `serviceOf` is asked once per channel, when this is called.
+ */
+export function linkedChannels(
+  channels: Channels,
+  serviceOf: ServiceOfChannel,
+): (linked: string) => Channel[] {
+  const services = new Map(channels.map((channel) => [channel.name, serviceOf(channel.name)]));
+  return (linked) =>
+    channels.filter((channel) => channel.name === linked || services.get(channel.name) === linked);
 }

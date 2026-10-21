@@ -20,7 +20,14 @@ import {
 } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
 import { OutboxRepository } from "../../db/repositories/outbox.js";
-import { outboundSendReceipts } from "../../db/schema.js";
+import {
+  channels as channelRows,
+  outboundSendReceipts,
+  romeAgentMessages,
+  romeSessions,
+} from "../../db/schema.js";
+import { channelList } from "../../channels/channel-list.js";
+import { channelConversationId } from "../../db/session-kind.js";
 import { SEND_IDEMPOTENCY_RETENTION_MS } from "@rome/api-types/people";
 
 // Sending to a person, and the outbox a send lives in until it arrives.
@@ -744,5 +751,120 @@ describe("People send API — delivery bookkeeping", () => {
 
     expect(res.status).toBe(409);
     expect((await res.json()) as SendRefusal).toMatchObject({ send: "no-conversation" });
+  });
+});
+
+// A first account connected into an empty database with an opaque channel id.
+// People keys the link by the service, and the account's conversation lives
+// under the opaque id, so both the send and the timeline have to reach across.
+describe("People on an account whose channel id is opaque", () => {
+  const OPAQUE = "0b5c6d1e-9a8f-4c3b-8e2d-7f6a5b4c3d2e";
+  const ADA = "tg-ada";
+  let deps: TestDeps;
+  let app: Hono;
+  let personId: string;
+
+  beforeEach(async () => {
+    const testDb = createTestDb();
+    const base = await buildTestDeps(testDb.db);
+    testDb.db
+      .insert(channelRows)
+      .values({
+        id: OPAQUE,
+        service: "telegram",
+        platform: "telegram",
+        connectionId: "test:telegram",
+        createdAt: new Date(0),
+      })
+      .run();
+    deps = {
+      ...base,
+      channels: channelList({
+        db: base.db,
+        whatsAppAccounts: base.whatsAppAccounts,
+        linkedInAccounts: base.linkedInAccounts,
+        connections: {
+          registry: base.connections,
+          channelOf: (connection) =>
+            connection.service === "telegram" ? OPAQUE : connection.service,
+        },
+        laterChannels: [{ name: OPAQUE, service: "telegram" }],
+      }),
+    };
+    app = new Hono().route("/", peopleRoutes(deps));
+
+    personId = await deps.personMappingRepo.create({
+      displayName: "Ada",
+      bondLevel: "acquaintance",
+      approved: true,
+      channelMappings: [{ channel: OPAQUE, channelUserId: ADA }],
+    });
+
+    // What Ada said to that account, as Rome's transcript holds it.
+    const sessionId = channelConversationId(OPAQUE, ADA);
+    testDb.db
+      .insert(romeSessions)
+      .values({
+        id: sessionId,
+        name: sessionId,
+        type: "channel",
+        sourceChannel: OPAQUE,
+        sourceThreadId: ADA,
+        sourceThreadType: "private",
+        createdAt: new Date(0),
+        activityAt: new Date(0),
+      })
+      .run();
+    testDb.db
+      .insert(romeAgentMessages)
+      .values({
+        id: "m-ada",
+        sessionId,
+        role: "user",
+        content: JSON.stringify([{ type: "text", content: "hello from Ada" }]),
+        senderId: ADA,
+        createdAt: new Date(1_000_000),
+      })
+      .run();
+  });
+
+  const person = async (): Promise<PersonResource> =>
+    (await (await app.request(`/people/${personId}`)).json()) as PersonResource;
+
+  const timeline = async (): Promise<TimelinePage> =>
+    (await (await app.request(`/people/${personId}/messages`)).json()) as TimelinePage;
+
+  it("links the account under its service and reads it as sendable", async () => {
+    expect((await person()).accounts).toMatchObject([
+      { channel: "telegram", channelUserId: ADA, send: "yes" },
+    ]);
+  });
+
+  it("shows the account's conversation on the person's timeline", async () => {
+    const entries = (await timeline()).entries;
+    expect(entries.map((entry) => entry.body)).toEqual(["hello from Ada"]);
+    expect(entries[0]?.source).toBe(OPAQUE);
+  });
+
+  it("sends on the opaque account and sees the message land in its conversation", async () => {
+    const res = await app.request(`/people/${personId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "telegram", channelUserId: ADA, text: "hi Ada" }),
+    });
+
+    expect(res.status).toBe(202);
+    expect(deps.transports.get("telegram")?.sentMessages).toEqual([
+      { conversationId: ADA, message: { text: "hi Ada" } },
+    ]);
+    // Rome's line joins the conversation the account already holds, rather
+    // than one under the service's name.
+    const entries = (await timeline()).entries;
+    expect(entries.map((entry) => [entry.body, entry.source])).toEqual([
+      ["hi Ada", OPAQUE],
+      ["hello from Ada", OPAQUE],
+    ]);
+    const outboxRes = await app.request(`/people/${personId}/outbox`);
+    expect(((await outboxRes.json()) as OutboxPage).messages).toEqual([]);
   });
 });

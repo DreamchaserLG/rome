@@ -17,6 +17,7 @@ import type { Account, AccountId, Accounts } from "./accounts.js";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import {
   channelMessageDetail,
+  heldOn,
   queryLimit,
   querySince,
   type AccountMessages,
@@ -89,7 +90,7 @@ function directAddresses(accounts: readonly MessageAccount[]): string[] {
   return [
     ...new Set(
       accounts
-        .filter((account) => account.channel === WECHAT_USER_CHANNEL)
+        .filter((account) => heldOn(account).includes(WECHAT_USER_CHANNEL))
         .flatMap((account) => account.addresses),
     ),
   ];

@@ -12,7 +12,13 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { Message } from "@rome/api-types/message";
 import type { DrizzleDb } from "../db/index.js";
-import type { AccountMessages, MessageAccount, MessageDetail, MessageRead } from "./messages.js";
+import {
+  heldOn,
+  type AccountMessages,
+  type MessageAccount,
+  type MessageDetail,
+  type MessageRead,
+} from "./messages.js";
 
 /**
  * A store's rows as timeline entries: a SELECT producing exactly the columns
@@ -146,9 +152,11 @@ function accountKeys(
 ): MessageScopeKey[] {
   const scope = new Map<string, MessageScopeKey>();
   for (const account of accounts) {
-    if (channel !== undefined && account.channel !== channel) continue;
-    for (const address of account.addresses) {
-      scope.set(`${account.channel}\n${address}`, { channel: account.channel, key: address });
+    for (const held of heldOn(account)) {
+      if (channel !== undefined && held !== channel) continue;
+      for (const address of account.addresses) {
+        scope.set(`${held}\n${address}`, { channel: held, key: address });
+      }
     }
   }
   return [...scope.values()];

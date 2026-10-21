@@ -34,6 +34,18 @@ export interface MessageAccount {
   channel: string;
   /** Non-empty. Order carries no meaning. */
   addresses: readonly string[];
+  /**
+   * Every channel the account's messages are stored under, when that is more
+   * than `channel`: a link keyed by a service reaches each channel of it, and a
+   * store keys a message by the channel it arrived on. Absent, `channel` alone.
+   * A store scopes by each of these paired with each address.
+   */
+  channels?: readonly string[];
+}
+
+/** The channels a store reads `account` under. */
+export function heldOn(account: MessageAccount): readonly string[] {
+  return account.channels ?? [account.channel];
 }
 
 export interface MessageRead {

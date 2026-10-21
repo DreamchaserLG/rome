@@ -16,7 +16,7 @@ import {
   type OutboxMessage,
 } from "@rome/api-types/people";
 import { createLogger } from "../logger.js";
-import type { AccountMessages, MessageAccount } from "../channels/messages.js";
+import { heldOn, type AccountMessages, type MessageAccount } from "../channels/messages.js";
 import { channelConversationId } from "../db/repositories/webchat.js";
 import { conversationPlatformMessageId } from "../db/repositories/webchat.js";
 import type { OutboxAccount, OutboxRepository, OutboxRow } from "../db/repositories/outbox.js";
@@ -153,7 +153,7 @@ async function attempt(
   // provider's own copy still lands and clears the row; on an unmirrored one
   // the row stays, visibly, which is the outbox doing its job.
   try {
-    await record(deps, row, receipt.messageId);
+    await record(deps, row, target.channel, receipt.messageId);
   } catch (error) {
     log.warn("outbound message delivered but recording failed", {
       outboxId: row.id,
@@ -228,9 +228,16 @@ async function heldBy(
   );
 }
 
-async function record(deps: OutboxDeps, row: OutboxRow, messageId: string | null): Promise<void> {
+/** Written under the channel that sent, which is the row's own or another of
+ *  its service's, so the line joins the conversation Rome holds there. */
+async function record(
+  deps: OutboxDeps,
+  row: OutboxRow,
+  channel: string,
+  messageId: string | null,
+): Promise<void> {
   const conversation = await deps.webchatRepo.ensureChannelConversation({
-    channel: row.channel,
+    channel,
     threadId: row.conversationId,
   });
   await deps.webchatRepo.recordOutboundConversationMessage({
@@ -293,7 +300,7 @@ export async function readOutbox(
   const landed = awaiting.filter(
     (row) =>
       row.providerMessageId === null ||
-      refsFor(row, addressesOf(accounts, row)).some((ref) => arrived.has(ref)),
+      refsFor(row, accountOf(accounts, row)).some((ref) => arrived.has(ref)),
   );
   await Promise.all(landed.map((row) => deps.outboxRepo.remove(row.id)));
 
@@ -317,28 +324,34 @@ export async function readOutbox(
  * the other. Predicting only the address we sent to left the row waiting on a
  * ref that would never appear, which is a send accepted and then stuck.
  *
+ * The transcript form is generated over every channel the account is read on,
+ * since the send went out on one of them and the row does not say which.
+ *
  * All of them need the provider's id, so a channel offering `directMessaging`
  * has to return one from `send` — see the note there. A send accepted without
  * one cannot be tracked, and the row is cleared rather than left waiting on an
  * answer that will never come.
  */
-function refsFor(row: OutboxRow, addresses: readonly string[]): string[] {
+function refsFor(row: OutboxRow, account: MessageAccount): string[] {
   const messageId = row.providerMessageId;
   if (messageId === null) return [];
-  const sessionId = channelConversationId(row.channel, row.conversationId);
   return [
     `${row.conversationId}:${messageId}`,
-    ...new Set(addresses.map((address) => `${address}:${messageId}`)),
-    `agent:${conversationPlatformMessageId(sessionId, messageId)}`,
+    ...new Set(account.addresses.map((address) => `${address}:${messageId}`)),
+    ...heldOn(account).map((channel) => {
+      const sessionId = channelConversationId(channel, row.conversationId);
+      return `agent:${conversationPlatformMessageId(sessionId, messageId)}`;
+    }),
   ];
 }
 
-/** Every address the channel folds onto this row's account, the row's own
- *  included. Falls back to that one alone for a channel that folds nothing. */
-function addressesOf(accounts: readonly MessageAccount[], row: OutboxRow): readonly string[] {
+/** This row's account, with every address the channel folds onto it, the
+ *  row's own included. Falls back to that one alone on the row's channel for a
+ *  channel that folds nothing. */
+function accountOf(accounts: readonly MessageAccount[], row: OutboxRow): MessageAccount {
   const account = accounts.find(
     (candidate) =>
       candidate.channel === row.channel && candidate.addresses.includes(row.channelUserId),
   );
-  return account?.addresses ?? [row.channelUserId];
+  return account ?? { channel: row.channel, addresses: [row.channelUserId] };
 }

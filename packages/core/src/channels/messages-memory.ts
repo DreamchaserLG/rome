@@ -3,7 +3,7 @@
 // meets are messages.ts's.
 
 import { compareMessages, isAfterMessageCursor, type Message } from "@rome/api-types/message";
-import type { AccountMessages, MessageAccount, MessageRead } from "./messages.js";
+import { heldOn, type AccountMessages, type MessageAccount, type MessageRead } from "./messages.js";
 
 /** One message the store holds, at the address it arrived on. A group's
  *  messages are held at the group, since that is what addresses one, so no
@@ -33,7 +33,7 @@ export function memoryMessages(held: readonly HeldMessage[]): AccountMessages {
   const full = (accounts: readonly MessageAccount[]): Message[] => {
     const scope = new Set(
       accounts.flatMap((account) =>
-        account.addresses.map((address) => pair(account.channel, address)),
+        heldOn(account).flatMap((held) => account.addresses.map((address) => pair(held, address))),
       ),
     );
     return ranked((message) => scope.has(pair(message.channel, message.address)));

@@ -1567,6 +1567,7 @@ async function main() {
       personMappingRepo,
       outboxRepo,
       channels,
+      serviceOfChannel,
       accountNames,
       webchatRepo,
       webhookInvocationsRepo,

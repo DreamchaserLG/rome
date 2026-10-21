@@ -531,7 +531,8 @@ export async function buildTestDeps(
   }
 
   const sessionsRepo = new SessionsRepository(db);
-  const personMappingRepo = new PersonMappingRepository(db, recordedServiceOf(db));
+  const serviceOfChannel = recordedServiceOf(db);
+  const personMappingRepo = new PersonMappingRepository(db, serviceOfChannel);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -718,6 +719,7 @@ export async function buildTestDeps(
     linkedInStoreRepo,
     linkedInAccounts,
     channels,
+    serviceOfChannel,
     accountNames,
     sentinelLogRepo,
     approvalsRepo,
