@@ -1998,6 +1998,11 @@ export interface ActionRunContext {
   parentExecutionId?: string;
   parentActionName?: string;
   actionName?: string;
+  /** What a root run does when every action worker is busy: `"fail"` (the
+   * default) fails at once, `"queue"` waits for a slot. Queue only from a
+   * caller that no action worker waits on. Queued runs never take the slots
+   * kept free for fail-fast callers. */
+  whenWorkersBusy?: "fail" | "queue";
 }
 
 export interface CurrentActionContext {

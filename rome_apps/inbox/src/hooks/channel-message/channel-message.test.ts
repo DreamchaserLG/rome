@@ -468,7 +468,7 @@ describe("ChannelMessageHook", () => {
       expect(harness.run).toHaveBeenCalledWith(
         "message_handler",
         expect.objectContaining({ messageId: "message-1", answer: false }),
-        expect.anything(),
+        expect.objectContaining({ whenWorkersBusy: "queue" }),
       );
       expect(begin).not.toHaveBeenCalled();
     });
@@ -483,6 +483,7 @@ describe("ChannelMessageHook", () => {
       await harness.emit(TELEGRAM_ID, message({ addressing }));
 
       expect(harness.run.mock.calls[0]?.[1]).not.toHaveProperty("answer");
+      expect(harness.run.mock.calls[0]?.[2]).not.toHaveProperty("whenWorkersBusy");
       await rs.waitFor(() => expect(begin).toHaveBeenCalledTimes(1));
     });
 

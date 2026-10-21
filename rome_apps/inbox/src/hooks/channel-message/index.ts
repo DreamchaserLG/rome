@@ -274,6 +274,9 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
             threadName: message.thread?.name,
             threadType: message.thread?.kind === "dm" ? "private" : "group",
           },
+          // A message Rome only records waits for a free worker, so a burst of
+          // group chatter is neither lost nor takes the slots answers need.
+          ...(route.answer === false ? { whenWorkersBusy: "queue" as const } : {}),
         },
       );
       void activity
