@@ -380,7 +380,7 @@ describe("FeishuAdapter", () => {
         appId: "cli_test",
         appSecret: "secret",
         connectionId: FEISHU_CONNECTION_ID,
-        conversationSettings: makeConversationSettings({ enabled: false }).control,
+        chatSettings: makeChatSettings({ enabled: false }).control,
       },
       () => channel as unknown as LarkChannel,
     );

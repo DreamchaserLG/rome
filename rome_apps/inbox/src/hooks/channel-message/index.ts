@@ -11,6 +11,7 @@ import type {
   InboundEvent,
   ChannelActivitySession,
   MessageAddressing,
+  RecordChatMessageHandler,
 } from "@rome-os/app-runtime";
 
 const log = createAppLogger("channel-message-hook");
@@ -58,6 +59,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       slowTurnMs?: number;
       log?: Pick<typeof log, "warn">;
       accountAgentOf?: ChannelMessageHookDeps["accountAgentOf"];
+      recordChatMessage?: RecordChatMessageHandler;
     } = {},
   ) {}
 
@@ -190,7 +192,22 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       // Recorded so the agent sees it, without a turn or a typing indicator.
       // Awaited, so the channel holds the conversation until it is stored: the
       // next message waits behind it, and a burst stays in the channel's
-      // bounded buffer instead of taking a worker per message.
+      // bounded buffer. The host's write takes no action worker, so a `/stop`
+      // behind it waits only for the store.
+      const record = this.options.recordChatMessage;
+      if (record) {
+        try {
+          await record({ ref, service, message: { ...message, attachments }, routedAgentName });
+        } catch (err) {
+          log.error("failed to record a declined message", {
+            service,
+            messageId: message.messageId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+      // A host that predates `recordChatMessage` stores it through `message_handler`.
       await this.runTurn(message, service, connectionId, attachments, Promise.resolve(null), {
         routedAgentName,
         accountAgentName: accountAgent,
@@ -331,6 +348,9 @@ export function createHook(deps: ChannelMessageHookDeps): ChannelMessageHookInte
     deps.chatSettings ?? deps.conversationSettings,
     deps.chatStop,
     deps.channels,
-    { accountAgentOf: deps.accountAgentOf ?? deps.linkedAgentOf },
+    {
+      accountAgentOf: deps.accountAgentOf ?? deps.linkedAgentOf,
+      recordChatMessage: deps.recordChatMessage,
+    },
   );
 }

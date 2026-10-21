@@ -40,7 +40,7 @@ import {
   shutdown as shutdownTelemetry,
   withInboundSpans,
 } from "./telemetry.js";
-import type { ChatStopHandler } from "@rome-os/app-runtime";
+import type { ChannelMessageHookDeps, ChatStopHandler } from "@rome-os/app-runtime";
 
 const log = createLogger("startup");
 
@@ -81,6 +81,7 @@ import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList, joinLaterChannel } from "./channels/channel-list.js";
 import { claimChannels } from "./channels/claim-channels.js";
 import { domainOf, domainOfGrants } from "./channels/platform.js";
+import { createChatMessageRecorder } from "./channels/record-chat-message.js";
 import { AccountListening, accountAgentResolver } from "./channels/account-agents.js";
 import { recordedChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
@@ -1257,21 +1258,29 @@ async function main() {
   // The channel-message hook hears every channel through these, so each
   // inbound message it handles is traced and logged once.
   const hookChannels = withInboundSpans(channels, "channel-message");
+  const hookDeps: ChannelMessageHookDeps = {
+    actionEngine,
+    chatSettings,
+    conversationSettings: chatSettings,
+    chatStop,
+    recordChatMessage: createChatMessageRecorder({
+      findPerson: (channel, channelUserId) =>
+        personMappingRepo.findByChannelUser(channel, channelUserId),
+      evaluatePolicy: (context) => policyEngine.evaluate(context),
+      chats: webchatRepo,
+      hasAgent: (name) => agentLoader.has(name),
+    }),
+    channels: hookChannels,
+    accountAgentOf,
+    linkedAgentOf: accountAgentOf,
+  };
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
   const channelMessageHookArtifact = appCatalog
     .listArtifacts("hook")
     .find((artifact) => artifact.publicName === "channel-message");
   if (messageHandlerRegistered) {
     try {
-      const loadedHook = await createChannelMessageHookFromCatalog(appCatalog, {
-        actionEngine,
-        chatSettings,
-        conversationSettings: chatSettings,
-        chatStop,
-        channels: hookChannels,
-        accountAgentOf,
-        linkedAgentOf: accountAgentOf,
-      });
+      const loadedHook = await createChannelMessageHookFromCatalog(appCatalog, hookDeps);
       if (loadedHook) {
         messageHook = loadedHook;
       } else {
@@ -1305,15 +1314,7 @@ async function main() {
   const reloadChannelMessageHook = messageHandlerRegistered
     ? createChannelMessageHookReloader({
         catalog: appCatalog,
-        deps: {
-          actionEngine,
-          chatSettings,
-          conversationSettings: chatSettings,
-          chatStop,
-          channels: hookChannels,
-          accountAgentOf,
-          linkedAgentOf: accountAgentOf,
-        },
+        deps: hookDeps,
         getCurrent: () => messageHook,
         setCurrent: (hook) => {
           messageHook = hook;

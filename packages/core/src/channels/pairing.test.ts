@@ -192,7 +192,7 @@ describe("channel pairing approvals", () => {
       channel,
       direction: "inbound",
       senderId: channel === "feishu" ? "ou_123" : "123",
-      conversationId: "group" as ConversationId,
+      conversationId: "group" as ChatId,
       messageId: "chatter",
       text: "RP-1234ABCD",
       attachments: [],

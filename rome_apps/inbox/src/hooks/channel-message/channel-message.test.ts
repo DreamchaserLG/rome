@@ -9,6 +9,7 @@ import type {
   InboundEvent,
   ChannelActivity,
   ChannelInboundMedia,
+  RecordChatMessageHandler,
 } from "@rome-os/app-runtime";
 import { ChannelMessageHook, createHook, MissingChannelsError, replyRuleAnswers } from "./index.js";
 
@@ -453,7 +454,143 @@ describe("ChannelMessageHook", () => {
       return begin;
     };
 
-    it("records an ambient message under mentions only, without a turn or typing", async () => {
+    describe("on a host that records declined messages", () => {
+      const recordChatMessage = rs.fn<RecordChatMessageHandler>(async () => ({
+        status: "recorded",
+      }));
+
+      beforeEach(async () => {
+        recordChatMessage.mockReset();
+        recordChatMessage.mockResolvedValue({ status: "recorded" });
+        harness.hook.unregister();
+        harness = createHarness({ recordChatMessage });
+        await harness.hook.register();
+      });
+
+      it("records an ambient message through the host, without an action or typing", async () => {
+        const begin = activityOn();
+        const materialize = rs.fn(async () => [
+          { type: "image" as const, url: "file-id", localPath: "/tmp/photo.jpg" },
+        ]);
+        harness.features.set(TELEGRAM_ID, {
+          ...harness.features.get(TELEGRAM_ID),
+          inboundMedia: { materialize },
+        });
+        harness.get.mockImplementation(async ({ connectionId, conversationId }) => {
+          const base = snapshot(connectionId, conversationId, { agentName: "sales:agent" });
+          return {
+            ...base,
+            supportedFields: ["enabled", "activation.mode"],
+            effective: {
+              ...base.effective,
+              activation: { ...base.effective.activation, mode: "mention" as const },
+            },
+          };
+        });
+
+        await harness.emit(
+          TELEGRAM_ID,
+          message({ addressing: "ambient", attachments: [{ type: "image", url: "file-id" }] }),
+        );
+
+        expect(recordChatMessage).toHaveBeenCalledTimes(1);
+        expect(recordChatMessage).toHaveBeenCalledWith({
+          ref: { connectionId: TELEGRAM_ID, conversationId: "chat-1" },
+          service: "telegram",
+          message: expect.objectContaining({
+            messageId: "message-1",
+            senderId: "user-1",
+            attachments: [{ type: "image", url: "file-id", localPath: "/tmp/photo.jpg" }],
+          }),
+          routedAgentName: "sales:agent",
+        });
+        expect(harness.run).not.toHaveBeenCalled();
+        expect(begin).not.toHaveBeenCalled();
+      });
+
+      it("still answers an addressed message through message_handler", async () => {
+        ruled("mention");
+
+        await harness.emit(TELEGRAM_ID, message({ addressing: "mention" }));
+
+        expect(recordChatMessage).not.toHaveBeenCalled();
+        expect(harness.run).toHaveBeenCalledWith(
+          "message_handler",
+          expect.not.objectContaining({ answer: false }),
+          expect.anything(),
+        );
+      });
+
+      it("settles the message when the host fails to record it", async () => {
+        ruled("mention");
+        recordChatMessage.mockRejectedValueOnce(new Error("disk full"));
+
+        await expect(
+          harness.emit(TELEGRAM_ID, message({ messageId: "lost", addressing: "ambient" })),
+        ).resolves.toBeUndefined();
+        await harness.emit(TELEGRAM_ID, message({ messageId: "next", addressing: "mention" }));
+
+        expect(harness.run).toHaveBeenCalledTimes(1);
+        expect(harness.run.mock.calls[0]?.[1]).toMatchObject({ messageId: "next" });
+      });
+
+      it("holds the conversation until the host stores a declined message", async () => {
+        ruled("mention");
+        let stored!: () => void;
+        recordChatMessage.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              stored = () => resolve({ status: "recorded" });
+            }),
+        );
+
+        const chatter = harness.emit(
+          TELEGRAM_ID,
+          message({ messageId: "chatter", addressing: "ambient" }),
+        );
+        const asked = harness.emit(
+          TELEGRAM_ID,
+          message({ messageId: "asked", addressing: "mention" }),
+        );
+        await rs.waitFor(() => expect(recordChatMessage).toHaveBeenCalledTimes(1));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(harness.run).not.toHaveBeenCalled();
+        stored();
+        await Promise.all([chatter, asked]);
+        expect(harness.run).toHaveBeenCalledTimes(1);
+        expect(harness.run.mock.calls[0]?.[1]).toMatchObject({ messageId: "asked" });
+      });
+
+      it("hears a /stop behind chatter once the chatter is stored", async () => {
+        ruled("mention");
+        let stored!: () => void;
+        recordChatMessage.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              stored = () => resolve({ status: "recorded" });
+            }),
+        );
+
+        const chatter = harness.emit(
+          TELEGRAM_ID,
+          message({ messageId: "chatter", addressing: "ambient" }),
+        );
+        const stop = harness.emit(
+          TELEGRAM_ID,
+          message({ messageId: "stop", text: "/stop", addressing: "mention" }),
+        );
+        await rs.waitFor(() => expect(recordChatMessage).toHaveBeenCalledTimes(1));
+        expect(harness.stop).not.toHaveBeenCalled();
+
+        stored();
+        await Promise.all([chatter, stop]);
+        expect(harness.stop).toHaveBeenCalledTimes(1);
+        expect(harness.run).not.toHaveBeenCalled();
+      });
+    });
+
+    it("records an ambient message through message_handler on a host without the recorder", async () => {
       ruled("mention");
       const begin = activityOn();
 
@@ -633,10 +770,10 @@ describe("ChannelMessageHook", () => {
 describe("replyRuleAnswers", () => {
   const settings = (supportedFields: string[], mode: "mention" | "all") =>
     ({
-      ...snapshot(TELEGRAM_ID, "chat-1" as ConversationId),
+      ...snapshot(TELEGRAM_ID, "chat-1" as ChatId),
       supportedFields,
       effective: {
-        ...snapshot(TELEGRAM_ID, "chat-1" as ConversationId).effective,
+        ...snapshot(TELEGRAM_ID, "chat-1" as ChatId).effective,
         activation: { mode, botMessages: "ignore", whenOthersMentioned: "ignore" },
       },
     }) as Parameters<typeof replyRuleAnswers>[0];
