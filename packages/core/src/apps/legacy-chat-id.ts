@@ -31,6 +31,15 @@ function chatIdIn<T extends { chatId?: ChatId }>(value: T): T {
   return { ...rest, chatId: value.chatId ?? conversationId } as T;
 }
 
+/** A message an app hands back, with its ids under the new names alone. */
+function messageIn(message: ChannelMessage): ChannelMessage {
+  const { parentConversationId, ...rest } = chatIdIn(message) as ChannelMessage & {
+    parentConversationId?: ChatId;
+  };
+  const parentChatId = rest.parentChatId ?? parentConversationId;
+  return parentChatId ? { ...rest, parentChatId } : rest;
+}
+
 function refOut(ref: ChatRef): ChatRef {
   return { ...ref, conversationId: ref.chatId } as ChatRef;
 }
@@ -144,7 +153,12 @@ export function legacyChatIdChannels<C extends Channel>(channels: readonly C[]):
             handler({ ...event, message: messageOut(event.message), ref: refOut(event.ref) }),
           ),
         get media() {
-          return inbound.media;
+          const media = inbound.media;
+          return (
+            media && {
+              materialize: (message: ChannelMessage) => media.materialize(messageIn(message)),
+            }
+          );
         },
       },
     } as C;

@@ -131,4 +131,25 @@ describe("chat ids for apps written for SDK 0.7", () => {
       expect.objectContaining({ ref: { connectionId: "conn-1", chatId: CHAT } }),
     );
   });
+
+  it("materializes media for a message a hook names only by conversationId", async () => {
+    const materialize = rs.fn(async (_message: ChannelMessage) => []);
+    const channel: Channel = {
+      name: "telegram",
+      send: null,
+      inbound: { subscribe: () => () => {}, media: { materialize } },
+    };
+    const [wrapped] = legacyChatIdChannels([channel]);
+    const { chatId: _chatId, parentChatId: _parentChatId, ...rest } = message;
+
+    await wrapped?.inbound?.media?.materialize({
+      ...rest,
+      conversationId: CHAT,
+      parentConversationId: "parent-1",
+    } as unknown as ChannelMessage);
+
+    const [forwarded] = materialize.mock.calls[0] ?? [];
+    expect(forwarded).toMatchObject({ chatId: CHAT, parentChatId: "parent-1" });
+    expect(legacy(forwarded).conversationId).toBeUndefined();
+  });
 });
