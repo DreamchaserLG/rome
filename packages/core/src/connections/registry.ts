@@ -72,6 +72,9 @@ export interface ConnectionRegistryDeps {
   /** Runs inside the transaction that deletes a Connection, before any
    *  caller participant. */
   onRemove?: (tx: DrizzleTx, id: ConnectionId) => void;
+  /** Runs once the transaction that deleted a Connection has committed, for
+   *  what cannot be rolled back. */
+  onRemoved?: (id: ConnectionId) => void;
 }
 
 const DEFAULT_BACKOFF = { baseMs: 1_000, maxMs: 60_000 };
@@ -176,6 +179,7 @@ export class ConnectionRegistry {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly onMint?: ConnectionRegistryDeps["onMint"];
   private readonly onRemove?: (tx: DrizzleTx, id: ConnectionId) => void;
+  private readonly onRemoved?: (id: ConnectionId) => void;
 
   private readonly descriptors = new Map<string, RegisteredDescriptor>();
   private readonly connections = new Map<ConnectionId, ConnectionImpl>();
@@ -206,6 +210,7 @@ export class ConnectionRegistry {
     this.sleep = deps.sleep ?? defaultSleep;
     this.onMint = deps.onMint;
     this.onRemove = deps.onRemove;
+    this.onRemoved = deps.onRemoved;
   }
 
   /** Declare a service integration. Boot-time only. Validates that every
@@ -383,6 +388,7 @@ export class ConnectionRegistry {
       });
       current.teardownAll();
       this.connections.delete(id);
+      this.onRemoved?.(id);
     });
   }
 

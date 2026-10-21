@@ -84,6 +84,9 @@ function onChannel(column: SQLiteColumn, id: string) {
   return startsWith(column, `channel:${id}:`);
 }
 
+/** The action a routine sends a message with, under either name it is stored by. */
+const SEND_ACTIONS = ["system:send_message", "send_message"];
+
 /** The shape of an id `claim` mints when a service's name is taken. */
 const MINTED_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -171,7 +174,7 @@ function deleteRecorded(exec: Exec, id: string): string[] {
     .set({ enabled: false })
     .where(
       and(
-        eq(routines.actionName, "system:send_message"),
+        inArray(routines.actionName, SEND_ACTIONS),
         sql`json_extract(${routines.args}, '$.channel') = ${id}`,
       ),
     )
@@ -430,7 +433,22 @@ export class ChannelRecordsRepository {
         .where(startsWith(romeAgentTraceBlocks.sessionId, "channel:"))
         .all(),
     ].flat();
-    for (const { id } of [...named, ...transcripts]) {
+    // A sentinel triage run spells its channel in its conversation's name and
+    // its agent session's key, `sentinel:<channel>:<thread>`.
+    const sentinelOf = (column: SQLiteColumn) => sql<string>`substr(${column}, 10, 36)`;
+    const sentinels = [
+      this.db
+        .selectDistinct({ id: sentinelOf(romeSessions.name) })
+        .from(romeSessions)
+        .where(and(eq(romeSessions.type, "action"), startsWith(romeSessions.name, "sentinel:")))
+        .all(),
+      this.db
+        .selectDistinct({ id: sentinelOf(sessions.channelThreadKey) })
+        .from(sessions)
+        .where(startsWith(sessions.channelThreadKey, "sentinel:"))
+        .all(),
+    ].flat();
+    for (const { id } of [...named, ...transcripts, ...sentinels]) {
       if (id && MINTED_ID.test(id)) recorded.add(id);
     }
     const orphaned = [...recorded].filter((id) => !held.has(id));

@@ -205,6 +205,36 @@ describe("ChannelRecordsRepository", () => {
     expect(db.select().from(romeAgentTraceBlocks).all()).toEqual([]);
   });
 
+  it("sweeps a late sentinel run under a deleted minted id that only its name spells", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", service: "feishu" }, NOW);
+    const minted = records.claim(db, { id: "c2", service: "feishu" }, NOW).id;
+    records.vacate(db, "c2");
+    db.insert(romeSessions)
+      .values({
+        id: "action:exec-late:sentinel",
+        name: `sentinel:${minted}:t1`,
+        type: "action",
+        activityAt: NOW,
+        createdAt: NOW,
+      })
+      .run();
+    db.insert(romeAgentMessages)
+      .values({
+        id: "late",
+        sessionId: "action:exec-late:sentinel",
+        role: "user",
+        content: "[]",
+        createdAt: NOW,
+      })
+      .run();
+
+    expect(new ChannelRecordsRepository(db).sweep()).toContain(minted);
+    expect(db.select().from(romeSessions).all()).toEqual([]);
+    expect(db.select().from(romeAgentMessages).all()).toEqual([]);
+  });
+
   it("gives a deleted channel's id to a re-added bot after a restart", () => {
     const records = repository();
     const db = testDb!.db;
@@ -276,7 +306,19 @@ describe("ChannelRecordsRepository", () => {
         .run();
     }
 
-    expect(records.vacate(db, "c1")).toEqual(["r-telegram"]);
+    // A routine may store the action by its bare name.
+    db.insert(routines)
+      .values({
+        id: "r-bare",
+        name: "notify",
+        trigger: { type: "schedule" },
+        actionName: "send_message",
+        args: { channel: "telegram", threadId: "t2", text: "hi" },
+        createdAt: NOW,
+      })
+      .run();
+
+    expect(records.vacate(db, "c1").sort()).toEqual(["r-bare", "r-telegram"]);
 
     expect(
       Object.fromEntries(
@@ -286,7 +328,7 @@ describe("ChannelRecordsRepository", () => {
           .all()
           .map((row) => [row.id, row.enabled]),
       ),
-    ).toEqual({ "r-telegram": false, "r-telegram_user": true });
+    ).toEqual({ "r-bare": false, "r-telegram": false, "r-telegram_user": true });
   });
 
   it("rejects the approvals still waiting to act on a deleted account", () => {

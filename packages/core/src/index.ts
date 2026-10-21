@@ -367,6 +367,8 @@ async function main() {
   // released in the same transaction as the Connection.
   const talks = (service: string) =>
     connectionRegistry.getDescriptor(service)?.capabilities.talker !== undefined;
+  // The routines each Connection's removal turned off, until it commits.
+  const routinesOff = new Map<string, string[]>();
   const connectionRegistry: ConnectionRegistry = new ConnectionRegistry({
     ledger: new DrizzleGrantLedger(db),
     onMint: (tx, record, profile) => {
@@ -374,9 +376,13 @@ async function main() {
       channelRecords.claim(tx, { ...record, domain: domainOf(profile) }, record.createdAt);
     },
     onRemove: (tx, id) => {
-      // A routine that sent on the account is off in the store, and its live
-      // trigger stops too. Removal runs after the engine is built.
-      for (const routineId of channelRecords.vacate(tx, id)) {
+      routinesOff.set(id, channelRecords.vacate(tx, id));
+    },
+    // A routine that sent on the account is off in the store, so its live
+    // trigger stops once that is committed. Removal runs after the engine is
+    // built.
+    onRemoved: (id) => {
+      for (const routineId of routinesOff.get(id) ?? []) {
         routineEngine.deactivate(routineId).catch((error: unknown) => {
           log.warn("failed to stop a disconnected account's routine", {
             routineId,
@@ -384,6 +390,7 @@ async function main() {
           });
         });
       }
+      routinesOff.delete(id);
     },
   });
   const channelOf = recordedChannelOf(channelRecords, talks);

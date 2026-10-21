@@ -117,6 +117,33 @@ describe("ConnectionRegistry Service uniqueness", () => {
     }
   });
 
+  it("runs the removed hook only once the delete commits", async () => {
+    const { db, close } = createTestDb();
+    try {
+      const removed: string[] = [];
+      const registry = new ConnectionRegistry({
+        ledger: new DrizzleGrantLedger(db),
+        onRemoved: (id) => removed.push(id),
+      });
+      registry.register(makePasteTalk().descriptor);
+      const connection = await registry.connect("fake-telegram");
+
+      await expect(
+        registry.remove(connection.id, {
+          inTx: () => {
+            throw new Error("injected participant failure");
+          },
+        }),
+      ).rejects.toThrow("injected participant failure");
+      expect(removed).toEqual([]);
+
+      await registry.remove(connection.id);
+      expect(removed).toEqual([connection.id]);
+    } finally {
+      close();
+    }
+  });
+
   it("rolls back the connection row when initial grant creation fails", async () => {
     const { db, close } = createTestDb();
     class FailingGrantInitLedger extends DrizzleGrantLedger {
