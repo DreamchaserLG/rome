@@ -1,9 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
-import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { platformOf } from "../../channels/platform.js";
-import { channels } from "../schema.js";
+import {
+  channels,
+  outboundMessages,
+  romeAgentMessages,
+  romeAgentTraceBlocks,
+  romeSessions,
+  sentinelLog,
+  sessions,
+  sessionTurnCheckpoints,
+  sharedChats,
+  webchatTurnFeedback,
+  webchatWorkspaceLayouts,
+} from "../schema.js";
 import { inTransaction, type DrizzleDb, type DrizzleTx } from "../index.js";
 
 /**
@@ -47,6 +59,50 @@ export class ChannelNotLinkable extends Error {
 }
 
 type Exec = DrizzleDb | DrizzleTx;
+
+/**
+ * Delete channel `id` with what was recorded through it: its conversations
+ * with their messages and the agent sessions that served them, its outbox and
+ * its triage log. A conversation under one of them stays, with no parent.
+ */
+function deleteChannel(exec: Exec, id: string): void {
+  const conversations = exec
+    .select({ id: romeSessions.id })
+    .from(romeSessions)
+    .where(eq(romeSessions.sourceChannel, id));
+  const agentSessions = exec
+    .select({ id: sessions.id })
+    .from(sessions)
+    .where(inArray(sessions.conversationId, conversations));
+  exec
+    .delete(sessionTurnCheckpoints)
+    .where(inArray(sessionTurnCheckpoints.sessionId, agentSessions))
+    .run();
+  exec.delete(sessions).where(inArray(sessions.id, agentSessions)).run();
+  exec
+    .delete(romeAgentTraceBlocks)
+    .where(inArray(romeAgentTraceBlocks.sessionId, conversations))
+    .run();
+  exec.delete(romeAgentMessages).where(inArray(romeAgentMessages.sessionId, conversations)).run();
+  exec
+    .delete(webchatTurnFeedback)
+    .where(inArray(webchatTurnFeedback.sessionId, conversations))
+    .run();
+  exec
+    .delete(webchatWorkspaceLayouts)
+    .where(inArray(webchatWorkspaceLayouts.sessionId, conversations))
+    .run();
+  exec.delete(sharedChats).where(inArray(sharedChats.sessionId, conversations)).run();
+  exec
+    .update(romeSessions)
+    .set({ parentSessionId: null })
+    .where(inArray(romeSessions.parentSessionId, conversations))
+    .run();
+  exec.delete(romeSessions).where(eq(romeSessions.sourceChannel, id)).run();
+  exec.delete(outboundMessages).where(eq(outboundMessages.channel, id)).run();
+  exec.delete(sentinelLog).where(eq(sentinelLog.channel, id)).run();
+  exec.delete(channels).where(eq(channels.id, id)).run();
+}
 
 /** The service a channel belongs to. A service's first channel carries the
  *  service's name, so a name with no record answers for itself. */
@@ -179,14 +235,22 @@ export class ChannelRecordsRepository {
     return toRecord(row);
   }
 
-  /** Release the channel `connectionId` backs. The row and its id stay, and
-   *  its link goes: an agent stays linked only where it can still answer. */
+  /** Release the channel `connectionId` backs. A linkable service's channel
+   *  is deleted with what was recorded through it. Its id is opaque, or a name
+   *  only the boot pass gives, so no later account takes it. Another
+   *  service's row and its id stay, and its link goes. */
   vacate(exec: Exec, connectionId: string): void {
     this.ids.clear();
+    const row = exec.select().from(channels).where(eq(channels.connectionId, connectionId)).get();
+    if (!row) return;
+    if (LINKABLE_SERVICES.has(row.service)) {
+      deleteChannel(exec, row.id);
+      return;
+    }
     exec
       .update(channels)
       .set({ connectionId: null, agent: null })
-      .where(eq(channels.connectionId, connectionId))
+      .where(eq(channels.id, row.id))
       .run();
   }
 

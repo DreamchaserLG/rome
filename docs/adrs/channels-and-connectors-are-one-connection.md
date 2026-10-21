@@ -148,3 +148,14 @@ A linkable service's account that connects through setup gets an opaque id, even
 ### Alternatives
 
 - **Name a service's first channel after the service, as before.** Rejected because the name then depends on whether an earlier account's row is still stored, which ties every later account to that row.
+
+## Amendment (2026-10-21): a disconnected account is deleted
+
+When a linkable service's Connection is removed, its channel row is deleted with what was recorded through it: the conversations on the channel and their messages, the agent sessions that served them, its outbox, and its sentinel triage log. A conversation under a deleted one stays, with no parent. A released channel of a linkable service is not kept, so the 2026-10-20 amendment's "a released channel and its history stay stored, reached by nothing" is withdrawn. Nothing keeps the deleted id, and none is needed: an account that connects gets an opaque id, so no later account takes it. Rows a turn still running at the disconnect writes afterwards stay under the deleted id, reached by nothing. Rows left by accounts disconnected before this stay as they are.
+
+Services that take no agent keep their row when their Connection goes, and their next Connection takes it back.
+
+### Alternatives
+
+- **Keep the released channel as a retired record.** Rejected by the guardian: an account that is disconnected is removed, and its chats go with it.
+- **Also clean up rows written after the delete, and the rows earlier disconnects left.** Rejected because no account can reach them, and doing so takes a migration, a boot sweep and key matching that cost more than the stored rows.
