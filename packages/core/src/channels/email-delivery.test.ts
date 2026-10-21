@@ -3,12 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type {
-  ChannelsService,
-  ConversationId,
-  ConversationRepository,
-  MessageReceipt,
-} from "@rome-os/app-runtime";
+import type { ChannelsService, ChatId, ChatRepository, MessageReceipt } from "@rome-os/app-runtime";
 import { executeSendMessage } from "../../../../rome_apps/system/src/actions/send-message/index.js";
 import type { SendMessageEmailInput } from "../../../../rome_apps/system/src/actions/send-message/types.js";
 import { DEFAULT_RPC_TIMEOUT_MS, IpcRpcTimeoutError } from "../actions/ipc.js";
@@ -100,17 +95,17 @@ async function harness(overrides: Partial<MailProvider> = {}) {
     send: rs.fn(send),
     query: async () => [],
   };
-  const ensureChannelConversation = rs.fn(async () => ({ id: "session", agentName: null }));
+  const ensureChannelChat = rs.fn(async () => ({ id: "session", agentName: null }));
   const recordOutboundMessage = rs.fn(
-    async (_input: Parameters<ConversationRepository["recordOutboundMessage"]>[0]) => undefined,
+    async (_input: Parameters<ChatRepository["recordOutboundMessage"]>[0]) => undefined,
   );
   const deps = {
-    conversations: {
-      ensureChannelConversation,
+    chats: {
+      ensureChannelChat,
       recordOutboundMessage,
-    } as unknown as ConversationRepository,
+    } as unknown as ChatRepository,
   };
-  return { provider, adapter, channels, deps, ensureChannelConversation, recordOutboundMessage };
+  return { provider, adapter, channels, deps, ensureChannelChat, recordOutboundMessage };
 }
 
 describe("email delivery through send_message", () => {
@@ -468,7 +463,7 @@ describe("email delivery through send_message", () => {
         ),
       ).rejects.toThrow("Cannot resolve email thread");
       expect(h.provider.send).not.toHaveBeenCalled();
-      expect(h.ensureChannelConversation).not.toHaveBeenCalled();
+      expect(h.ensureChannelChat).not.toHaveBeenCalled();
       expect(h.recordOutboundMessage).not.toHaveBeenCalled();
     }
   });
@@ -490,7 +485,7 @@ describe("email delivery through send_message", () => {
       ).rejects.toThrow("Email attachments are not supported");
       expect(h.provider.send).not.toHaveBeenCalled();
       expect(h.provider.listMessages).not.toHaveBeenCalled();
-      expect(h.ensureChannelConversation).not.toHaveBeenCalled();
+      expect(h.ensureChannelChat).not.toHaveBeenCalled();
       expect(h.recordOutboundMessage).not.toHaveBeenCalled();
     }
   });
@@ -573,9 +568,9 @@ describe("email delivery through send_message", () => {
       ),
     ).rejects.toBe(sendError);
     expect(failed.provider.send).toHaveBeenCalledTimes(1);
-    expect(failed.ensureChannelConversation).not.toHaveBeenCalled();
+    expect(failed.ensureChannelChat).not.toHaveBeenCalled();
     expect(failed.recordOutboundMessage).not.toHaveBeenCalled();
-    await expect(failed.adapter.send(THREAD as ConversationId, { text: "reply" })).rejects.toThrow(
+    await expect(failed.adapter.send(THREAD as ChatId, { text: "reply" })).rejects.toThrow(
       "Cannot resolve email thread",
     );
     expect(failed.provider.send).toHaveBeenCalledTimes(1);
@@ -596,7 +591,7 @@ describe("email delivery through send_message", () => {
         executeSendMessage(h.channels, { channel: "email", to: "guardian", text: "hello" }, h.deps),
       ).rejects.toThrow("Check email history before retrying");
       expect(h.channels.send).toHaveBeenCalledTimes(1);
-      expect(h.ensureChannelConversation).not.toHaveBeenCalled();
+      expect(h.ensureChannelChat).not.toHaveBeenCalled();
       expect(h.recordOutboundMessage).not.toHaveBeenCalled();
     }
   });
@@ -634,7 +629,7 @@ describe("email thread lookup under the channel-send RPC deadline", () => {
       if (method === "channels.list") return [{ name: "email", sendable: true }];
       if (method !== "channels.send") throw new Error(`unexpected RPC ${method}`);
       const { conversationId, message } = params as {
-        conversationId: ConversationId;
+        conversationId: ChatId;
         message: Parameters<ChannelsService["send"]>[2];
       };
       return h.adapter.send(conversationId, message);

@@ -16,7 +16,7 @@ import {
 } from "../../lib/rome-cloud-oauth.js";
 import { credentialFromBundle, grantProfileFromBundle } from "../providers-import.js";
 import type { ConnectionRegistry } from "../registry.js";
-import type { ConversationSettingsService } from "../../conversation-settings/service.js";
+import type { ChatSettingsService } from "../../conversation-settings/service.js";
 import type { ChatStopHandler } from "@rome-os/app-runtime";
 import { makeAgentsDescriptor } from "./agents.js";
 import { makeDiscordDescriptor } from "./discord.js";
@@ -26,6 +26,7 @@ import { createLinkedInDescriptor } from "./linkedin.js";
 import { makeTelegramDescriptor } from "./telegram.js";
 import { makeTelegramUserDescriptor } from "./telegram-user.js";
 import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
+import { makeSlackBotDescriptor } from "./slack-bot.js";
 import { createWechatDescriptor } from "./wechat.js";
 import { createWechatUserDescriptor } from "./wechat-user.js";
 import { makeWebchatDescriptor } from "./webchat.js";
@@ -43,6 +44,7 @@ export { makeWebchatDescriptor } from "./webchat.js";
 export { createWhatsAppDescriptor } from "./whatsapp.js";
 export { createLinkedInDescriptor } from "./linkedin.js";
 export { makeOAuthProviderDescriptor, OAUTH_PROVIDER_GRANTS } from "./oauth-providers.js";
+export { makeSlackBotDescriptor, SLACK_BOT_SERVICE } from "./slack-bot.js";
 
 /**
  * The runtime dependencies the descriptor factories need, threaded from index.ts
@@ -51,7 +53,7 @@ export { makeOAuthProviderDescriptor, OAUTH_PROVIDER_GRANTS } from "./oauth-prov
  */
 export interface BuiltinConnectionDeps {
   settingsRepo: SettingsRepository;
-  conversationSettings: ConversationSettingsService;
+  chatSettings: ChatSettingsService;
   chatStop: ChatStopHandler;
   personMappingRepo: PersonMappingRepository;
   webchatRepo: WebChatRepository;
@@ -98,7 +100,7 @@ export function registerBuiltinConnections(
   registry.register(makeTelegramDescriptor());
   registry.register(
     makeDiscordDescriptor({
-      conversationSettings: deps.conversationSettings,
+      chatSettings: deps.chatSettings,
       chatStop: deps.chatStop,
       personMappingRepo: deps.personMappingRepo,
       listAgents: deps.listAgents,
@@ -107,6 +109,7 @@ export function registerBuiltinConnections(
     }),
   );
   registry.register(makeTelegramUserDescriptor());
+  registry.register(makeSlackBotDescriptor());
   registry.register(createWechatDescriptor());
   // The personal WeChat connection is opt-in: boot passes its runtime only when
   // config `wechatUserEnabled` is on.
@@ -118,7 +121,7 @@ export function registerBuiltinConnections(
   }
   registry.register(
     createFeishuDescriptor({
-      conversationSettings: deps.conversationSettings,
+      chatSettings: deps.chatSettings,
       personMappingRepo: deps.personMappingRepo,
       listAgents: deps.listAgents,
       accountAgentOf: deps.accountAgentOf,

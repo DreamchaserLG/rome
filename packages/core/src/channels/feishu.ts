@@ -15,10 +15,10 @@ import { createLogger } from "../logger.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type {
   ChannelMessage,
-  ConversationDescriptor,
-  ConversationId,
-  ConversationSettingsControl,
-  ConversationSettingsSnapshot,
+  ChatDescriptor,
+  ChatId,
+  ChatSettingsControl,
+  ChatSettingsSnapshot,
   MessageAddressing,
   MessageReceipt,
 } from "@rome-os/app-runtime";
@@ -39,8 +39,8 @@ export interface FeishuConfig {
    *  (International). Defaults to "feishu". */
   domain?: "feishu" | "lark";
   connectionId?: string;
-  conversationSettings?: ConversationSettingsControl & {
-    observe?(descriptor: ConversationDescriptor): void;
+  chatSettings?: ChatSettingsControl & {
+    observe?(descriptor: ChatDescriptor): void;
   };
   personMappingRepo?: PersonMappingRepository;
   listAgents?: () => string[];
@@ -133,8 +133,8 @@ export class FeishuAdapter {
   private channel: LarkChannel;
   private handler?: (msg: ChannelMessage) => Promise<void>;
   private readonly connectionId?: string;
-  private readonly conversationSettings?: ConversationSettingsControl & {
-    observe?(descriptor: ConversationDescriptor): void;
+  private readonly chatSettings?: ChatSettingsControl & {
+    observe?(descriptor: ChatDescriptor): void;
   };
   private readonly personMappingRepo?: PersonMappingRepository;
   private readonly listAgents?: () => string[];
@@ -170,7 +170,7 @@ export class FeishuAdapter {
   ) {
     this.channel = createChannel(config);
     this.connectionId = config.connectionId;
-    this.conversationSettings = config.conversationSettings;
+    this.chatSettings = config.chatSettings;
     this.personMappingRepo = config.personMappingRepo;
     this.listAgents = config.listAgents;
     this.accountAgent = config.accountAgent;
@@ -208,7 +208,7 @@ export class FeishuAdapter {
     log.info("feishu adapter stopped");
   }
 
-  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
+  async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     if (!message.text) return { conversationId };
     const threadId: string = conversationId;
 
@@ -306,7 +306,7 @@ export class FeishuAdapter {
       channel: "feishu",
       direction: "inbound",
       messageId: m.messageId,
-      conversationId: m.chatId as ConversationId,
+      conversationId: m.chatId as ChatId,
       senderId: m.senderId,
       senderDisplayName: m.senderName ?? "Feishu User",
       text,
@@ -430,7 +430,7 @@ export class FeishuAdapter {
   private async handleGroupConfigAction(evt: CardActionEvent): Promise<void> {
     const value = evt.action.value;
     if (!isFeishuGroupConfigAction(value)) return;
-    if (!this.conversationSettings || !this.connectionId) {
+    if (!this.chatSettings || !this.connectionId) {
       await this.sendGroupConfigStatus(
         evt.chatId,
         evt.messageId,
@@ -554,7 +554,7 @@ export class FeishuAdapter {
   }
 
   private agentsOf(
-    snapshot: Pick<ConversationSettingsSnapshot, "effective" | "overrides">,
+    snapshot: Pick<ChatSettingsSnapshot, "effective" | "overrides">,
   ): Pick<FeishuChannelConfig, "storedAgent" | "answeringAgent"> {
     const storedAgent = storedAgentChoice(snapshot);
     return {
@@ -566,20 +566,20 @@ export class FeishuAdapter {
   /** The group's settings. `withAgents` adds `storedAgent` and
    *  `answeringAgent`, which read the link and the loaded agents. */
   private async getChannelConfig(chatId: string, withAgents = false): Promise<FeishuChannelConfig> {
-    if (!this.conversationSettings || !this.connectionId) {
+    if (!this.chatSettings || !this.connectionId) {
       return withAgents
         ? { answeringAgent: answeringAgentOf(this.accountAgent?.(), undefined, "group") }
         : {};
     }
     const observed = this.observedConversations.get(chatId);
-    const descriptor: ConversationDescriptor = {
-      ref: { connectionId: this.connectionId, conversationId: chatId as ConversationId },
+    const descriptor: ChatDescriptor = {
+      ref: { connectionId: this.connectionId, conversationId: chatId as ChatId },
       service: "feishu",
       kind: observed?.kind ?? "group",
       displayName: observed?.displayName ?? chatId,
     };
-    this.conversationSettings.observe?.(descriptor);
-    const snapshot = await this.conversationSettings.get(descriptor.ref);
+    this.chatSettings.observe?.(descriptor);
+    const snapshot = await this.chatSettings.get(descriptor.ref);
     return {
       chatName: descriptor.displayName,
       mode: snapshot.effective.enabled ? "allow" : "ignore",
@@ -596,11 +596,11 @@ export class FeishuAdapter {
     patch: Partial<FeishuChannelConfig> | null,
     updatedBy?: string,
   ): Promise<FeishuChannelConfig> {
-    if (!this.conversationSettings || !this.connectionId) return {};
+    if (!this.chatSettings || !this.connectionId) return {};
     const current = await this.getChannelConfig(chatId);
-    const ref = { connectionId: this.connectionId, conversationId: chatId as ConversationId };
+    const ref = { connectionId: this.connectionId, conversationId: chatId as ChatId };
     if (patch === null) {
-      const saved = await this.conversationSettings.reset({
+      const saved = await this.chatSettings.reset({
         ref,
         actor: { kind: "guardian", id: updatedBy ?? "feishu-card" },
       });
@@ -611,8 +611,8 @@ export class FeishuAdapter {
         ...this.agentsOf(saved),
       };
     }
-    const set: import("@rome-os/app-runtime").PartialConversationSettings = {};
-    const clear: import("@rome-os/app-runtime").ConversationSettingField[] = [];
+    const set: import("@rome-os/app-runtime").PartialChatSettings = {};
+    const clear: import("@rome-os/app-runtime").ChatSettingField[] = [];
     const owns = (key: keyof FeishuChannelConfig) => Object.hasOwn(patch, key);
     if (owns("mode")) {
       if (patch.mode === "ignore") set.enabled = false;
@@ -628,7 +628,7 @@ export class FeishuAdapter {
     }
     // A patch carries an agent only to set one. Reset clears it.
     if (patch.agentName) (set.routing ??= {}).agentName = patch.agentName;
-    await this.conversationSettings.update({
+    await this.chatSettings.update({
       ref,
       set,
       clear,

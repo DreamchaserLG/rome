@@ -3,8 +3,8 @@ import type {
   ActionEngineLike,
   Channel,
   ChatStopHandler,
-  ConversationId,
-  ConversationSettingsControl,
+  ChatId,
+  ChatSettingsControl,
   ChannelMessage,
   InboundEvent,
   ChannelActivity,
@@ -34,7 +34,7 @@ function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
     channel: "telegram",
     direction: "inbound",
     messageId: "message-1",
-    conversationId: "chat-1" as ConversationId,
+    conversationId: "chat-1" as ChatId,
     senderId: "user-1",
     senderDisplayName: "Alice",
     text: "Hello team",
@@ -47,7 +47,7 @@ function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
 
 function snapshot(
   connectionId: string,
-  conversationId: ConversationId,
+  conversationId: ChatId,
   overrides: { enabled?: boolean; agentName?: string | null } = {},
 ) {
   return {
@@ -81,11 +81,11 @@ function createHarness(options: ConstructorParameters<typeof ChannelMessageHook>
   const get = rs.fn(async ({ connectionId, conversationId }) =>
     snapshot(connectionId, conversationId),
   );
-  const conversationSettings = { get } as unknown as ConversationSettingsControl;
+  const chatSettings = { get } as unknown as ChatSettingsControl;
   const stop = rs.fn(async () => ({ status: "stop_requested" as const, turnId: "turn-1" }));
   const chatStop: ChatStopHandler = stop;
   const send = rs.fn(
-    async (_connectionId: string, conversationId: ConversationId, _outgoing?: unknown) => ({
+    async (_connectionId: string, conversationId: ChatId, _outgoing?: unknown) => ({
       conversationId,
     }),
   );
@@ -117,13 +117,7 @@ function createHarness(options: ConstructorParameters<typeof ChannelMessageHook>
     channel("whatsapp", WHATSAPP_ID),
     channel("agents", AGENTS_ID),
   ];
-  const hook = new ChannelMessageHook(
-    actionEngine,
-    conversationSettings,
-    chatStop,
-    channels,
-    options,
-  );
+  const hook = new ChannelMessageHook(actionEngine, chatSettings, chatStop, channels, options);
   // A conversation's events reach the handler one at a time, each after the
   // previous one settles, as rule R4 of `ChannelInbound` requires of a channel.
   const tails = new Map<string, Promise<void>>();
@@ -162,8 +156,8 @@ describe("ChannelMessageHook", () => {
       TELEGRAM_ID,
       message({
         messageId: "tg-100",
-        conversationId: "thread-1" as ConversationId,
-        parentConversationId: "group-1" as ConversationId,
+        conversationId: "thread-1" as ChatId,
+        parentConversationId: "group-1" as ChatId,
         thread: { kind: "topic", name: "Dev thread" },
         attachments: [{ type: "image", url: "file-id-1", caption: "pic" }],
         replyTo: { messageId: "tg-99", content: "Earlier message", senderName: "Bob" },
@@ -246,7 +240,7 @@ describe("ChannelMessageHook", () => {
       message({
         channel: "agents",
         senderId: agentId,
-        conversationId: agentId as ConversationId,
+        conversationId: agentId as ChatId,
         senderDisplayName: "Atlas",
         text: "/stop",
         thread: { kind: "dm" },
@@ -355,7 +349,7 @@ describe("ChannelMessageHook", () => {
     await harness.emit(TELEGRAM_ID, message({ text: "from telegram" }));
     await harness.emit(
       WHATSAPP_ID,
-      message({ conversationId: "dm-1" as ConversationId, text: "from whatsapp" }),
+      message({ conversationId: "dm-1" as ChatId, text: "from whatsapp" }),
     );
 
     expect(harness.run).toHaveBeenCalledTimes(2);
@@ -609,7 +603,7 @@ describe("ChannelMessageHook", () => {
   it("reads every channel as taking no link on a host that passes no accountAgentOf", async () => {
     const hook = createHook({
       actionEngine: { run: harness.run } as unknown as ActionEngineLike,
-      conversationSettings: { get: harness.get } as unknown as ConversationSettingsControl,
+      chatSettings: { get: harness.get } as unknown as ChatSettingsControl,
       chatStop: harness.stop,
       channels: harness.channels,
     });
@@ -629,7 +623,7 @@ describe("ChannelMessageHook", () => {
     expect(() =>
       createHook({
         actionEngine: {} as ActionEngineLike,
-        conversationSettings: {} as ConversationSettingsControl,
+        chatSettings: {} as ChatSettingsControl,
         chatStop: async () => ({ status: "idle" }),
       } as unknown as Parameters<typeof createHook>[0]),
     ).toThrow(MissingChannelsError);

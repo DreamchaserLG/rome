@@ -5,9 +5,9 @@ import type {
   ChatStopHandler,
   ChannelMessageHook as ChannelMessageHookInterface,
   ChannelMessageHookDeps,
-  ConversationId,
-  ConversationSettingsControl,
-  ConversationSettingsSnapshot,
+  ChatId,
+  ChatSettingsControl,
+  ChatSettingsSnapshot,
   InboundEvent,
   ChannelActivitySession,
   MessageAddressing,
@@ -37,7 +37,7 @@ function addressingOf(message: InboundEvent["message"]): MessageAddressing {
  * every message.
  */
 export function replyRuleAnswers(
-  snapshot: Pick<ConversationSettingsSnapshot, "supportedFields" | "effective">,
+  snapshot: Pick<ChatSettingsSnapshot, "supportedFields" | "effective">,
   message: InboundEvent["message"],
 ): boolean {
   if (!snapshot.supportedFields.includes("activation.mode")) return true;
@@ -51,7 +51,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
 
   constructor(
     private readonly actionEngine: ActionEngineLike,
-    private readonly conversationSettings: ConversationSettingsControl,
+    private readonly chatSettings: ChatSettingsControl,
     private readonly chatStop: ChatStopHandler,
     private readonly channels: readonly Channel[],
     private readonly options: {
@@ -158,7 +158,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       return;
     }
 
-    const snapshot = await this.conversationSettings.get(ref);
+    const snapshot = await this.chatSettings.get(ref);
     const enabled = snapshot.effective.enabled;
     // A group's own agent choice, which wins over the account's agent.
     // An explicit pin to main is stored as null, apart from no choice at all.
@@ -303,11 +303,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
 
   /** Answer in a conversation on the channel it arrived on, where it can send.
    *  The channel sends through the Connection backing it, which is `ref`'s. */
-  private async reply(
-    channel: Channel,
-    conversationId: ConversationId,
-    text: string,
-  ): Promise<void> {
+  private async reply(channel: Channel, conversationId: ChatId, text: string): Promise<void> {
     if (!channel.send) {
       log.warn("cannot answer on a channel that does not send", { service: channel.name });
       return;
@@ -332,7 +328,7 @@ export function createHook(deps: ChannelMessageHookDeps): ChannelMessageHookInte
   if (!Array.isArray(deps.channels)) throw new MissingChannelsError();
   return new ChannelMessageHook(
     deps.actionEngine,
-    deps.conversationSettings,
+    deps.chatSettings ?? deps.conversationSettings,
     deps.chatStop,
     deps.channels,
     { accountAgentOf: deps.accountAgentOf ?? deps.linkedAgentOf },

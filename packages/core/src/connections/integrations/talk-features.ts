@@ -1,4 +1,4 @@
-import type { ConversationId, ChannelActivity, ChannelDirectMessaging } from "@rome-os/app-runtime";
+import type { ChatId, ChannelActivity, ChannelDirectMessaging } from "@rome-os/app-runtime";
 
 export function historyWindowHours(since?: Date): number {
   if (!since) return 24;
@@ -52,11 +52,11 @@ export function directoryPage<T>(
  * implementation instead, opening or looking up the thread; that one is a
  * provider call and should be priced as one.
  */
-export function addressIsConversationFeature(): ChannelDirectMessaging {
+export function addressIsConversationFeature(): Pick<ChannelDirectMessaging, "chatFor"> {
   return {
-    async conversationFor(channelUserId: string) {
+    async chatFor(channelUserId: string) {
       const trimmed = channelUserId.trim();
-      return trimmed === "" ? null : (trimmed as ConversationId);
+      return trimmed === "" ? null : (trimmed as ChatId);
     },
   };
 }

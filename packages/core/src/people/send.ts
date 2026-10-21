@@ -18,7 +18,7 @@
 // directly cannot be written to from here, without a read-only flag threaded
 // through anything.
 
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
 import type { AccountSendState } from "@rome/api-types/people";
 import { ChannelNotConnected, type ChannelSend, type Channels } from "../channels/channel.js";
 
@@ -38,7 +38,7 @@ export interface SendDeps {
  *  unless the Connection was replaced in between. This is deliberate. */
 export interface SendTarget {
   send: ChannelSend;
-  conversationId: ConversationId;
+  conversationId: ChatId;
 }
 
 export type Resolution = { ok: true; target: SendTarget } | { ok: false; send: RefusedState };
@@ -70,9 +70,9 @@ async function sendStateOf(
   // person read already gives for this account. Letting it escape would make
   // the send path report a 500 where the read reported `no-conversation`, so
   // the two would disagree about one condition.
-  let conversationId: ConversationId | null;
+  let conversationId: ChatId | null;
   try {
-    conversationId = await direct.conversationFor(account.channelUserId);
+    conversationId = await direct.chatFor(account.channelUserId);
   } catch (err) {
     if (err instanceof ChannelNotConnected) return { state: "not-connected" };
     conversationId = null;
@@ -91,7 +91,7 @@ export async function resolveSendTarget(deps: SendDeps, account: SendAccount): P
 /**
  * Whether Rome can send to each of the given accounts, positionally.
  *
- * Only `conversationFor` can reach a provider, and it is asked once per
+ * Only `chatFor` can reach a provider, and it is asked once per
  * account — cheap on the channels in play, and the reason a channel that keys
  * threads separately has to be priced before it is added to a listing read. A
  * listing must not fail because one account of one person could not be priced.

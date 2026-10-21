@@ -4,11 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type {
-  ConversationId,
-  ConversationRepository,
-  StreamAgentEvent,
-} from "@rome-os/app-runtime";
+import type { ChatId, ChatRepository, StreamAgentEvent } from "@rome-os/app-runtime";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import type {
   AgentSession,
@@ -94,7 +90,7 @@ describe("AgentSessionBridge turn routing", () => {
 
     const ref = {
       connectionId: "connection:discord",
-      conversationId: "channel-1" as ConversationId,
+      conversationId: "channel-1" as ChatId,
     };
     await rs.waitFor(() =>
       expect(child.sent).toContainEqual(expect.objectContaining({ type: "rpc_response" })),
@@ -591,15 +587,12 @@ describe("AgentSessionBridge reply streaming", () => {
     const { written, edits } = recording;
     const transport = own ?? recording.transport;
     // The host's adapter over the repository.
-    const conversations =
+    const chats =
       repo &&
       ({
-        ensureChannelConversation: (input) => repo.ensureChannelConversation(input),
+        ensureChannelChat: (input) => repo.ensureChannelChat(input),
         recordOutboundMessage: (input) => repo.recordOutboundConversationMessage(input),
-      } satisfies Pick<
-        ConversationRepository,
-        "ensureChannelConversation" | "recordOutboundMessage"
-      >);
+      } satisfies Pick<ChatRepository, "ensureChannelChat" | "recordOutboundMessage">);
     const session = {
       key: { agentName: "main", channelThreadKey: "telegram:chat-1" },
       sessionId: "session-1",
@@ -620,7 +613,7 @@ describe("AgentSessionBridge reply streaming", () => {
             channel === "telegram" ? { transport, pacer: new Pacer(budget, systemClock) } : null,
           clock: systemClock,
           policy,
-          ...(conversations ? { conversations } : {}),
+          ...(chats ? { chats } : {}),
         });
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
@@ -787,7 +780,7 @@ describe("AgentSessionBridge reply streaming", () => {
     })();
     const interrupt = rs.fn(async () => undefined);
     const { written, edits, turnEnd, turns } = run(events, { streamReply: true, interrupt });
-    const ref = { connectionId: "c", conversationId: "chat-1" as ConversationId };
+    const ref = { connectionId: "c", conversationId: "chat-1" as ChatId };
 
     await rs.waitFor(() => expect(written).toEqual([["chat-1", "Hello", "msg-1"]]));
     await turns.getActiveByConversation(ref)?.interrupt?.("chat-stop");

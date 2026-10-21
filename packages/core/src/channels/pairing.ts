@@ -1,4 +1,4 @@
-import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { pairingPayload, pairingPayloadSchema } from "@rome/api-types/approvals";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
@@ -35,6 +35,13 @@ function pairingAccount(
     : code;
 }
 
+/** The docs page that explains pairing for a service. */
+function pairingGuidePage(service: string): string {
+  if (service === "feishu") return "lark";
+  if (service === "slack_bot") return "slack";
+  return service;
+}
+
 function pairingSuccess(
   channel: string,
   id: string,
@@ -69,7 +76,7 @@ export function createPairingAdmission(deps: {
         log.error("pairing reply failed", { connectionId, senderId: message.senderId });
       });
     };
-    const guidance = `🔗 Pair ${pairingAccount(service, message.senderId, message.senderDisplayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nLearn more in the [Pairing Guide](https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}).`;
+    const guidance = `🔗 Pair ${pairingAccount(service, message.senderId, message.senderDisplayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nLearn more in the [Pairing Guide](https://romeos.cc/docs/rome/${pairingGuidePage(service)}).`;
     const directed =
       message.thread?.kind === "dm" ||
       ["mention", "reply", "bot_thread"].includes(message.addressing ?? "ambient");
@@ -171,10 +178,10 @@ export async function notifyPairingResolution(
   if (!payload || approval.status !== "approved") return;
   try {
     const conversationId =
-      (payload.conversationId as ConversationId | undefined) ??
+      (payload.conversationId as ChatId | undefined) ??
       (await registry
         .get(payload.connectionId)
-        .withTalker((talker) => talker.directMessaging?.conversationFor(payload.channelUserId)));
+        .withTalker((talker) => talker.directMessaging?.chatFor(payload.channelUserId)));
     if (!conversationId) throw new Error("Direct conversation unavailable");
     await sendOn(
       registry,
@@ -194,7 +201,7 @@ export async function notifyPairingResolution(
 async function sendOn(
   registry: Pick<ConnectionRegistry, "get">,
   connectionId: string,
-  conversationId: ConversationId,
+  conversationId: ChatId,
   text: string,
 ): Promise<void> {
   await sendThrough(registry.get(connectionId), conversationId, { text });

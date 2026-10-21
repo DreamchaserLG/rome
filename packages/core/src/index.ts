@@ -80,6 +80,7 @@ import { createAccountNames } from "./channels/account-names.js";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList, joinLaterChannel } from "./channels/channel-list.js";
 import { claimChannels } from "./channels/claim-channels.js";
+import { domainOf, domainOfGrants } from "./channels/platform.js";
 import { AccountListening, accountAgentResolver } from "./channels/account-agents.js";
 import { recordedChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
@@ -212,10 +213,7 @@ import { SetupManager } from "./connections/setup/manager.js";
 import { AGENTS_SERVICE } from "./connections/integrations/agents.js";
 import { autoConnectEmail } from "./connections/integrations/email.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
-import {
-  ConversationSettingsRepository,
-  ConversationSettingsService,
-} from "./conversation-settings/index.js";
+import { ChatSettingsRepository, ChatSettingsService } from "./conversation-settings/index.js";
 import { removeUnconnectedAccounts } from "./connections/unconnected-accounts.js";
 import { ensureZeroGrantConnections } from "./connections/zero-grant.js";
 import { createAppDbMigrationSubscriber } from "./apps/db-migration-subscriber.js";
@@ -368,8 +366,9 @@ async function main() {
     connectionRegistry.getDescriptor(service)?.capabilities.talker !== undefined;
   const connectionRegistry: ConnectionRegistry = new ConnectionRegistry({
     ledger: new DrizzleGrantLedger(db),
-    onMint: (tx, record) => {
-      if (talks(record.service)) channelRecords.claim(tx, record, record.createdAt);
+    onMint: (tx, record, profile) => {
+      if (!talks(record.service)) return;
+      channelRecords.claim(tx, { ...record, domain: domainOf(profile) }, record.createdAt);
     },
     onRemove: (tx, id) => channelRecords.vacate(tx, id),
   });
@@ -407,9 +406,7 @@ async function main() {
     streaming: replyStreamingOn,
     replies: (name) => builtChannels?.find((channel) => channel.name === name)?.send?.replies,
     clock: systemClock,
-    ...(appRuntimeRepositories.conversations
-      ? { conversations: appRuntimeRepositories.conversations }
-      : {}),
+    ...(appRuntimeRepositories.chats ? { chats: appRuntimeRepositories.chats } : {}),
   });
   const channelsService = createChannelsService({
     channels: () => builtChannels,
@@ -734,8 +731,8 @@ async function main() {
   // (injected into appActionDeps) and the WorkerRPC handlers, so a worker's
   // proxy and a main-process call resolve to identical behavior.
   const eventService = new EventService(eventBus, eventCatalog);
-  const conversationSettings = new ConversationSettingsService({
-    repository: new ConversationSettingsRepository(db),
+  const chatSettings = new ChatSettingsService({
+    repository: new ChatSettingsRepository(db),
     connections: connectionRegistry,
     channelOf,
     channels: () => builtChannels,
@@ -837,7 +834,7 @@ async function main() {
       activeSubagentRegistry,
       turnMiddleware: turnMiddlewareChain,
       resolveProviderSessionReset: async (ref) =>
-        (await conversationSettings.get(ref)).effective.session.reset,
+        (await chatSettings.get(ref)).effective.session.reset,
       usageRecorder,
       channelSurface: (channel) => {
         const talker = connectionRegistry.getDescriptor(serviceOfChannel(channel))?.capabilities
@@ -908,7 +905,7 @@ async function main() {
     // no backend turn runs before boot completes.
     channel: (name) => channels.find((channel) => channel.name === name) ?? null,
     resolveWorkingDir: resolveContinuationWorkingDir,
-    conversations: appRuntimeRepositories.conversations!,
+    chats: appRuntimeRepositories.chats!,
   });
 
   const approvalHandler = new ApprovalHandler(
@@ -943,7 +940,9 @@ async function main() {
       resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),
     resolveArtifactReference,
     channelsService,
-    conversationSettings,
+    chatSettings,
+    // Apps built before the chat rename read `conversationSettings`.
+    conversationSettings: chatSettings,
     capabilityDiscovery,
     personMappingRepo,
     sentinelLogRepo,
@@ -1185,7 +1184,7 @@ async function main() {
   const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
     settingsRepo,
-    conversationSettings,
+    chatSettings,
     chatStop,
     personMappingRepo,
     webchatRepo,
@@ -1266,7 +1265,8 @@ async function main() {
     try {
       const loadedHook = await createChannelMessageHookFromCatalog(appCatalog, {
         actionEngine,
-        conversationSettings,
+        chatSettings,
+        conversationSettings: chatSettings,
         chatStop,
         channels: hookChannels,
         accountAgentOf,
@@ -1307,7 +1307,8 @@ async function main() {
         catalog: appCatalog,
         deps: {
           actionEngine,
-          conversationSettings,
+          chatSettings,
+          conversationSettings: chatSettings,
           chatStop,
           channels: hookChannels,
           accountAgentOf,
@@ -1380,10 +1381,11 @@ async function main() {
   await removeUnconnectedAccounts(connectionRegistry);
   // Connections minted before channels were recorded get theirs now. Each
   // service held one, so each takes its service's name.
-  claimChannels(
+  await claimChannels(
     db,
     channelRecords,
     connectionRegistry.all().filter((c) => talks(c.service)),
+    async (id) => domainOfGrants(await connectionRegistry.getLedger().listGrants(id)),
   );
   await ensureZeroGrantConnections(connectionRegistry);
   connectionRegistry.startCapabilities();
@@ -1429,7 +1431,7 @@ async function main() {
     channelsService,
     connectionRegistry,
     channelOf,
-    conversationSettings,
+    chatSettings,
     routinesRepo,
     routineEngine,
     eventService,
@@ -1561,7 +1563,7 @@ async function main() {
       nodeDevices,
       notifyPairingResolution: (approval) => notifyPairingResolution(connectionRegistry, approval),
       channelsService,
-      conversationSettings,
+      chatSettings,
       actionEngine,
       actionLoader,
       personMappingRepo,

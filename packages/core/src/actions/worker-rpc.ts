@@ -6,16 +6,16 @@ import { backingConnection } from "../channels/channels-service.js";
 import type { ChannelOf } from "../channels/connection-ports.js";
 import type {
   BackendTurnRunner,
-  ConversationId,
-  ConversationRef,
-  ConversationSettingsControl,
+  ChatId,
+  ChatRef,
+  ChatSettingsControl,
   ChannelMessage,
   OutgoingMessage,
   ChannelsService,
   MessageReceipt,
-  UpdateConversationSettingsInput,
-  ResetConversationSettingsInput,
-  ListConversationSettingsInput,
+  UpdateChatSettingsInput,
+  ResetChatSettingsInput,
+  ListChatSettingsInput,
 } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import type { EventService } from "../events/event-service.js";
@@ -54,11 +54,11 @@ const ChannelsQueryParams = z
 
 const AgentNamesResolveParams = z.object({ name: z.string().min(1) }).strict();
 
-const ConversationRefParams = z.object({
+const ChatRefParams = z.object({
   ref: z.object({ connectionId: z.string().min(1), conversationId: z.string() }),
 });
-const ConversationSettingsInput = z.custom<
-  UpdateConversationSettingsInput | ResetConversationSettingsInput | ListConversationSettingsInput
+const ChatSettingsInput = z.custom<
+  UpdateChatSettingsInput | ResetChatSettingsInput | ListChatSettingsInput
 >((value) => typeof value === "object" && value !== null);
 
 const EmailIngestInboundParams = z.object({
@@ -177,7 +177,7 @@ export interface WorkerRpcServices {
   channelsService: ChannelsService;
   connectionRegistry: ConnectionRegistry;
   channelOf: ChannelOf;
-  conversationSettings: ConversationSettingsControl;
+  chatSettings: ChatSettingsControl;
   /** Live routine engine + repo — the action worker has no in-process engine,
    * so it persists a routine then calls `routines.schedule` to activate it here. */
   routinesRepo: RoutinesRepository;
@@ -239,33 +239,25 @@ export class WorkerRpcServer {
           const { name } = parseParams("agentNames.resolve", AgentNamesResolveParams, params);
           return this.services.agentNames.resolve(name);
         },
-        "conversationSettings.list": (params) =>
-          this.services.conversationSettings.list(
-            parseParams(
-              "conversationSettings.list",
-              ConversationSettingsInput,
-              params,
-            ) as ListConversationSettingsInput,
+        "chatSettings.list": (params) =>
+          this.services.chatSettings.list(
+            parseParams("chatSettings.list", ChatSettingsInput, params) as ListChatSettingsInput,
           ),
-        "conversationSettings.get": (params) => {
-          const { ref } = parseParams("conversationSettings.get", ConversationRefParams, params);
-          return this.services.conversationSettings.get(ref as ConversationRef);
+        "chatSettings.get": (params) => {
+          const { ref } = parseParams("chatSettings.get", ChatRefParams, params);
+          return this.services.chatSettings.get(ref as ChatRef);
         },
-        "conversationSettings.update": (params) =>
-          this.services.conversationSettings.update(
+        "chatSettings.update": (params) =>
+          this.services.chatSettings.update(
             parseParams(
-              "conversationSettings.update",
-              ConversationSettingsInput,
+              "chatSettings.update",
+              ChatSettingsInput,
               params,
-            ) as UpdateConversationSettingsInput,
+            ) as UpdateChatSettingsInput,
           ),
-        "conversationSettings.reset": (params) =>
-          this.services.conversationSettings.reset(
-            parseParams(
-              "conversationSettings.reset",
-              ConversationSettingsInput,
-              params,
-            ) as ResetConversationSettingsInput,
+        "chatSettings.reset": (params) =>
+          this.services.chatSettings.reset(
+            parseParams("chatSettings.reset", ChatSettingsInput, params) as ResetChatSettingsInput,
           ),
         "channels.email.ingestInbound": (params) => this.handleEmailIngestInbound(params),
         "actions.has": (params) => this.handleActionsHas(params),
@@ -386,11 +378,7 @@ export class WorkerRpcServer {
       ChannelsSendParams,
       params,
     );
-    return await this.services.channelsService.send(
-      channel,
-      conversationId as ConversationId,
-      message,
-    );
+    return await this.services.channelsService.send(channel, conversationId as ChatId, message);
   }
 
   private async handleChannelsQuery(params: unknown): Promise<ChannelMessage[]> {
@@ -400,7 +388,7 @@ export class WorkerRpcServer {
       params,
     );
     return await this.services.channelsService.query(channel, {
-      ...(conversationId ? { conversationId: conversationId as ConversationId } : {}),
+      ...(conversationId ? { conversationId: conversationId as ChatId } : {}),
       ...(since ? { since: new Date(since) } : {}),
       ...(limit ? { limit } : {}),
     });
