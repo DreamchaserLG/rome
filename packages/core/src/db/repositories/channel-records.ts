@@ -106,7 +106,7 @@ const MINTED_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
  * after its conversation went are deleted too. A subagent conversation
  * carries its parent's channel, so it is one of the channel's conversations
  * and goes with it. Any other conversation whose parent goes stays, with no
- * parent. Migration 0083 runs the same deletes for the channels left unbacked
+ * parent. Migration 0084 runs the same deletes for the channels left unbacked
  * before this.
  */
 function deleteRecorded(exec: Exec, id: string): void {
@@ -243,8 +243,13 @@ export class ChannelRecordsRepository {
    * name first. Failing that, it gets the service's name if no channel holds
    * it, and a fresh opaque id otherwise. A linkable service's only connected
    * account is linked to main, so a guardian's first account answers.
+   * `domain` is a Feishu app's domain, which decides its channel's platform.
    */
-  claim(exec: Exec, connection: { id: string; service: string }, now: Date): ChannelRecord {
+  claim(
+    exec: Exec,
+    connection: { id: string; service: string; domain?: string },
+    now: Date,
+  ): ChannelRecord {
     const held = exec.select().from(channels).where(eq(channels.connectionId, connection.id)).get();
     if (held) return toRecord(held);
     this.ids.clear();
@@ -280,7 +285,7 @@ export class ChannelRecordsRepository {
     const row = {
       id,
       service,
-      platform: platformOf(service),
+      platform: platformOf(service, connection.domain),
       connectionId: connection.id,
       agent: firstAccountAgent(exec, service),
       createdAt: now,

@@ -18,7 +18,7 @@ import {
 const DELETE_DISCONNECTED = readFileSync(
   resolve(
     dirname(fileURLToPath(import.meta.url)),
-    "../../drizzle/system/0083_delete_disconnected_accounts.sql",
+    "../../drizzle/system/0084_delete_disconnected_accounts.sql",
   ),
   "utf8",
 );

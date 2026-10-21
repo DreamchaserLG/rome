@@ -44,6 +44,23 @@ describe("buildEnvoys", () => {
     expect(unlinked).toEqual([]);
   });
 
+  it("names an account with no name after its platform, Lark apart from Feishu", () => {
+    const { unlinked } = buildEnvoys(
+      [
+        connection({ service: "feishu", platform: "feishu" }),
+        connection({ service: "feishu", id: "lark-id", channel: "lark-app", platform: "lark" }),
+        // A core that predates `platform`.
+        connection({ service: "telegram_user", channel: "telegram_user" }),
+      ],
+      [],
+    );
+    expect(unlinked.map(({ platform, name }) => ({ platform, name }))).toEqual([
+      { platform: "feishu", name: "Feishu" },
+      { platform: "lark", name: "Lark" },
+      { platform: "telegram", name: "Telegram" },
+    ]);
+  });
+
   it("lists connected accounts with no agent apart", () => {
     const { envoys, unlinked } = buildEnvoys([connection({ service: "feishu" })], []);
     expect(envoys).toEqual([]);
@@ -102,6 +119,8 @@ describe("buildEnvoys", () => {
       kind: "delegate",
       platform: "telegram",
       route: null,
+      connectionId: "telegram_user-id",
+      grant: "session",
     });
     expect(buildEnvoys([own(null)], []).unlinked.map((account) => account.kind)).toEqual([
       "delegate",
