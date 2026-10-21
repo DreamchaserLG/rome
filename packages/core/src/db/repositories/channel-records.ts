@@ -11,6 +11,7 @@ import {
   romeAgentMessages,
   romeAgentTraceBlocks,
   romeSessions,
+  routines,
   sentinelLog,
   sessions,
   sessionTurnCheckpoints,
@@ -99,26 +100,39 @@ function onChannel(column: SQLiteColumn, id: string) {
 /** The shape of an id `claim` mints when a service's name is taken. */
 const MINTED_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** A conversation recorded through channel `id`: one on it, or the triage
+ *  run the inbox's sentinel makes for a message on it. That run carries no
+ *  thread, so its conversation is named by its agent session's key. */
+function recordedThrough(id: string) {
+  return or(
+    eq(romeSessions.sourceChannel, id),
+    and(eq(romeSessions.type, "action"), startsWith(romeSessions.name, `sentinel:${id}:`)),
+  );
+}
+
 /**
  * Delete what was recorded through channel `id`: its conversations with their
  * messages, the agent sessions that served them, its outbox and its triage
- * log. An approval still waiting to act on the channel, an action asked
- * from one of its conversations that has not run or failed and could be
- * retried, or a reply to send there, is rejected, so
- * approving it later acts on no channel that takes this id next. Agent sessions are found by their key and messages by their
+ * log. Agent sessions are found by their key and messages by their
  * conversation id as well, since both spell the channel, so rows a turn wrote
  * after its conversation went are deleted too. A subagent conversation
  * carries its parent's channel, so it is one of the channel's conversations
  * and goes with it. Its id does not spell the channel, so its recorder writes
- * nothing once its conversation is gone. Any other conversation whose parent goes stays, with no
- * parent. Migration 0084 runs the same deletes for the channels left unbacked
- * before this.
+ * nothing once its conversation is gone. Any other conversation whose parent
+ * goes stays, with no parent.
+ *
+ * What would act on the channel later stops, so it acts on no channel that
+ * takes this id next: a routine that sends on it is turned off, and an
+ * approval still waiting is rejected. That is an action asked from one of its
+ * conversations that has not run, or failed and could be retried, or a reply
+ * to send there. Migration 0084 runs the same changes for the channels left
+ * unbacked before this.
  */
 function deleteRecorded(exec: Exec, id: string): void {
   const conversations = exec
     .select({ id: romeSessions.id })
     .from(romeSessions)
-    .where(eq(romeSessions.sourceChannel, id));
+    .where(recordedThrough(id));
   const agentSessions = exec
     .select({ id: sessions.id })
     .from(sessions)
@@ -160,9 +174,21 @@ function deleteRecorded(exec: Exec, id: string): void {
     .set({ parentSessionId: null })
     .where(inArray(romeSessions.parentSessionId, conversations))
     .run();
-  exec.delete(romeSessions).where(eq(romeSessions.sourceChannel, id)).run();
+  exec.delete(romeSessions).where(recordedThrough(id)).run();
   exec.delete(outboundMessages).where(eq(outboundMessages.channel, id)).run();
   exec.delete(sentinelLog).where(eq(sentinelLog.channel, id)).run();
+  // A routine that sends on the channel would send through whichever account
+  // takes this id next.
+  exec
+    .update(routines)
+    .set({ enabled: false })
+    .where(
+      and(
+        eq(routines.actionName, "system:send_message"),
+        sql`json_extract(${routines.args}, '$.channel') = ${id}`,
+      ),
+    )
+    .run();
   exec
     .update(approvals)
     .set({

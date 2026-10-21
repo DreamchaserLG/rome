@@ -11,6 +11,7 @@ import {
   outboundMessages,
   romeAgentMessages,
   romeSessions,
+  routines,
   sentinelLog,
   sessions,
   sessionTurnCheckpoints,
@@ -175,6 +176,28 @@ describe("delete disconnected accounts migration", () => {
       )
       .run();
 
+    db.insert(romeSessions)
+      .values({
+        id: "triage",
+        name: "sentinel:telegram:t1",
+        type: "action",
+        activityAt: NOW,
+        createdAt: NOW,
+      })
+      .run();
+    db.insert(routines)
+      .values(
+        (["telegram", "telegram_user"] as const).map((channel) => ({
+          id: `r-${channel}`,
+          name: "notify",
+          trigger: { type: "schedule" },
+          actionName: "system:send_message",
+          args: { channel, threadId: "t1", text: "hi" },
+          createdAt: NOW,
+        })),
+      )
+      .run();
+
     migrate(db);
 
     const ids = (rows: Array<{ id: string }>) => rows.map((row) => row.id).sort();
@@ -201,5 +224,14 @@ describe("delete disconnected accounts migration", () => {
           .map((row) => [row.id, row.status]),
       ),
     ).toEqual({ "ap-telegram": "rejected", "ap-telegram_user": "pending" });
+    expect(
+      Object.fromEntries(
+        db
+          .select()
+          .from(routines)
+          .all()
+          .map((row) => [row.id, row.enabled]),
+      ),
+    ).toEqual({ "r-telegram": false, "r-telegram_user": true });
   });
 });

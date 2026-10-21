@@ -7,11 +7,14 @@ import {
   romeAgentMessages,
   romeAgentTraceBlocks,
   romeSessions,
+  routines,
   sentinelLog,
   sessions,
   sessionTurnCheckpoints,
 } from "../schema.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { AgentTraceRecorder } from "../../core/agent-trace-recorder.js";
+import { WebChatRepository } from "./webchat.js";
 import {
   ChannelNotLinkable,
   ChannelRecordNotFound,
@@ -213,6 +216,77 @@ describe("ChannelRecordsRepository", () => {
       id: "feishu",
       agent: "core:main",
     });
+  });
+
+  it("deletes the sentinel's triage runs on a deleted account, by the key the inbox runs it under", async () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", service: "telegram" }, NOW);
+    records.claim(db, { id: "c2", service: "telegram_user" }, NOW);
+    const webchat = new WebChatRepository(db);
+    for (const channel of ["telegram", "telegram_user"]) {
+      const recorder = new AgentTraceRecorder({
+        webchatRepo: webchat,
+        agentName: "sentinel",
+        channelThreadKey: `sentinel:${channel}:t1`,
+        turnId: `turn-${channel}`,
+        actionContext: { actionName: "inbox:message_handler", executionId: `exec-${channel}` },
+      });
+      await recorder.record({
+        type: "turn_start",
+        turnId: `turn-${channel}`,
+        sessionId: `provider-${channel}`,
+        userPrompt: "hello from a stranger",
+      });
+    }
+
+    records.vacate(db, "c1");
+
+    expect(
+      db
+        .select()
+        .from(romeSessions)
+        .all()
+        .map((row) => row.id),
+    ).toEqual(["action:exec-telegram_user:sentinel"]);
+    expect(
+      db
+        .select()
+        .from(romeAgentMessages)
+        .all()
+        .map((row) => row.sessionId),
+    ).not.toContain("action:exec-telegram:sentinel");
+  });
+
+  it("turns off a routine that sends on a deleted account", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", service: "telegram" }, NOW);
+    records.claim(db, { id: "c2", service: "telegram_user" }, NOW);
+    for (const channel of ["telegram", "telegram_user"]) {
+      db.insert(routines)
+        .values({
+          id: `r-${channel}`,
+          name: "notify",
+          trigger: { type: "schedule" },
+          actionName: "system:send_message",
+          args: { channel, threadId: "t1", text: "hi" },
+          createdAt: NOW,
+        })
+        .run();
+    }
+
+    records.vacate(db, "c1");
+
+    expect(
+      Object.fromEntries(
+        db
+          .select()
+          .from(routines)
+          .all()
+          .map((row) => [row.id, row.enabled]),
+      ),
+    ).toEqual({ "r-telegram": false, "r-telegram_user": true });
   });
 
   it("rejects the approvals still waiting to act on a deleted account", () => {
