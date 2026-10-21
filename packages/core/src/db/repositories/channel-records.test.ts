@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import {
+  approvals,
   channels,
   outboundMessages,
   romeAgentMessages,
@@ -187,6 +188,51 @@ describe("ChannelRecordsRepository", () => {
     expect(restarted.claim(db, { id: "c2", service: "feishu" }, NOW)).toMatchObject({
       id: "feishu",
       agent: "core:main",
+    });
+  });
+
+  it("rejects the approvals still waiting to act on a deleted account", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", service: "telegram" }, NOW);
+    records.claim(db, { id: "c2", service: "telegram_user" }, NOW);
+    const action = (channel: string) => ({ channelContext: { channel, threadId: "t1" } });
+    db.insert(approvals)
+      .values(
+        [
+          ["asked", "action_execution", "pending", "idle", action("telegram")],
+          ["queued", "action_execution", "approved", "queued", action("telegram")],
+          ["ran", "action_execution", "approved", "succeeded", action("telegram")],
+          ["reply", "outgoing_message", "pending", "idle", { channel: "telegram", threadId: "t1" }],
+          ["other", "action_execution", "pending", "idle", action("telegram_user")],
+        ].map(([id, type, status, executionState, payload]) => ({
+          id: id as string,
+          type: type as "action_execution" | "outgoing_message",
+          status: status as "pending" | "approved",
+          executionState: executionState as "idle" | "queued" | "succeeded",
+          requestedBy: "main",
+          description: "d",
+          payload,
+          createdAt: NOW,
+        })),
+      )
+      .run();
+
+    records.vacate(db, "c1");
+
+    const states = Object.fromEntries(
+      db
+        .select()
+        .from(approvals)
+        .all()
+        .map((row) => [row.id, `${row.status}/${row.executionState}`]),
+    );
+    expect(states).toEqual({
+      asked: "rejected/idle",
+      queued: "rejected/idle",
+      ran: "approved/succeeded",
+      reply: "rejected/idle",
+      other: "pending/idle",
     });
   });
 

@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
-import { and, asc, eq, gte, inArray, isNotNull, isNull, lt, or } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { platformOf } from "../../channels/platform.js";
 import {
+  approvals,
   channels,
   outboundMessages,
   romeAgentMessages,
@@ -101,7 +102,9 @@ const MINTED_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 /**
  * Delete what was recorded through channel `id`: its conversations with their
  * messages, the agent sessions that served them, its outbox and its triage
- * log. Agent sessions are found by their key and messages by their
+ * log. An approval still waiting to act on the channel, an action asked
+ * from one of its conversations or a reply to send there, is rejected, so
+ * approving it later acts on no channel that takes this id next. Agent sessions are found by their key and messages by their
  * conversation id as well, since both spell the channel, so rows a turn wrote
  * after its conversation went are deleted too. A subagent conversation
  * carries its parent's channel, so it is one of the channel's conversations
@@ -158,6 +161,33 @@ function deleteRecorded(exec: Exec, id: string): void {
   exec.delete(romeSessions).where(eq(romeSessions.sourceChannel, id)).run();
   exec.delete(outboundMessages).where(eq(outboundMessages.channel, id)).run();
   exec.delete(sentinelLog).where(eq(sentinelLog.channel, id)).run();
+  exec
+    .update(approvals)
+    .set({
+      status: "rejected",
+      resolvedAt: new Date(),
+      resolvedBy: "system:connection-disconnected",
+      executionState: "idle",
+      payload: sql`json_set(${approvals.payload}, '$.resolution', 'superseded')`,
+    })
+    .where(
+      or(
+        and(
+          eq(approvals.type, "action_execution"),
+          or(
+            eq(approvals.status, "pending"),
+            and(eq(approvals.status, "approved"), eq(approvals.executionState, "queued")),
+          ),
+          sql`json_extract(${approvals.payload}, '$.channelContext.channel') = ${id}`,
+        ),
+        and(
+          eq(approvals.type, "outgoing_message"),
+          eq(approvals.status, "pending"),
+          sql`json_extract(${approvals.payload}, '$.channel') = ${id}`,
+        ),
+      ),
+    )
+    .run();
 }
 
 /** The service a channel belongs to. A service's first channel carries the

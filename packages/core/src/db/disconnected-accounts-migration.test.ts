@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "@rstest/core";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import type { DrizzleDb } from "./index.js";
 import {
+  approvals,
   channels,
   outboundMessages,
   romeAgentMessages,
@@ -160,6 +161,20 @@ describe("delete disconnected accounts migration", () => {
         .run();
     }
 
+    db.insert(approvals)
+      .values(
+        (["telegram", "telegram_user"] as const).map((channel) => ({
+          id: `ap-${channel}`,
+          type: "action_execution" as const,
+          status: "pending" as const,
+          requestedBy: "main",
+          description: "d",
+          payload: { channelContext: { channel, threadId: "t1" } },
+          createdAt: NOW,
+        })),
+      )
+      .run();
+
     migrate(db);
 
     const ids = (rows: Array<{ id: string }>) => rows.map((row) => row.id).sort();
@@ -177,5 +192,14 @@ describe("delete disconnected accounts migration", () => {
         .map((row) => row.sessionId)
         .sort(),
     ).toEqual(["a-live", "a-mail"]);
+    expect(
+      Object.fromEntries(
+        db
+          .select()
+          .from(approvals)
+          .all()
+          .map((row) => [row.id, row.status]),
+      ),
+    ).toEqual({ "ap-telegram": "rejected", "ap-telegram_user": "pending" });
   });
 });
