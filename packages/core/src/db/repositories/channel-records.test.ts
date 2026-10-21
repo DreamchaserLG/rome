@@ -227,13 +227,14 @@ describe("ChannelRecordsRepository", () => {
           ["asked", "action_execution", "pending", "idle", action("telegram")],
           ["queued", "action_execution", "approved", "queued", action("telegram")],
           ["ran", "action_execution", "approved", "succeeded", action("telegram")],
+          ["failed", "action_execution", "approved", "failed", action("telegram")],
           ["reply", "outgoing_message", "pending", "idle", { channel: "telegram", threadId: "t1" }],
           ["other", "action_execution", "pending", "idle", action("telegram_user")],
         ].map(([id, type, status, executionState, payload]) => ({
           id: id as string,
           type: type as "action_execution" | "outgoing_message",
           status: status as "pending" | "approved",
-          executionState: executionState as "idle" | "queued" | "succeeded",
+          executionState: executionState as "idle" | "queued" | "succeeded" | "failed",
           requestedBy: "main",
           description: "d",
           payload,
@@ -255,6 +256,7 @@ describe("ChannelRecordsRepository", () => {
       asked: "rejected/idle",
       queued: "rejected/idle",
       ran: "approved/succeeded",
+      failed: "rejected/failed",
       reply: "rejected/idle",
       other: "pending/idle",
     });

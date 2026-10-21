@@ -103,7 +103,8 @@ const MINTED_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
  * Delete what was recorded through channel `id`: its conversations with their
  * messages, the agent sessions that served them, its outbox and its triage
  * log. An approval still waiting to act on the channel, an action asked
- * from one of its conversations or a reply to send there, is rejected, so
+ * from one of its conversations that has not run or failed and could be
+ * retried, or a reply to send there, is rejected, so
  * approving it later acts on no channel that takes this id next. Agent sessions are found by their key and messages by their
  * conversation id as well, since both spell the channel, so rows a turn wrote
  * after its conversation went are deleted too. A subagent conversation
@@ -168,7 +169,8 @@ function deleteRecorded(exec: Exec, id: string): void {
       status: "rejected",
       resolvedAt: new Date(),
       resolvedBy: "system:connection-disconnected",
-      executionState: "idle",
+      // A queued run will not start. A failed one keeps its failure.
+      executionState: sql`CASE WHEN ${approvals.executionState} = 'queued' THEN 'idle' ELSE ${approvals.executionState} END`,
       payload: sql`json_set(${approvals.payload}, '$.resolution', 'superseded')`,
     })
     .where(
@@ -177,7 +179,10 @@ function deleteRecorded(exec: Exec, id: string): void {
           eq(approvals.type, "action_execution"),
           or(
             eq(approvals.status, "pending"),
-            and(eq(approvals.status, "approved"), eq(approvals.executionState, "queued")),
+            and(
+              eq(approvals.status, "approved"),
+              inArray(approvals.executionState, ["queued", "failed"]),
+            ),
           ),
           sql`json_extract(${approvals.payload}, '$.channelContext.channel') = ${id}`,
         ),
