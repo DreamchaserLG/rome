@@ -467,7 +467,7 @@ describe("ChannelMessageHook", () => {
         await harness.hook.register();
       });
 
-      it("records an ambient message through the host, without an action or typing", async () => {
+      it("records an ambient message through the host, without an action, typing or a download", async () => {
         const begin = activityOn();
         const materialize = rs.fn(async () => [
           { type: "image" as const, url: "file-id", localPath: "/tmp/photo.jpg" },
@@ -500,10 +500,11 @@ describe("ChannelMessageHook", () => {
           message: expect.objectContaining({
             messageId: "message-1",
             senderId: "user-1",
-            attachments: [{ type: "image", url: "file-id", localPath: "/tmp/photo.jpg" }],
+            attachments: [{ type: "image", url: "file-id" }],
           }),
           routedAgentName: "sales:agent",
         });
+        expect(materialize).not.toHaveBeenCalled();
         expect(harness.run).not.toHaveBeenCalled();
         expect(begin).not.toHaveBeenCalled();
       });

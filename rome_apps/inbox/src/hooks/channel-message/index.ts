@@ -173,6 +173,41 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       return;
     }
 
+    if (!replyRuleAnswers(snapshot, message)) {
+      // Recorded so the agent sees it, without a turn or a typing indicator.
+      // Awaited, so the channel holds the conversation until it is stored: the
+      // next message waits behind it, and a burst stays in the channel's
+      // bounded buffer. Its files are not downloaded and no action worker is
+      // taken, so a `/stop` behind it waits only for the host's store.
+      const record = this.options.recordChatMessage;
+      if (record) {
+        try {
+          await record({ ref, service, message, routedAgentName });
+        } catch (err) {
+          log.error("failed to record a declined message", {
+            service,
+            messageId: message.messageId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        return;
+      }
+      // A host that predates `recordChatMessage` stores it through `message_handler`.
+      await this.runTurn(
+        message,
+        service,
+        connectionId,
+        message.attachments,
+        Promise.resolve(null),
+        {
+          routedAgentName,
+          accountAgentName: accountAgent,
+          answer: false,
+        },
+      );
+      return;
+    }
+
     let attachments = message.attachments;
     // Through the channel's Connection, which is `ref`'s.
     const inboundMedia = channel.inbound?.media ?? null;
@@ -186,34 +221,6 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           error: err instanceof Error ? err.message : String(err),
         });
       }
-    }
-
-    if (!replyRuleAnswers(snapshot, message)) {
-      // Recorded so the agent sees it, without a turn or a typing indicator.
-      // Awaited, so the channel holds the conversation until it is stored: the
-      // next message waits behind it, and a burst stays in the channel's
-      // bounded buffer. The host's write takes no action worker, so a `/stop`
-      // behind it waits only for the store.
-      const record = this.options.recordChatMessage;
-      if (record) {
-        try {
-          await record({ ref, service, message: { ...message, attachments }, routedAgentName });
-        } catch (err) {
-          log.error("failed to record a declined message", {
-            service,
-            messageId: message.messageId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-        return;
-      }
-      // A host that predates `recordChatMessage` stores it through `message_handler`.
-      await this.runTurn(message, service, connectionId, attachments, Promise.resolve(null), {
-        routedAgentName,
-        accountAgentName: accountAgent,
-        answer: false,
-      });
-      return;
     }
 
     const activity = Promise.resolve()
