@@ -112,18 +112,14 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           service,
           senderId: message.senderId,
         });
-        await this.reply(channel, message.conversationId, chatStopReceipt(result.status));
+        await this.reply(channel, message.chatId, chatStopReceipt(result.status));
       } catch (err) {
         log.error("stop command failed", {
           service,
           messageId: message.messageId,
           error: err instanceof Error ? err.message : String(err),
         });
-        await this.reply(
-          channel,
-          message.conversationId,
-          "Stop could not be requested. Please try again.",
-        );
+        await this.reply(channel, message.chatId, "Stop could not be requested. Please try again.");
       }
       return;
     }
@@ -148,7 +144,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         ? "core:main"
         : (snapshot.effective.routing.agentName ?? undefined);
     if (!enabled) {
-      log.debug("conversation disabled", { connectionId, conversationId: message.conversationId });
+      log.debug("conversation disabled", { connectionId, chatId: message.chatId });
       return;
     }
 
@@ -172,7 +168,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         () =>
           // Typing follows the channel's current Connection, the one a reply would go out on.
           channel.send?.activity?.begin({
-            conversationId: message.conversationId,
+            chatId: message.chatId,
             messageId: message.messageId,
           }) ?? null,
       )
@@ -220,8 +216,8 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           channelUserId: message.senderId,
           threadName: message.thread?.name,
           threadType: message.thread?.kind === "dm" ? "private" : "group",
-          threadId: message.conversationId,
-          parentThreadId: message.parentConversationId,
+          threadId: message.chatId,
+          parentThreadId: message.parentChatId,
           displayName: message.senderDisplayName ?? message.senderId,
           text: message.text,
           timestamp: message.timestamp.toISOString(),
@@ -235,8 +231,8 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           channelContext: {
             connectionId,
             channel: service,
-            threadId: message.conversationId,
-            parentThreadId: message.parentConversationId,
+            threadId: message.chatId,
+            parentThreadId: message.parentChatId,
             channelUserId: message.senderId,
             threadName: message.thread?.name,
             threadType: message.thread?.kind === "dm" ? "private" : "group",
@@ -267,12 +263,12 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
 
   /** Answer in a conversation on the channel it arrived on, where it can send.
    *  The channel sends through the Connection backing it, which is `ref`'s. */
-  private async reply(channel: Channel, conversationId: ChatId, text: string): Promise<void> {
+  private async reply(channel: Channel, chatId: ChatId, text: string): Promise<void> {
     if (!channel.send) {
       log.warn("cannot answer on a channel that does not send", { service: channel.name });
       return;
     }
-    await channel.send.send(conversationId, { text });
+    await channel.send.send(chatId, { text });
   }
 }
 

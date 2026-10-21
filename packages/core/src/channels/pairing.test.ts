@@ -99,9 +99,9 @@ describe("channel pairing approvals", () => {
         : channel === "discord"
           ? "<@123> (`123`)"
           : '<at user_id="ou_123">ou_123</at> (`ou_123`)';
-    const send = rs.fn<Send>(async (_connection, conversationId) => ({
+    const send = rs.fn<Send>(async (_connection, chatId) => ({
       messageId: "sent",
-      conversationId,
+      chatId,
     }));
     const chatFor = rs.fn(async () => "private-chat" as ChatId);
     const feature = rs.fn(() => ({ chatFor }));
@@ -117,7 +117,7 @@ describe("channel pairing approvals", () => {
       direction: "inbound",
       senderId: id,
       senderUsername: channel === "telegram" ? "actualuser" : undefined,
-      conversationId: "group" as ChatId,
+      chatId: "group" as ChatId,
       messageId: "request",
       text: "hello",
       attachments: [],
@@ -159,7 +159,7 @@ describe("channel pairing approvals", () => {
       channel: "telegram",
       direction: "inbound",
       senderId: "123",
-      conversationId: "group" as ChatId,
+      chatId: "group" as ChatId,
       messageId: "request",
       text: "hello",
       attachments: [],
@@ -185,7 +185,7 @@ describe("channel pairing approvals", () => {
     seedConnection(channel);
     const send = rs.fn<Send>(async () => ({
       messageId: "sent",
-      conversationId: "dm" as ChatId,
+      chatId: "dm" as ChatId,
     }));
     await createPairingAdmission({
       talkGrants,
@@ -197,7 +197,7 @@ describe("channel pairing approvals", () => {
       direction: "inbound",
       senderId: id,
       senderDisplayName: name,
-      conversationId: "dm" as ChatId,
+      chatId: "dm" as ChatId,
       messageId: "request",
       text: "hello",
       attachments: [],
@@ -245,7 +245,7 @@ describe("channel pairing approvals", () => {
     if (result.outcome !== "resolved") throw new Error("Approval failed");
     const send = rs.fn<Send>(async () => ({
       messageId: "sent",
-      conversationId: "dm" as ChatId,
+      chatId: "dm" as ChatId,
     }));
     const registry = registryOf(send, () => ({
       chatFor: async () => "dm" as ChatId,
@@ -297,7 +297,7 @@ describe("channel pairing approvals", () => {
     await people.addChannelMapping(STRANGER_PERSON_ID, channel, accountId, "Alice");
     const send = rs.fn<Send>(async () => ({
       messageId: "sent",
-      conversationId: "dm" as ChatId,
+      chatId: "dm" as ChatId,
     }));
     const registry = registryOf(send);
     const admit = createPairingAdmission({
@@ -311,7 +311,7 @@ describe("channel pairing approvals", () => {
       direction: "inbound",
       senderId: accountId,
       senderDisplayName: "Alice",
-      conversationId: "dm" as ChatId,
+      chatId: "dm" as ChatId,
       messageId: "request",
       text: "hello",
       attachments: [],
@@ -381,7 +381,7 @@ describe("channel pairing approvals", () => {
       direction: "inbound",
       senderId: "123",
       senderDisplayName: "Alice",
-      conversationId: "dm" as ChatId,
+      chatId: "dm" as ChatId,
       messageId: "racing",
       text: "hello",
       attachments: [],
@@ -597,7 +597,7 @@ describe("channel pairing approvals", () => {
     seedConnection(service);
     const send = rs.fn<Send>(async () => ({
       messageId: "sent",
-      conversationId: "dm" as ChatId,
+      chatId: "dm" as ChatId,
     }));
     const registry = registryOf(send);
     const admit = createPairingAdmission({
@@ -619,7 +619,7 @@ describe("channel pairing approvals", () => {
       senderId: id,
       senderDisplayName: "Owner",
       senderUsername: service === "telegram" ? "realowner" : undefined,
-      conversationId: "dm" as ChatId,
+      chatId: "dm" as ChatId,
       messageId: "one",
       text: "hello",
       attachments: [],

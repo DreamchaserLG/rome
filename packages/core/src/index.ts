@@ -40,6 +40,12 @@ import {
   shutdown as shutdownTelemetry,
   withInboundSpans,
 } from "./telemetry.js";
+import {
+  legacyChatIdChannels,
+  legacyChatIdChannelsService,
+  legacyChatIdSettings,
+  legacyChatIdStop,
+} from "./apps/legacy-chat-id.js";
 import type { ChatStopHandler } from "@rome-os/app-runtime";
 
 const log = createLogger("startup");
@@ -935,15 +941,18 @@ async function main() {
     agentLoader,
     actionRegistry,
   });
+  // What apps get of the chat settings, with the chat ids an app built for
+  // SDK 0.7 reads.
+  const appChatSettings = legacyChatIdSettings(chatSettings);
   const appActionDeps = {
     agentRunner,
     resolveOneOffDate: (trigger: Trigger) =>
       resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),
     resolveArtifactReference,
-    channelsService,
-    chatSettings,
+    channelsService: legacyChatIdChannelsService(channelsService),
+    chatSettings: appChatSettings,
     // Apps built before the chat rename read `conversationSettings`.
-    conversationSettings: chatSettings,
+    conversationSettings: appChatSettings,
     capabilityDiscovery,
     personMappingRepo,
     sentinelLogRepo,
@@ -1257,7 +1266,8 @@ async function main() {
 
   // The channel-message hook hears every channel through these, so each
   // inbound message it handles is traced and logged once.
-  const hookChannels = withInboundSpans(channels, "channel-message");
+  const hookChannels = legacyChatIdChannels(withInboundSpans(channels, "channel-message"));
+  const hookChatStop = legacyChatIdStop(chatStop);
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
   const channelMessageHookArtifact = appCatalog
     .listArtifacts("hook")
@@ -1266,9 +1276,9 @@ async function main() {
     try {
       const loadedHook = await createChannelMessageHookFromCatalog(appCatalog, {
         actionEngine,
-        chatSettings,
-        conversationSettings: chatSettings,
-        chatStop,
+        chatSettings: appChatSettings,
+        conversationSettings: appChatSettings,
+        chatStop: hookChatStop,
         channels: hookChannels,
         accountAgentOf,
         linkedAgentOf: accountAgentOf,
@@ -1308,9 +1318,9 @@ async function main() {
         catalog: appCatalog,
         deps: {
           actionEngine,
-          chatSettings,
-          conversationSettings: chatSettings,
-          chatStop,
+          chatSettings: appChatSettings,
+          conversationSettings: appChatSettings,
+          chatStop: hookChatStop,
           channels: hookChannels,
           accountAgentOf,
           linkedAgentOf: accountAgentOf,
@@ -1339,7 +1349,7 @@ async function main() {
       connection,
     );
     if (!channel) return;
-    const added = withInboundSpans([channel], "channel-message");
+    const added = legacyChatIdChannels(withInboundSpans([channel], "channel-message"));
     hookChannels.push(...added);
     const hook = messageHook;
     // A hook without `addChannels` re-registers, as the app-keys reloader

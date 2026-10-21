@@ -6,12 +6,12 @@ const dashboardActor = { kind: "guardian" as const, id: "dashboard" };
 
 function parseRef(value: unknown): ChatRef {
   if (!value || typeof value !== "object") throw new Error("ref is required");
-  const ref = value as { connectionId?: unknown; conversationId?: unknown };
+  const ref = value as { connectionId?: unknown; chatId?: unknown };
   if (typeof ref.connectionId !== "string" || !ref.connectionId) {
     throw new Error("ref.connectionId is required");
   }
-  if (typeof ref.conversationId !== "string") {
-    throw new Error("ref.conversationId is required");
+  if (typeof ref.chatId !== "string") {
+    throw new Error("ref.chatId is required");
   }
   return ref as ChatRef;
 }

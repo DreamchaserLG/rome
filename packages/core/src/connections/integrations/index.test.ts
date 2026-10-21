@@ -69,7 +69,7 @@ describe("registerBuiltinConnections", () => {
       );
     const page = await talker.directory!.listConversations({ limit: 10 });
 
-    expect(page.conversations.map((c) => c.ref.conversationId)).toEqual(["wxid_friend"]);
+    expect(page.conversations.map((c) => c.ref.chatId)).toEqual(["wxid_friend"]);
     expect(bridgeCommand).toHaveBeenCalled();
   });
   it("offers no WeChat personal connection without a runtime, so none is built twice", () => {

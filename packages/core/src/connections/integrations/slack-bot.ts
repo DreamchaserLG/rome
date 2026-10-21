@@ -365,9 +365,9 @@ export function makeSlackBotDescriptor(deps: SlackBotDescriptorDeps = {}): Conne
             stop(): void {
               adapter.stop();
             },
-            async send(conversationId, message) {
+            async send(chatId, message) {
               try {
-                return await adapter.send(conversationId, message);
+                return await adapter.send(chatId, message);
               } catch (error) {
                 if (isSlackCredentialError(error)) {
                   throw new CredentialRejected({ grant: "bot", cause: error });

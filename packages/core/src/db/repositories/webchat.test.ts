@@ -9,7 +9,7 @@ import { romeAgentMessages, romeSessions, romeAgentTraceBlocks } from "../schema
 import {
   INTERRUPTED_TURN_ERROR,
   WebChatRepository,
-  channelConversationId,
+  channelChatId,
   sessionAwaitingGuardian,
   sessionLastTurnFailed,
   validateTurnRecapAudioUrl,
@@ -497,9 +497,9 @@ describe("WebChatRepository", () => {
         parentSessionId: "chat-1",
       });
 
-      expect(await repo.findConversationIdByAddress("webchat", "chat-1")).toBe("chat-1");
-      expect(await repo.findConversationIdByAddress("telegram", "thread-1")).toBe(channel.id);
-      expect(await repo.findConversationIdByAddress("telegram", "thread-2")).toBeNull();
+      expect(await repo.findChatIdByAddress("webchat", "chat-1")).toBe("chat-1");
+      expect(await repo.findChatIdByAddress("telegram", "thread-1")).toBe(channel.id);
+      expect(await repo.findChatIdByAddress("telegram", "thread-2")).toBeNull();
     });
 
     it("finds a chat by its webchat address like any channel conversation", async () => {
@@ -569,7 +569,7 @@ describe("WebChatRepository", () => {
       await testDb.db
         .update(romeSessions)
         .set({ agentName: "release-agent" })
-        .where(eq(romeSessions.id, channelConversationId("discord", "channel-1")));
+        .where(eq(romeSessions.id, channelChatId("discord", "channel-1")));
       const second = await repo.ensureChannelChat({
         channel: "discord",
         threadId: "thread-1",
@@ -578,14 +578,14 @@ describe("WebChatRepository", () => {
       });
 
       expect(first).toEqual({
-        id: channelConversationId("discord", "thread-1"),
+        id: channelChatId("discord", "thread-1"),
         agentName: null,
       });
       expect(second).toEqual({ ...first, agentName: "release-agent" });
 
       const rows = await testDb.db.select().from(romeSessions).where(eq(romeSessions.id, first.id));
       expect(rows[0]).toMatchObject({
-        parentSessionId: channelConversationId("discord", "channel-1"),
+        parentSessionId: channelChatId("discord", "channel-1"),
         sourceChannel: "discord",
         sourceThreadId: "thread-1",
         agentName: "release-agent",
@@ -594,7 +594,7 @@ describe("WebChatRepository", () => {
       const parentRows = await testDb.db
         .select()
         .from(romeSessions)
-        .where(eq(romeSessions.id, channelConversationId("discord", "channel-1")));
+        .where(eq(romeSessions.id, channelChatId("discord", "channel-1")));
       expect(parentRows[0]?.agentName).toBe("release-agent");
     });
 
@@ -617,7 +617,7 @@ describe("WebChatRepository", () => {
     });
 
     it("backfills a row the settings page saved under the bare chat id", async () => {
-      const id = channelConversationId("feishu", "oc_chat");
+      const id = channelChatId("feishu", "oc_chat");
       await repo.ensureRomeSession({
         id,
         name: "oc_chat",

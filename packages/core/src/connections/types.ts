@@ -31,11 +31,7 @@ import type { CredentialRejected, Disconnected } from "./errors.js";
  * store of its own (channels/connection-ports.ts).
  */
 export interface TalkHistory {
-  query(input: {
-    conversationId?: ChatId;
-    since?: Date;
-    limit?: number;
-  }): Promise<ChannelMessage[]>;
+  query(input: { chatId?: ChatId; since?: Date; limit?: number }): Promise<ChannelMessage[]>;
 }
 
 /** The conversations a Connection can see, for conversation settings. */
@@ -258,7 +254,7 @@ export interface Talker extends TalkFeatures {
    *  shutdown (`ConnectionRegistry.stopAll`) so in-flight sends / long-poll
    *  drain before the process exits; relock teardown does NOT await it. */
   stop(): void | Promise<void>;
-  send(conversationId: ChatId, msg: OutgoingMessage): Promise<MessageReceipt>;
+  send(chatId: ChatId, msg: OutgoingMessage): Promise<MessageReceipt>;
 }
 
 /** Builder-side Act implementation. */

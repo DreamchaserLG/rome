@@ -20,7 +20,7 @@ let outsideRoot = "";
 function makeAdapter(service = "discord"): ChannelsService {
   return {
     list: rs.fn(async () => [{ name: service, sendable: true }]),
-    send: rs.fn(async (_channel, conversationId) => ({ conversationId })),
+    send: rs.fn(async (_channel, chatId) => ({ chatId })),
     query: async () => [],
   };
 }
@@ -103,7 +103,7 @@ describe("send_message email union", () => {
   function makeEmailAdapter(): ChannelsService {
     const adapter = makeAdapter("email");
     (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
-      conversationId: "t1",
+      chatId: "t1",
       messageId: "msg_1",
     });
     return adapter;
@@ -311,7 +311,7 @@ describe("send_message conversation recording", () => {
     const adapter = makeAdapter();
     (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
       messageId: "platform-out-1",
-      conversationId: "thread-1",
+      chatId: "thread-1",
     });
     const ensureChannelChat = rs.fn(async () => ({
       id: "channel:discord:thread-1",
@@ -355,7 +355,7 @@ describe("send_message conversation recording", () => {
     const adapter = makeAdapter();
     (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
       messageId: "platform-out-1",
-      conversationId: "thread-1",
+      chatId: "thread-1",
     });
     const recordOutboundMessage = rs.fn(async () => undefined);
     // Only the old method, reading its own receiver as a host repository can.
@@ -384,7 +384,7 @@ describe("send_message conversation recording", () => {
     const adapter = makeAdapter("webchat");
     (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
       messageId: "webchat-out-1",
-      conversationId: "session-1",
+      chatId: "session-1",
     });
     const ensureChannelChat = rs.fn();
     const recordOutboundMessage = rs.fn();
@@ -411,7 +411,7 @@ describe("send_message conversation recording", () => {
     const adapter = makeAdapter();
     (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
       messageId: "platform-out-2",
-      conversationId: "thread-2",
+      chatId: "thread-2",
     });
 
     await expect(
