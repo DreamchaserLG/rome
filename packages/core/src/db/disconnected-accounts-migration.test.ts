@@ -100,6 +100,15 @@ describe("delete disconnected accounts migration", () => {
         })
         .run();
     }
+    db.insert(romeAgentMessages)
+      .values({
+        id: "m-late",
+        sessionId: "channel:telegram:t2",
+        role: "assistant",
+        content: "[]",
+        createdAt: NOW,
+      })
+      .run();
     db.insert(romeSessions)
       .values({
         id: "child",

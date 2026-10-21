@@ -73,6 +73,26 @@ describe("ChannelRecordsRepository", () => {
     expect(readded.id).toMatch(UUID);
   });
 
+  it("keeps a deleted channel's id from a re-added bot while a late turn's rows spell it", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", service: "telegram" }, NOW);
+    records.vacate(db, "c1");
+    // A turn still running at the disconnect writes its reply afterwards.
+    db.insert(romeAgentMessages)
+      .values({
+        id: "late",
+        sessionId: "channel:telegram:t1",
+        role: "assistant",
+        content: "[]",
+        createdAt: NOW,
+      })
+      .run();
+
+    const restarted = new ChannelRecordsRepository(db);
+    expect(restarted.claim(db, { id: "c2", service: "telegram" }, NOW).id).toMatch(UUID);
+  });
+
   it("gives a deleted channel's id to a re-added bot after a restart", () => {
     const records = repository();
     const db = testDb!.db;

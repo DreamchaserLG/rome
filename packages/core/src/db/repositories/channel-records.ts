@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { platformOf } from "../../channels/platform.js";
 import {
@@ -73,12 +74,49 @@ function firstAccountAgent(exec: Exec, service: string): string | null {
   return backed === undefined ? MAIN_AGENT_ID : null;
 }
 
+const startsWith = (column: SQLiteColumn, prefix: string) =>
+  sql`substr(${column}, 1, ${prefix.length}) = ${prefix}`;
+
+/** An agent session whose key spells channel `id`, its sentinel's included. */
+function keyedTo(id: string) {
+  return or(
+    startsWith(sessions.channelThreadKey, `${id}:`),
+    startsWith(sessions.channelThreadKey, `sentinel:${id}:`),
+  );
+}
+
+/** A message row of a conversation on channel `id`, by the conversation id
+ *  every conversation on the channel takes (`channelConversationId`), so it
+ *  is found even when its conversation row is gone. */
+function onChannel(column: SQLiteColumn, id: string) {
+  return startsWith(column, `channel:${id}:`);
+}
+
+/** Whether anything stored spells channel `id`: a conversation on it, or an
+ *  agent session keyed to it. A turn running when its channel was deleted can
+ *  still write under the deleted id, so a new channel avoids such an id. */
+function spelled(exec: Exec, id: string): boolean {
+  const conversation = exec
+    .select({ id: romeSessions.id })
+    .from(romeSessions)
+    .where(eq(romeSessions.sourceChannel, id))
+    .get();
+  if (conversation) return true;
+  const message = exec
+    .select({ id: romeAgentMessages.id })
+    .from(romeAgentMessages)
+    .where(onChannel(romeAgentMessages.sessionId, id))
+    .get();
+  if (message) return true;
+  return exec.select({ id: sessions.id }).from(sessions).where(keyedTo(id)).get() !== undefined;
+}
+
 /**
  * Delete channel `id` and what was recorded through it: its conversations with
  * their messages, the agent sessions that served them, its outbox and its
- * triage log. An agent session is
- * found by its conversation and by its key, which spells the channel, so a
- * later channel minted under the same id resumes none of them. Subagent
+ * triage log. Agent sessions are found by their key and messages by their
+ * conversation id as well, since both spell the channel, so rows a turn wrote
+ * after its conversation went are deleted too. Subagent
  * conversations whose parent goes stay, with no parent. Migration 0083 runs
  * the same deletes for the channels left unbacked before this.
  */
@@ -87,18 +125,10 @@ function deleteChannel(exec: Exec, id: string): void {
     .select({ id: romeSessions.id })
     .from(romeSessions)
     .where(eq(romeSessions.sourceChannel, id));
-  const keyed = (prefix: string) =>
-    sql`substr(${sessions.channelThreadKey}, 1, ${prefix.length}) = ${prefix}`;
   const agentSessions = exec
     .select({ id: sessions.id })
     .from(sessions)
-    .where(
-      or(
-        inArray(sessions.conversationId, conversations),
-        keyed(`${id}:`),
-        keyed(`sentinel:${id}:`),
-      ),
-    );
+    .where(or(inArray(sessions.conversationId, conversations), keyedTo(id)));
   exec
     .delete(sessionTurnCheckpoints)
     .where(inArray(sessionTurnCheckpoints.sessionId, agentSessions))
@@ -106,9 +136,22 @@ function deleteChannel(exec: Exec, id: string): void {
   exec.delete(sessions).where(inArray(sessions.id, agentSessions)).run();
   exec
     .delete(romeAgentTraceBlocks)
-    .where(inArray(romeAgentTraceBlocks.sessionId, conversations))
+    .where(
+      or(
+        inArray(romeAgentTraceBlocks.sessionId, conversations),
+        onChannel(romeAgentTraceBlocks.sessionId, id),
+      ),
+    )
     .run();
-  exec.delete(romeAgentMessages).where(inArray(romeAgentMessages.sessionId, conversations)).run();
+  exec
+    .delete(romeAgentMessages)
+    .where(
+      or(
+        inArray(romeAgentMessages.sessionId, conversations),
+        onChannel(romeAgentMessages.sessionId, id),
+      ),
+    )
+    .run();
   exec
     .delete(webchatTurnFeedback)
     .where(inArray(webchatTurnFeedback.sessionId, conversations))
@@ -244,7 +287,8 @@ export class ChannelRecordsRepository {
     const serviceIdTaken =
       this.deleted.has(service) ||
       exec.select({ id: channels.id }).from(channels).where(eq(channels.id, service)).get() !==
-        undefined;
+        undefined ||
+      (LINKABLE_SERVICES.has(service) && spelled(exec, service));
     const id = serviceIdTaken ? randomUUID() : service;
     const row = {
       id,
