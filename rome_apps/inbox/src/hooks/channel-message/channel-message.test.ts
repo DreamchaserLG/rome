@@ -468,7 +468,7 @@ describe("ChannelMessageHook", () => {
       expect(harness.run).toHaveBeenCalledWith(
         "message_handler",
         expect.objectContaining({ messageId: "message-1", answer: false }),
-        expect.objectContaining({ whenWorkersBusy: "queue" }),
+        expect.anything(),
       );
       expect(begin).not.toHaveBeenCalled();
     });
@@ -483,11 +483,10 @@ describe("ChannelMessageHook", () => {
       await harness.emit(TELEGRAM_ID, message({ addressing }));
 
       expect(harness.run.mock.calls[0]?.[1]).not.toHaveProperty("answer");
-      expect(harness.run.mock.calls[0]?.[2]).not.toHaveProperty("whenWorkersBusy");
       await rs.waitFor(() => expect(begin).toHaveBeenCalledTimes(1));
     });
 
-    it("starts a turn only after the recordings before it are stored", async () => {
+    it("holds the conversation until a declined message is stored", async () => {
       ruled("mention");
       let stored!: () => void;
       harness.run.mockImplementationOnce(
@@ -497,13 +496,21 @@ describe("ChannelMessageHook", () => {
           }),
       );
 
-      await harness.emit(TELEGRAM_ID, message({ messageId: "chatter", addressing: "ambient" }));
-      await harness.emit(TELEGRAM_ID, message({ messageId: "asked", addressing: "mention" }));
+      const chatter = harness.emit(
+        TELEGRAM_ID,
+        message({ messageId: "chatter", addressing: "ambient" }),
+      );
+      const asked = harness.emit(
+        TELEGRAM_ID,
+        message({ messageId: "asked", addressing: "mention" }),
+      );
+      await rs.waitFor(() => expect(harness.run).toHaveBeenCalledTimes(1));
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(harness.run).toHaveBeenCalledTimes(1);
       stored();
-      await rs.waitFor(() => expect(harness.run).toHaveBeenCalledTimes(2));
+      await Promise.all([chatter, asked]);
+      expect(harness.run).toHaveBeenCalledTimes(2);
       expect(harness.run.mock.calls[1]?.[1]).toMatchObject({ messageId: "asked" });
     });
 

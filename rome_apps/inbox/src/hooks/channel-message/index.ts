@@ -48,10 +48,6 @@ export function replyRuleAnswers(
 export class ChannelMessageHook implements ChannelMessageHookInterface {
   /** Unsubscribe functions by channel name, one per channel this hook holds. */
   private readonly subscriptions = new Map<string, () => void>();
-  /** The last recording-only run still pending, by conversation. A recording
-   *  can wait for a worker while an answer takes a reserved one, so a turn
-   *  waits on it to see the messages before it. */
-  private readonly recordings = new Map<string, Promise<void>>();
 
   constructor(
     private readonly actionEngine: ActionEngineLike,
@@ -190,20 +186,15 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       }
     }
 
-    const conversation = `${connectionId}:${message.conversationId}`;
-    const recorded = this.recordings.get(conversation) ?? Promise.resolve();
     if (!replyRuleAnswers(snapshot, message)) {
       // Recorded so the agent sees it, without a turn or a typing indicator.
-      const recording = recorded.then(() =>
-        this.runTurn(message, service, connectionId, attachments, Promise.resolve(null), {
-          routedAgentName,
-          accountAgentName: accountAgent,
-          answer: false,
-        }),
-      );
-      this.recordings.set(conversation, recording);
-      void recording.then(() => {
-        if (this.recordings.get(conversation) === recording) this.recordings.delete(conversation);
+      // Awaited, so the channel holds the conversation until it is stored: the
+      // next message waits behind it, and a burst stays in the channel's
+      // bounded buffer instead of taking a worker per message.
+      await this.runTurn(message, service, connectionId, attachments, Promise.resolve(null), {
+        routedAgentName,
+        accountAgentName: accountAgent,
+        answer: false,
       });
       return;
     }
@@ -229,12 +220,10 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         });
         return null;
       });
-    void recorded.then(() =>
-      this.runTurn(message, service, connectionId, attachments, activity, {
-        routedAgentName,
-        accountAgentName: accountAgent,
-      }),
-    );
+    void this.runTurn(message, service, connectionId, attachments, activity, {
+      routedAgentName,
+      accountAgentName: accountAgent,
+    });
   }
 
   private async runTurn(
@@ -288,9 +277,6 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
             threadName: message.thread?.name,
             threadType: message.thread?.kind === "dm" ? "private" : "group",
           },
-          // A message Rome only records waits for a free worker, so a burst of
-          // group chatter is neither lost nor takes the slots answers need.
-          ...(route.answer === false ? { whenWorkersBusy: "queue" as const } : {}),
         },
       );
       void activity
