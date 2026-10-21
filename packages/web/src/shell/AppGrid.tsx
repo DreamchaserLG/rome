@@ -33,7 +33,7 @@ export interface PinnedEntry {
 
 // The rail always leads with Rome's three main surfaces, in this order. They
 // are not pins the guardian can remove; everything after them is.
-export const REQUIRED_BUILTIN_PINS: readonly PinnedEntry[] = [
+const REQUIRED_BUILTIN_PINS: readonly PinnedEntry[] = [
   { type: "builtin", id: "apps" },
   { type: "builtin", id: "chat" },
   { type: "builtin", id: "projects" },

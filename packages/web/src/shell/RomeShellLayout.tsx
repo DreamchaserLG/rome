@@ -192,10 +192,13 @@ export function RomeShellLayout() {
         {!hideSidebar ? (
           <aside
             ref={sidebarRef}
-            className={`fixed inset-y-0 left-0 z-40 flex shrink-0 border-r border-border bg-background pb-safe pt-safe transition-[translate] duration-200 ease-out motion-reduce:transition-none md:sticky md:top-0 md:h-[var(--rome-viewport-height)] md:translate-x-0 md:pb-0 md:pt-0 ${
+            className={`fixed inset-y-0 left-0 z-40 flex shrink-0 bg-background after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-border pb-safe pt-safe transition-[translate] duration-200 ease-out motion-reduce:transition-none md:sticky md:top-0 md:h-[var(--rome-viewport-height)] md:translate-x-0 md:pb-0 md:pt-0 ${
               sidebarOpen ? "translate-x-0" : "-translate-x-full"
             }`}
           >
+            {/* The edge line is drawn over the last pixel, not added as a
+                border: a border would make the sidebar a pixel wider than the
+                4rem or 20rem the page is pushed by. */}
             {/* The rail never carries a border of its own: one would take a pixel
                 from its width while the chat list shows, and shift every
                 centered tile by half of it as the list opens and closes. */}
