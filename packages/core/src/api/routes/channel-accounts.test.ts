@@ -212,6 +212,6 @@ describe("channel account routes", () => {
     });
 
     expect(res.status).toBe(403);
-    expect(records.byId("feishu")?.agent).toBe("core:main");
+    expect(records.byId("feishu")?.agent).toBeNull();
   });
 });
