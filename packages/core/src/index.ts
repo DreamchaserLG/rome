@@ -1385,6 +1385,10 @@ async function main() {
     channelRecords,
     connectionRegistry.all().filter((c) => talks(c.service)),
   );
+  // What a disconnected account left behind goes before a new account can
+  // take its id.
+  const swept = channelRecords.sweep();
+  if (swept.length > 0) log.info("deleted records of disconnected accounts", { channels: swept });
   await ensureZeroGrantConnections(connectionRegistry);
   connectionRegistry.startCapabilities();
 

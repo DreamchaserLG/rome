@@ -28,7 +28,7 @@ describe("claimChannels", () => {
     expect(records.all()).toHaveLength(3);
   });
 
-  it("keeps the service's name for a Connection whose history spells it", () => {
+  it("keeps the service's name and history for a Connection from before channels", () => {
     testDb = createTestDb();
     const records = new ChannelRecordsRepository(testDb.db);
     const now = new Date();
@@ -46,7 +46,10 @@ describe("claimChannels", () => {
       .run();
 
     claimChannels(testDb.db, records, [{ id: "c1", service: "telegram" }]);
+    // Boot sweeps after this pass, and the account's history is its own.
+    records.sweep();
 
     expect(records.byConnection("c1")?.id).toBe("telegram");
+    expect(testDb.db.select().from(romeSessions).all()).toHaveLength(1);
   });
 });

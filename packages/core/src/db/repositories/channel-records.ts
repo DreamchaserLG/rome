@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
-import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, isNull, lt, or } from "drizzle-orm";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { platformOf } from "../../channels/platform.js";
@@ -74,8 +74,11 @@ function firstAccountAgent(exec: Exec, service: string): string | null {
   return backed === undefined ? MAIN_AGENT_ID : null;
 }
 
-const startsWith = (column: SQLiteColumn, prefix: string) =>
-  sql`substr(${column}, 1, ${prefix.length}) = ${prefix}`;
+/** Rows whose `column` begins with `prefix`, as a range its index serves. */
+function startsWith(column: SQLiteColumn, prefix: string) {
+  const next = String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
+  return and(gte(column, prefix), lt(column, `${prefix.slice(0, -1)}${next}`));
+}
 
 /** An agent session whose key spells channel `id`, its sentinel's included. */
 function keyedTo(id: string) {
@@ -92,43 +95,21 @@ function onChannel(column: SQLiteColumn, id: string) {
   return startsWith(column, `channel:${id}:`);
 }
 
-/** Whether anything stored spells channel `id`: a conversation on it, a
- *  message or trace block of one, or an agent session keyed to it. A turn running when its channel was deleted can
- *  still write under the deleted id, so a new channel avoids such an id. */
-function spelled(exec: Exec, id: string): boolean {
-  const conversation = exec
-    .select({ id: romeSessions.id })
-    .from(romeSessions)
-    .where(eq(romeSessions.sourceChannel, id))
-    .get();
-  if (conversation) return true;
-  const message = exec
-    .select({ id: romeAgentMessages.id })
-    .from(romeAgentMessages)
-    .where(onChannel(romeAgentMessages.sessionId, id))
-    .get();
-  if (message) return true;
-  const traceBlock = exec
-    .select({ id: romeAgentTraceBlocks.messageId })
-    .from(romeAgentTraceBlocks)
-    .where(onChannel(romeAgentTraceBlocks.sessionId, id))
-    .get();
-  if (traceBlock) return true;
-  return exec.select({ id: sessions.id }).from(sessions).where(keyedTo(id)).get() !== undefined;
-}
+/** The shape of an id `claim` mints when a service's name is taken. */
+const MINTED_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Delete channel `id` and what was recorded through it: its conversations with
- * their messages, the agent sessions that served them, its outbox and its
- * triage log. Agent sessions are found by their key and messages by their
+ * Delete what was recorded through channel `id`: its conversations with their
+ * messages, the agent sessions that served them, its outbox and its triage
+ * log. Agent sessions are found by their key and messages by their
  * conversation id as well, since both spell the channel, so rows a turn wrote
  * after its conversation went are deleted too. A subagent conversation
  * carries its parent's channel, so it is one of the channel's conversations
  * and goes with it. Any other conversation whose parent goes stays, with no
- * parent. Migration 0083 runs
- * the same deletes for the channels left unbacked before this.
+ * parent. Migration 0083 runs the same deletes for the channels left unbacked
+ * before this.
  */
-function deleteChannel(exec: Exec, id: string): void {
+function deleteRecorded(exec: Exec, id: string): void {
   const conversations = exec
     .select({ id: romeSessions.id })
     .from(romeSessions)
@@ -177,7 +158,6 @@ function deleteChannel(exec: Exec, id: string): void {
   exec.delete(romeSessions).where(eq(romeSessions.sourceChannel, id)).run();
   exec.delete(outboundMessages).where(eq(outboundMessages.channel, id)).run();
   exec.delete(sentinelLog).where(eq(sentinelLog.channel, id)).run();
-  exec.delete(channels).where(eq(channels.id, id)).run();
 }
 
 /** The service a channel belongs to. A service's first channel carries the
@@ -263,17 +243,8 @@ export class ChannelRecordsRepository {
    * name first. Failing that, it gets the service's name if no channel holds
    * it, and a fresh opaque id otherwise. A linkable service's only connected
    * account is linked to main, so a guardian's first account answers.
-   *
-   * A new account of a linkable service skips its service's name while
-   * anything stored still spells it. `existing` marks a Connection from before
-   * channels were recorded, whose history is its own under that name.
    */
-  claim(
-    exec: Exec,
-    connection: { id: string; service: string },
-    now: Date,
-    { existing = false }: { existing?: boolean } = {},
-  ): ChannelRecord {
+  claim(exec: Exec, connection: { id: string; service: string }, now: Date): ChannelRecord {
     const held = exec.select().from(channels).where(eq(channels.connectionId, connection.id)).get();
     if (held) return toRecord(held);
     this.ids.clear();
@@ -304,8 +275,7 @@ export class ChannelRecordsRepository {
     const serviceIdTaken =
       this.deleted.has(service) ||
       exec.select({ id: channels.id }).from(channels).where(eq(channels.id, service)).get() !==
-        undefined ||
-      (!existing && LINKABLE_SERVICES.has(service) && spelled(exec, service));
+        undefined;
     const id = serviceIdTaken ? randomUUID() : service;
     const row = {
       id,
@@ -327,7 +297,8 @@ export class ChannelRecordsRepository {
     this.ids.clear();
     const row = exec.select().from(channels).where(eq(channels.connectionId, connectionId)).get();
     if (row && LINKABLE_SERVICES.has(row.service)) {
-      deleteChannel(exec, row.id);
+      deleteRecorded(exec, row.id);
+      exec.delete(channels).where(eq(channels.id, row.id)).run();
       this.deleted.add(row.id);
       return;
     }
@@ -357,6 +328,37 @@ export class ChannelRecordsRepository {
       tx.update(channels).set({ agent }).where(eq(channels.id, id)).run();
       return toRecord({ ...row, agent });
     });
+  }
+
+  /**
+   * Delete what is recorded under a channel id no row holds: a linkable
+   * service's name, or an id `claim` minted. Such rows are what a turn still
+   * running when its account was disconnected wrote after the deletes, and
+   * what was recorded through an account disconnected before channels were
+   * recorded. Run at boot after every Connection has its channel, before any
+   * new account can take a service's name, so none inherits them. Returns
+   * the ids swept.
+   */
+  sweep(): string[] {
+    const held = new Set(
+      this.db
+        .select({ id: channels.id })
+        .from(channels)
+        .all()
+        .map((row) => row.id),
+    );
+    const recorded = new Set<string>(LINKABLE_SERVICES);
+    const named = [
+      this.db.selectDistinct({ id: romeSessions.sourceChannel }).from(romeSessions).all(),
+      this.db.selectDistinct({ id: outboundMessages.channel }).from(outboundMessages).all(),
+      this.db.selectDistinct({ id: sentinelLog.channel }).from(sentinelLog).all(),
+    ].flat();
+    for (const { id } of named) if (id && MINTED_ID.test(id)) recorded.add(id);
+    const orphaned = [...recorded].filter((id) => !held.has(id));
+    this.db.transaction((tx) => {
+      for (const id of orphaned) deleteRecorded(tx, id);
+    });
+    return orphaned;
   }
 
   /** The Connections no channel records yet, for the boot pass that gives

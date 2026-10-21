@@ -74,37 +74,95 @@ describe("ChannelRecordsRepository", () => {
     expect(readded.id).toMatch(UUID);
   });
 
-  it("keeps a deleted channel's id from a re-added bot while a late turn's rows spell it", () => {
+  it("sweeps a late turn's rows under a deleted account's name, then gives the name back", () => {
     const records = repository();
     const db = testDb!.db;
     records.claim(db, { id: "c1", service: "telegram" }, NOW);
     records.vacate(db, "c1");
-    // A turn still running at the disconnect writes its reply afterwards.
+    // A turn still running at the disconnect writes after the deletes.
+    db.insert(romeSessions)
+      .values({
+        id: "channel:telegram:t1",
+        name: "t1",
+        type: "channel",
+        sourceChannel: "telegram",
+        sourceThreadId: "t1",
+        activityAt: NOW,
+        createdAt: NOW,
+      })
+      .run();
     db.insert(romeAgentMessages)
       .values({
         id: "late",
-        sessionId: "channel:telegram:t1",
+        sessionId: "channel:telegram:t2",
         role: "assistant",
         content: "[]",
         createdAt: NOW,
       })
       .run();
-
-    const restarted = new ChannelRecordsRepository(db);
-    expect(restarted.claim(db, { id: "c2", service: "telegram" }, NOW).id).toMatch(UUID);
-  });
-
-  it("keeps a deleted channel's id from a re-added bot while a late trace block spells it", () => {
-    const records = repository();
-    const db = testDb!.db;
-    records.claim(db, { id: "c1", service: "telegram" }, NOW);
-    records.vacate(db, "c1");
     db.insert(romeAgentTraceBlocks)
-      .values({ messageId: "trace", seq: 0, sessionId: "channel:telegram:t1", content: "{}" })
+      .values({ messageId: "trace", seq: 0, sessionId: "channel:telegram:t3", content: "{}" })
+      .run();
+    db.insert(sentinelLog)
+      .values({
+        id: "triage",
+        messageId: "p1",
+        channel: "telegram",
+        channelUserId: "u1",
+        text: "hello",
+        action: "replied",
+        createdAt: NOW,
+      })
+      .run();
+    db.insert(sessions)
+      .values({
+        id: "agent",
+        agentName: "main",
+        channelThreadKey: "sentinel:telegram:t1",
+        createdAt: NOW,
+        lastActiveAt: NOW,
+        status: "completed",
+      })
       .run();
 
     const restarted = new ChannelRecordsRepository(db);
-    expect(restarted.claim(db, { id: "c2", service: "telegram" }, NOW).id).toMatch(UUID);
+    expect(restarted.sweep()).toContain("telegram");
+    expect(db.select().from(romeSessions).all()).toEqual([]);
+    expect(db.select().from(romeAgentMessages).all()).toEqual([]);
+    expect(db.select().from(romeAgentTraceBlocks).all()).toEqual([]);
+    expect(db.select().from(sentinelLog).all()).toEqual([]);
+    expect(db.select().from(sessions).all()).toEqual([]);
+    expect(restarted.claim(db, { id: "c2", service: "telegram" }, NOW).id).toBe("telegram");
+  });
+
+  it("sweeps late rows under a deleted minted id, and keeps every held channel's", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", service: "feishu" }, NOW);
+    const minted = records.claim(db, { id: "c2", service: "feishu" }, NOW).id;
+    records.vacate(db, "c2");
+    for (const channel of [minted, "feishu"]) {
+      db.insert(sentinelLog)
+        .values({
+          id: `s-${channel}`,
+          messageId: `p-${channel}`,
+          channel,
+          channelUserId: "u1",
+          text: "hello",
+          action: "replied",
+          createdAt: NOW,
+        })
+        .run();
+    }
+
+    expect(new ChannelRecordsRepository(db).sweep()).toContain(minted);
+    expect(
+      db
+        .select()
+        .from(sentinelLog)
+        .all()
+        .map((row) => row.id),
+    ).toEqual(["s-feishu"]);
   });
 
   it("gives a deleted channel's id to a re-added bot after a restart", () => {
