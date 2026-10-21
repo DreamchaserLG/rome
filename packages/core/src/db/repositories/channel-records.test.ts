@@ -92,6 +92,19 @@ describe("ChannelRecordsRepository", () => {
     expect(records.claim(db, { id: "c5", service: "agents" }, NOW).agent).toBeNull();
   });
 
+  it("gives a freshly connected account of a linkable service an opaque id, even when the name is free", () => {
+    const records = repository();
+    const db = testDb!.db;
+
+    expect(records.claim(db, { id: "c1", service: "telegram" }, NOW, { fresh: true }).id).toMatch(
+      UUID,
+    );
+    expect(records.claim(db, { id: "c2", service: "email" }, NOW, { fresh: true }).id).toBe(
+      "email",
+    );
+    expect(records.byId("telegram")).toBeNull();
+  });
+
   it("never gives a later account's channel to the next account", () => {
     const records = repository();
     const db = testDb!.db;

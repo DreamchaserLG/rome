@@ -123,7 +123,9 @@ export class ChannelRecordsRepository {
    * channel, so it starts with no history. A Connection of any other service
    * takes back the service's unbacked channel, the one carrying the service's
    * name first. Failing that, it gets the service's name if no channel holds
-   * it, and a fresh opaque id otherwise. A new channel is linked to `agent`
+   * it, and a fresh opaque id otherwise. With `fresh`, a linkable service's
+   * channel takes an opaque id even when the name is free, so its id is one
+   * no account ever had. A new channel is linked to `agent`
    * when its service takes one, and to none by default: Rome picks no agent
    * for an account. `domain` is a Feishu app's domain, which decides its
    * channel's platform.
@@ -132,7 +134,7 @@ export class ChannelRecordsRepository {
     exec: Exec,
     connection: { id: string; service: string; domain?: string },
     now: Date,
-    { agent = null }: { agent?: string | null } = {},
+    { agent = null, fresh = false }: { agent?: string | null; fresh?: boolean } = {},
   ): ChannelRecord {
     const held = exec.select().from(channels).where(eq(channels.connectionId, connection.id)).get();
     if (held) return toRecord(held);
@@ -164,7 +166,7 @@ export class ChannelRecordsRepository {
     const serviceIdTaken =
       exec.select({ id: channels.id }).from(channels).where(eq(channels.id, service)).get() !==
       undefined;
-    const id = serviceIdTaken ? randomUUID() : service;
+    const id = serviceIdTaken || (fresh && LINKABLE_SERVICES.has(service)) ? randomUUID() : service;
     const row = {
       id,
       service,
