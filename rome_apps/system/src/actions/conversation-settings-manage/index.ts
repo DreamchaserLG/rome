@@ -12,7 +12,7 @@ import type {
 interface Input {
   op: "list" | "get" | "set" | "reset";
   connectionId?: string;
-  conversationId?: string;
+  chatId?: string;
   query?: string;
   settings?: PartialChatSettings;
   clear?: ChatSettingField[];
@@ -34,9 +34,9 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
           type: "string",
           description: "Opaque connectionId returned by list or present in channel context.",
         },
-        conversationId: {
+        chatId: {
           type: "string",
-          description: "Opaque conversationId returned by list or present in channel context.",
+          description: "Opaque chatId returned by list or present in channel context.",
         },
         query: { type: "string", description: "Optional list search." },
         settings: {
@@ -73,12 +73,12 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
           }),
         };
       }
-      if (!input.connectionId || input.conversationId === undefined) {
-        return { status: "error", error: "connectionId and conversationId are required" };
+      if (!input.connectionId || input.chatId === undefined) {
+        return { status: "error", error: "connectionId and chatId are required" };
       }
       const ref = {
         connectionId: input.connectionId,
-        conversationId: input.conversationId as ChatId,
+        chatId: input.chatId as ChatId,
       };
       if (input.op === "get") return { status: "ok", data: await settings.get(ref) };
       if (input.op === "reset") {

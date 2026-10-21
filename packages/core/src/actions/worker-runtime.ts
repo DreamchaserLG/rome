@@ -57,6 +57,7 @@ import { createArtifactReferenceResolver } from "../apps/artifact-reference.js";
 import { resolveGuardianTimezone } from "../routines/guardian-timezone.js";
 import { resolveOneOffDate } from "../routines/schedule-trigger-provider.js";
 import type { Trigger } from "../routines/types.js";
+import { legacyChatIdChannelsService, legacyChatIdSettings } from "../apps/legacy-chat-id.js";
 
 const log = createLogger("action-worker");
 
@@ -118,6 +119,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
 
   const channelsService = new ChannelsServiceProxy();
   const chatSettings = new ChatSettingsControlProxy();
+  const appChatSettings = legacyChatIdSettings(chatSettings);
   const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, serviceOfChannel);
 
   const actionEngine = new ActionEngine(
@@ -150,10 +152,10 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     {
       agentRunner,
       resolveArtifactReference,
-      channelsService,
-      chatSettings,
+      channelsService: legacyChatIdChannelsService(channelsService),
+      chatSettings: appChatSettings,
       // Apps built before the chat rename read `conversationSettings`.
-      conversationSettings: chatSettings,
+      conversationSettings: appChatSettings,
       capabilityDiscovery,
       personMappingRepo,
       sentinelLogRepo,

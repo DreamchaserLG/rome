@@ -27,7 +27,7 @@ function makeChatSettings() {
     session: { reset: { mode: "idle", idleMinutes: 10_080 } },
   };
   const descriptor: ChatDescriptor = {
-    ref: { connectionId: CONNECTION_ID, conversationId: CHANNEL_ID },
+    ref: { connectionId: CONNECTION_ID, chatId: CHANNEL_ID },
     service: "discord",
     kind: "channel",
     displayName: "general",
@@ -190,7 +190,7 @@ describe("Discord configuration command authorization", () => {
 
     expect(settings.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        ref: { connectionId: CONNECTION_ID, conversationId: CHANNEL_ID },
+        ref: { connectionId: CONNECTION_ID, chatId: CHANNEL_ID },
         set: { routing: { agentName: "pm-assistant" } },
         actor: { kind: "guardian", id: "discord-slash" },
       }),

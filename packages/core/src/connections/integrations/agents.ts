@@ -84,7 +84,7 @@ export function toAgentInboundMessage(message: AgentMessageEnvelope): ChannelMes
     channel: AGENTS_SERVICE,
     direction: "inbound",
     messageId: message.messageId,
-    conversationId: sender as ChatId,
+    chatId: sender as ChatId,
     senderId: sender,
     senderDisplayName: agentLabel(message.from),
     text: `${message.text}${data}`,
@@ -258,24 +258,24 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
       generation++;
       cancelWait?.();
     },
-    async send(conversationId, msg) {
+    async send(chatId, msg) {
       // Cloud carries text and data only. Refusing here keeps a partial send
       // from being reported, and recorded, as if the files went too.
       if (msg.attachments?.length) {
         throw new Error("Agent messages carry text only; send the files another way.");
       }
-      if (!isAgentId(conversationId)) {
+      if (!isAgentId(chatId)) {
         throw new Error("Address an agent by its agent id (a UUID), not its name.");
       }
       const text = outgoingText(msg);
       if (!text.trim()) throw new Error("An agent message needs text.");
       try {
         const sent = await client.send({
-          to: conversationId,
+          to: chatId,
           text,
           ...(msg.replyToMessageId ? { inReplyTo: msg.replyToMessageId } : {}),
         });
-        return { conversationId, messageId: sent.messageId };
+        return { chatId, messageId: sent.messageId };
       } catch (err) {
         if (!isNotReachable(err)) throw err;
         throw new Error(

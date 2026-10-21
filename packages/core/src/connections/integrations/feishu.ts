@@ -597,7 +597,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
                 conversations: page.items.map((conversation) => ({
                   ref: {
                     connectionId: kit.connectionId,
-                    conversationId: conversation.id as import("@rome-os/app-runtime").ChatId,
+                    chatId: conversation.id as import("@rome-os/app-runtime").ChatId,
                   },
                   service: "feishu",
                   kind: conversation.kind,
@@ -624,9 +624,9 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             stop(): Promise<void> {
               return adapter.stop();
             },
-            async send(conversationId, msg) {
+            async send(chatId, msg) {
               try {
-                return await adapter.send(conversationId, msg);
+                return await adapter.send(chatId, msg);
               } catch (err) {
                 // A tenant-access-token failure from send is a refused credential.
                 if (isFeishuAuthError(err)) {

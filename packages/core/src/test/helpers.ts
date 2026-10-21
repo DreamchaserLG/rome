@@ -234,7 +234,7 @@ let sentCount = 0;
 
 /** One message Rome sent on a fake transport. */
 export interface SentMessage {
-  conversationId: ChatId;
+  chatId: ChatId;
   message: OutgoingMessage;
 }
 
@@ -253,12 +253,12 @@ export class FakeTransport {
 
   constructor(readonly channel = "test") {}
 
-  async send(conversationId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
-    this.sentMessages.push({ conversationId, message });
+  async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+    this.sentMessages.push({ chatId, message });
     // A message id, the way every real talker answers with one. The outbox
     // recognizes a delivered message by it, so a Talk that named nothing
     // would make every send untrackable in tests and only in tests.
-    return { conversationId, messageId: `sent-${++sentCount}` };
+    return { chatId, messageId: `sent-${++sentCount}` };
   }
 
   /** What the Connection's talker delivers through. */
@@ -344,7 +344,7 @@ export function createTestConnections(
 /** A talker over a fake transport. */
 function talkerOver(transport: FakeTransport): TestTalker {
   return {
-    send: (conversationId, message) => transport.send(conversationId, message),
+    send: (chatId, message) => transport.send(chatId, message),
     directMessaging: {
       async chatFor(channelUserId: string) {
         return channelUserId as ChatId;
@@ -420,7 +420,7 @@ export function buildMessage(overrides: Partial<ChannelMessage> = {}): ChannelMe
     channel: "telegram",
     direction: "inbound",
     messageId: "msg-001",
-    conversationId: "thread-001" as ChatId,
+    chatId: "thread-001" as ChatId,
     senderId: "user-123",
     senderDisplayName: "Test User",
     text: "Hello, world!",

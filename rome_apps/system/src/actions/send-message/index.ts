@@ -401,15 +401,15 @@ export async function executeSendMessage(
     if (
       typeof delivery?.messageId !== "string" ||
       !delivery.messageId.trim() ||
-      typeof delivery.conversationId !== "string" ||
-      !delivery.conversationId.trim()
+      typeof delivery.chatId !== "string" ||
+      !delivery.chatId.trim()
     ) {
       throw new Error(
         "Email delivery is unconfirmed: the channel did not return valid message and thread IDs. " +
           "Check email history before retrying to avoid sending a duplicate.",
       );
     }
-    const deliveredThreadId = delivery.conversationId;
+    const deliveredThreadId = delivery.chatId;
     await recordDeliveredConversationMessageBestEffort(deps, input, deliveredThreadId, delivery);
     return { status: "ok", data: { messageId: delivery.messageId, threadId: deliveredThreadId } };
   }
@@ -434,12 +434,7 @@ export async function executeSendMessage(
     replyToMessageId: chat.replyToMessageId,
     turnId,
   });
-  await recordDeliveredConversationMessageBestEffort(
-    deps,
-    input,
-    delivery.conversationId,
-    delivery,
-  );
+  await recordDeliveredConversationMessageBestEffort(deps, input, delivery.chatId, delivery);
   return delivery.messageId
     ? { status: "ok", data: { messageId: delivery.messageId } }
     : { status: "ok" };
