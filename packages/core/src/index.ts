@@ -44,6 +44,7 @@ import {
   legacyChatIdChannels,
   legacyChatIdChannelsService,
   legacyChatIdSettings,
+  legacyChatIdStop,
 } from "./apps/legacy-chat-id.js";
 import type { ChatStopHandler } from "@rome-os/app-runtime";
 
@@ -1265,6 +1266,7 @@ async function main() {
   // The channel-message hook hears every channel through these, so each
   // inbound message it handles is traced and logged once.
   const hookChannels = legacyChatIdChannels(withInboundSpans(channels, "channel-message"));
+  const hookChatStop = legacyChatIdStop(chatStop);
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
   const channelMessageHookArtifact = appCatalog
     .listArtifacts("hook")
@@ -1275,7 +1277,7 @@ async function main() {
         actionEngine,
         chatSettings: appChatSettings,
         conversationSettings: appChatSettings,
-        chatStop,
+        chatStop: hookChatStop,
         channels: hookChannels,
         accountAgentOf,
         linkedAgentOf: accountAgentOf,
@@ -1317,7 +1319,7 @@ async function main() {
           actionEngine,
           chatSettings: appChatSettings,
           conversationSettings: appChatSettings,
-          chatStop,
+          chatStop: hookChatStop,
           channels: hookChannels,
           accountAgentOf,
           linkedAgentOf: accountAgentOf,

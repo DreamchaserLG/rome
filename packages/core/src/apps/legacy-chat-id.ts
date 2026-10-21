@@ -18,14 +18,17 @@ import type {
   ChatRef,
   ChatSettingsControl,
   ChatSettingsSnapshot,
+  ChatStopHandler,
   MessageReceipt,
 } from "@rome-os/app-runtime";
 
-/** `value` with its chat id under `chatId`, when the app named it only
- *  `conversationId`. */
+/** `value` with its chat id under `chatId` alone, read from `conversationId`
+ *  when the app named it only that. The worker RPC rejects keys it does not
+ *  know, so the old name never travels on. */
 function chatIdIn<T extends { chatId?: ChatId }>(value: T): T {
-  const legacy = (value as { conversationId?: ChatId }).conversationId;
-  return value.chatId === undefined && legacy !== undefined ? { ...value, chatId: legacy } : value;
+  if (!("conversationId" in value)) return value;
+  const { conversationId, ...rest } = value as T & { conversationId?: ChatId };
+  return { ...rest, chatId: value.chatId ?? conversationId } as T;
 }
 
 function refOut(ref: ChatRef): ChatRef {
@@ -76,6 +79,11 @@ export function legacyChatIdSettings(control: ChatSettingsControl): ChatSettings
     reset: async (input) =>
       snapshotOut(await control.reset({ ...input, ref: chatIdIn(input.ref) })),
   };
+}
+
+/** The stop handler as a hook gets it. */
+export function legacyChatIdStop(stop: ChatStopHandler): ChatStopHandler {
+  return (input) => stop({ ...input, ref: chatIdIn(input.ref) });
 }
 
 /** The channels service as an app action gets it. Every other member,

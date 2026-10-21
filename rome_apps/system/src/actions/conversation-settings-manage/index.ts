@@ -13,6 +13,8 @@ interface Input {
   op: "list" | "get" | "set" | "reset";
   connectionId?: string;
   chatId?: string;
+  /** What routines saved before the rename name the chat. */
+  conversationId?: string;
   query?: string;
   settings?: PartialChatSettings;
   clear?: ChatSettingField[];
@@ -73,13 +75,11 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
           }),
         };
       }
-      if (!input.connectionId || input.chatId === undefined) {
+      const chatId = input.chatId ?? input.conversationId;
+      if (!input.connectionId || chatId === undefined) {
         return { status: "error", error: "connectionId and chatId are required" };
       }
-      const ref = {
-        connectionId: input.connectionId,
-        chatId: input.chatId as ChatId,
-      };
+      const ref = { connectionId: input.connectionId, chatId: chatId as ChatId };
       if (input.op === "get") return { status: "ok", data: await settings.get(ref) };
       if (input.op === "reset") {
         return {

@@ -7,12 +7,14 @@ import type {
   ChatRef,
   ChatSettingsControl,
   ChatSettingsSnapshot,
+  ChatStopHandler,
   InboundEvent,
 } from "@rome-os/app-runtime";
 import {
   legacyChatIdChannels,
   legacyChatIdChannelsService,
   legacyChatIdSettings,
+  legacyChatIdStop,
 } from "./legacy-chat-id.js";
 
 const CHAT = "chat-1" as ChatId;
@@ -83,7 +85,8 @@ describe("chat ids for apps written for SDK 0.7", () => {
     } as unknown as Parameters<ChannelsService["query"]>[1]);
     const receipt = await service.send("telegram", CHAT, { text: "hi" });
 
-    expect(query).toHaveBeenCalledWith("telegram", expect.objectContaining({ chatId: CHAT }));
+    // The worker RPC rejects a key it does not know, so the old name stays behind.
+    expect(query).toHaveBeenCalledWith("telegram", { chatId: CHAT });
     expect(legacy(read)).toMatchObject({ conversationId: CHAT, parentConversationId: "parent-1" });
     expect(legacy(receipt).conversationId).toBe(CHAT);
   });
@@ -113,5 +116,19 @@ describe("chat ids for apps written for SDK 0.7", () => {
     expect(legacy(heard[0]?.message).conversationId).toBe(CHAT);
     expect(legacy(heard[0]?.ref).conversationId).toBe(CHAT);
     expect(legacy(receipt).conversationId).toBe(CHAT);
+  });
+
+  it("stops the turn of a chat a hook names only by conversationId", async () => {
+    const stop = rs.fn<ChatStopHandler>(async () => ({ status: "idle" }));
+
+    await legacyChatIdStop(stop)({
+      ref: { connectionId: "conn-1", conversationId: CHAT } as unknown as ChatRef,
+      service: "telegram",
+      senderId: "u1",
+    });
+
+    expect(stop).toHaveBeenCalledWith(
+      expect.objectContaining({ ref: { connectionId: "conn-1", chatId: CHAT } }),
+    );
   });
 });
