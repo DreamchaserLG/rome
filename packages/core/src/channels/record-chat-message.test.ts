@@ -182,9 +182,26 @@ describe("createChatMessageRecorder", () => {
       JSON.stringify([
         {
           type: "text",
-          content: "see this\n\nAttachment 1 (image photo.jpg) path: /data/photo.jpg",
+          content:
+            "see this\n\nAttachment 1 (image photo.jpg) path: /data/photo.jpg\n\nAttachment (document) not downloaded",
         },
       ]),
+    );
+  });
+
+  it("names a file-only message's attachments when none was downloaded", async () => {
+    await record()({
+      ref: REF,
+      service: "discord",
+      message: message({
+        text: "",
+        attachments: [{ type: "image", url: "https://cdn/x.png", fileName: "x.png" }],
+      }),
+    });
+
+    const [chat] = await sessions();
+    expect((await rows(chat!.id))[0]?.content).toBe(
+      JSON.stringify([{ type: "text", content: "Attachment (image x.png) not downloaded" }]),
     );
   });
 });

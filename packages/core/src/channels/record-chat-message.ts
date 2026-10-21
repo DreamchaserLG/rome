@@ -52,6 +52,19 @@ export function appendAttachmentPathsToPrompt(text: string, attachments: unknown
   return [text.trim(), lines.join("\n")].filter(Boolean).join("\n\n").trim();
 }
 
+/** One line per attachment that was not saved to disk, so a declined message
+ *  that was only a file still tells the next turn what was sent. */
+function appendUnsavedAttachments(content: string, attachments: readonly Attachment[]): string {
+  const unsaved = attachments.filter((attachment) => !attachment.localPath?.trim());
+  if (unsaved.length === 0) return content;
+  const lines = unsaved.map((attachment) => {
+    const name = attachment.fileName ? ` ${attachment.fileName}` : "";
+    const caption = attachment.caption ? ` caption: ${attachment.caption}` : "";
+    return `Attachment (${attachment.type}${name}) not downloaded${caption}`;
+  });
+  return [content, lines.join("\n")].filter(Boolean).join("\n\n");
+}
+
 /** The agent a chat recorded for the first time stores: the chat's own choice
  *  while it is loaded, and main otherwise. */
 function initialAgent(routedAgentName: string | undefined, hasAgent: (name: string) => boolean) {
@@ -89,7 +102,10 @@ export function createChatMessageRecorder(deps: ChatMessageRecorderDeps): Record
       agentName: initialAgent(routedAgentName, deps.hasAgent),
     });
     const createdAt = Number.isNaN(message.timestamp.getTime()) ? undefined : message.timestamp;
-    const content = appendAttachmentPathsToPrompt(message.text ?? "", message.attachments);
+    const content = appendUnsavedAttachments(
+      appendAttachmentPathsToPrompt(message.text ?? "", message.attachments),
+      message.attachments,
+    );
     const stored = await deps.chats.addConversationMessage({
       sessionId: chat.id,
       role: "notification",
