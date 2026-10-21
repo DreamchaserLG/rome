@@ -92,8 +92,8 @@ function onChannel(column: SQLiteColumn, id: string) {
   return startsWith(column, `channel:${id}:`);
 }
 
-/** Whether anything stored spells channel `id`: a conversation on it, or an
- *  agent session keyed to it. A turn running when its channel was deleted can
+/** Whether anything stored spells channel `id`: a conversation on it, a
+ *  message or trace block of one, or an agent session keyed to it. A turn running when its channel was deleted can
  *  still write under the deleted id, so a new channel avoids such an id. */
 function spelled(exec: Exec, id: string): boolean {
   const conversation = exec
@@ -108,6 +108,12 @@ function spelled(exec: Exec, id: string): boolean {
     .where(onChannel(romeAgentMessages.sessionId, id))
     .get();
   if (message) return true;
+  const traceBlock = exec
+    .select({ id: romeAgentTraceBlocks.messageId })
+    .from(romeAgentTraceBlocks)
+    .where(onChannel(romeAgentTraceBlocks.sessionId, id))
+    .get();
+  if (traceBlock) return true;
   return exec.select({ id: sessions.id }).from(sessions).where(keyedTo(id)).get() !== undefined;
 }
 

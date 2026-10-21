@@ -4,6 +4,7 @@ import {
   channels,
   outboundMessages,
   romeAgentMessages,
+  romeAgentTraceBlocks,
   romeSessions,
   sentinelLog,
   sessions,
@@ -87,6 +88,19 @@ describe("ChannelRecordsRepository", () => {
         content: "[]",
         createdAt: NOW,
       })
+      .run();
+
+    const restarted = new ChannelRecordsRepository(db);
+    expect(restarted.claim(db, { id: "c2", service: "telegram" }, NOW).id).toMatch(UUID);
+  });
+
+  it("keeps a deleted channel's id from a re-added bot while a late trace block spells it", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", service: "telegram" }, NOW);
+    records.vacate(db, "c1");
+    db.insert(romeAgentTraceBlocks)
+      .values({ messageId: "trace", seq: 0, sessionId: "channel:telegram:t1", content: "{}" })
       .run();
 
     const restarted = new ChannelRecordsRepository(db);
