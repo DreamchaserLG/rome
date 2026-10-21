@@ -22,7 +22,6 @@ import {
   PageNavLink,
   PageTitle,
   Section,
-  SectionActions,
   SectionDescription,
   SectionHeader,
   SectionHeading,
@@ -617,6 +616,9 @@ function AgentPage() {
             </div>
           </div>
         </PageHeading>
+        <PageActions>
+          <BotPills bots={agent.bots} />
+        </PageActions>
       </PageHeader>
       <PageNav aria-label={agent.name}>
         {tabs.map((x) => (
@@ -636,71 +638,55 @@ function AgentPage() {
 
 function Overview({ agent }: { agent: OutreachAgentSummary }) {
   const { t } = useTranslation("outreach");
-  const first = agent.bots[0];
   return (
-    <Section>
-      <SectionHeader>
-        <SectionHeading>
-          <SectionTitle>{t("overview.bots")}</SectionTitle>
-          {!first && (
-            <SectionDescription>
+    <div className="grid gap-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("overview.bots")}</CardTitle>
+          {agent.bots.length === 0 && (
+            <CardDescription>
               <AgentText k="overview.noBots" values={{ agent: agent.name }} />
-            </SectionDescription>
+            </CardDescription>
           )}
-        </SectionHeading>
-        <SectionActions>
-          <Button asChild variant={first ? "outline" : "default"} size="sm">
-            <Link to={agentPath(agent.name, "/new")}>{t("overview.addBot")}</Link>
-          </Button>
-        </SectionActions>
-      </SectionHeader>
-      {first && (
-        <ListGrid>
-          {agent.bots.map((b) => (
-            <AccountCard key={b.id} bot={b} />
-          ))}
-        </ListGrid>
-      )}
-      {first && agent.chats === 0 && (
-        <p className="max-w-3xl rounded-8 bg-surface-muted p-3 text-ui">
-          <span className="font-medium">{t("overview.inviteTitle", { bot: first.name })}</span>{" "}
-          {t(`platforms.${first.platform}.invite`, { bot: first.name })}
-        </p>
-      )}
-    </Section>
-  );
-}
-
-/** One account: who it is on which platform, then how many chats it is in. */
-function AccountCard({ bot }: { bot: OutreachBot }) {
-  const { t } = useTranslation("outreach");
-  return (
-    <Card>
-      <div className="flex items-center gap-3 px-4">
-        <span className="grid size-10 shrink-0 place-items-center rounded-8 bg-surface-muted">
-          <PlatformIcon platform={bot.platform} className="size-5" />
-        </span>
-        <div className="min-w-0">
-          <div className="truncate font-medium">{bot.name}</div>
-          <div className="truncate text-aux text-muted-foreground">
-            {t(`platforms.${bot.platform}.name`)} · {t(`kinds.${bot.kind}`)}
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          {agent.bots.length > 0 && (
+            <List>
+              {agent.bots.map((b) => (
+                <ListRow key={b.id}>
+                  <PlatformIcon platform={b.platform} className="size-6" />
+                  <ListRowContent>
+                    <div className="font-medium">{b.name}</div>
+                    <div className="text-aux text-muted-foreground">
+                      {t("overview.groupCount", { count: b.groups })},{" "}
+                      {t("overview.dmCount", { count: b.dms })}
+                      {" · "}
+                      {t("overview.since")} <Timestamp value={b.connectedAt} format="date" />
+                    </div>
+                  </ListRowContent>
+                  <Badge variant={b.kind === "delegate" ? "info" : "success"}>
+                    {t(`kinds.${b.kind}`)}
+                  </Badge>
+                </ListRow>
+              ))}
+            </List>
+          )}
+          {agent.bots.length > 0 && agent.chats === 0 && (
+            <p className="rounded-8 bg-surface-muted p-3 text-ui">
+              <span className="font-medium">
+                {t("overview.inviteTitle", { bot: agent.bots[0]!.name })}
+              </span>{" "}
+              {t(`platforms.${agent.bots[0]!.platform}.invite`, { bot: agent.bots[0]!.name })}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant={agent.bots.length ? "ghost" : "default"} size="sm">
+              <Link to={agentPath(agent.name, "/new")}>{t("overview.addBot")}</Link>
+            </Button>
           </div>
-        </div>
-      </div>
-      <dl className="grid grid-cols-2 gap-4 border-t border-border-subtle px-4 pt-4">
-        <div>
-          <dt className="text-aux text-muted-foreground">{t("overview.groups")}</dt>
-          <dd className="text-title tabular-nums">{bot.groups}</dd>
-        </div>
-        <div>
-          <dt className="text-aux text-muted-foreground">{t("overview.dms")}</dt>
-          <dd className="text-title tabular-nums">{bot.dms}</dd>
-        </div>
-      </dl>
-      <div className="px-4 text-aux text-muted-foreground">
-        {t("overview.since")} <Timestamp value={bot.connectedAt} format="date" />
-      </div>
-    </Card>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
