@@ -53,7 +53,7 @@ export { makeSlackBotDescriptor, SLACK_BOT_SERVICE } from "./slack-bot.js";
  */
 export interface BuiltinConnectionDeps {
   settingsRepo: SettingsRepository;
-  conversationSettings: ChatSettingsService;
+  chatSettings: ChatSettingsService;
   chatStop: ChatStopHandler;
   personMappingRepo: PersonMappingRepository;
   webchatRepo: WebChatRepository;
@@ -100,7 +100,7 @@ export function registerBuiltinConnections(
   registry.register(makeTelegramDescriptor());
   registry.register(
     makeDiscordDescriptor({
-      conversationSettings: deps.conversationSettings,
+      chatSettings: deps.chatSettings,
       chatStop: deps.chatStop,
       personMappingRepo: deps.personMappingRepo,
       listAgents: deps.listAgents,
@@ -121,7 +121,7 @@ export function registerBuiltinConnections(
   }
   registry.register(
     createFeishuDescriptor({
-      conversationSettings: deps.conversationSettings,
+      chatSettings: deps.chatSettings,
       personMappingRepo: deps.personMappingRepo,
       listAgents: deps.listAgents,
       accountAgentOf: deps.accountAgentOf,

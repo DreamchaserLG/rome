@@ -7,7 +7,9 @@ import type {
   ActionConfig,
   ActionResult,
   ChatId,
+  ChatRecord,
   ChatRepository,
+  EnsureChannelChatInput,
   MessageReceipt,
   ChannelsService,
   PreviewPayload,
@@ -54,7 +56,7 @@ export interface AgentNamesService {
 
 interface SendMessageRuntimeDeps {
   personMappingRepo?: PersonMappingResolver;
-  conversations?: ChatRepository;
+  chats?: ChatRepository;
   agentNames?: AgentNamesService;
 }
 
@@ -79,7 +81,7 @@ async function recordDeliveredConversationMessage(
   threadId: string,
   delivery: MessageReceipt,
 ): Promise<void> {
-  if (!deps.conversations || !threadId) return;
+  if (!deps.chats || !threadId) return;
   // The webchat channel writes the line into the chat itself. Recording it
   // again would leave a second copy under a separate channel row.
   if (input.channel === "webchat") return;
@@ -96,7 +98,7 @@ async function recordDeliveredConversationMessage(
   const boundRomeSessionId = explicitRomeSessionId ?? ambientRomeSessionId;
   const conversation = boundRomeSessionId
     ? { id: boundRomeSessionId, agentName: null }
-    : await deps.conversations.ensureChannelConversation({
+    : await ensureChannelChat(deps.chats, {
         channel: input.channel,
         threadId,
         parentThreadId: deliveryCreatedThread ? requestedThreadId : undefined,
@@ -109,7 +111,7 @@ async function recordDeliveredConversationMessage(
     !deliveryCreatedThread &&
     (input.knownToProvider ??
       Boolean(input.turnId || (sameAmbientConversation && current?.turnId)));
-  await deps.conversations.recordOutboundMessage({
+  await deps.chats.recordOutboundMessage({
     sessionId: conversation.id,
     content: outboundContent(input),
     platformMessageId: delivery?.messageId,
@@ -119,6 +121,17 @@ async function recordDeliveredConversationMessage(
     turnId: input.turnId ?? current?.turnId,
     knownToProvider,
   });
+}
+
+/** Opens the chat for a channel thread, or finds the one already open. A host
+ *  that predates the chat names offers only `ensureChannelConversation`. */
+function ensureChannelChat(
+  repository: ChatRepository,
+  input: EnsureChannelChatInput,
+): Promise<ChatRecord> {
+  return typeof repository.ensureChannelChat === "function"
+    ? repository.ensureChannelChat(input)
+    : repository.ensureChannelConversation(input);
 }
 
 async function recordDeliveredConversationMessageBestEffort(
@@ -562,11 +575,14 @@ export function createSendMessageAction(
 export function createAction(
   config: ActionConfig,
   deps: { channelsService: ChannelsService } & SendMessageRuntimeDeps & {
-      appContext?: { repositories?: { conversations?: ChatRepository } };
+      appContext?: { repositories?: { chats?: ChatRepository; conversations?: ChatRepository } };
     },
 ): Action {
   return createSendMessageAction(config, deps.channelsService, {
     ...deps,
-    conversations: deps.conversations ?? deps.appContext?.repositories?.conversations,
+    chats:
+      deps.chats ??
+      deps.appContext?.repositories?.chats ??
+      deps.appContext?.repositories?.conversations,
   });
 }

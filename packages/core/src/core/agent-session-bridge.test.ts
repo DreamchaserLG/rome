@@ -587,12 +587,12 @@ describe("AgentSessionBridge reply streaming", () => {
     const { written, edits } = recording;
     const transport = own ?? recording.transport;
     // The host's adapter over the repository.
-    const conversations =
+    const chats =
       repo &&
       ({
-        ensureChannelConversation: (input) => repo.ensureChannelConversation(input),
+        ensureChannelChat: (input) => repo.ensureChannelChat(input),
         recordOutboundMessage: (input) => repo.recordOutboundConversationMessage(input),
-      } satisfies Pick<ChatRepository, "ensureChannelConversation" | "recordOutboundMessage">);
+      } satisfies Pick<ChatRepository, "ensureChannelChat" | "recordOutboundMessage">);
     const session = {
       key: { agentName: "main", channelThreadKey: "telegram:chat-1" },
       sessionId: "session-1",
@@ -613,7 +613,7 @@ describe("AgentSessionBridge reply streaming", () => {
             channel === "telegram" ? { transport, pacer: new Pacer(budget, systemClock) } : null,
           clock: systemClock,
           policy,
-          ...(conversations ? { conversations } : {}),
+          ...(chats ? { chats } : {}),
         });
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();

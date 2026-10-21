@@ -7,7 +7,9 @@ import type {
   AppActionRuntimeDeps,
   ApprovalsRepository,
   Attachment,
+  ChatRecord,
   ChatRepository,
+  EnsureChannelChatInput,
   MessageReplyReference,
   PersonMappingRepository,
   PersonRecord,
@@ -303,10 +305,22 @@ async function collectAgentResult(
   return { success: true, content: response, turnId, ...(replyDelivery ? { replyDelivery } : {}) };
 }
 
-function requireConversationRepository(deps: MessageHandlerRuntimeDeps): ChatRepository {
-  const repository = deps.appContext.repositories.conversations;
-  if (!repository) throw new Error("Conversation repository is unavailable");
+function requireChatRepository(deps: MessageHandlerRuntimeDeps): ChatRepository {
+  const repository =
+    deps.appContext.repositories.chats ?? deps.appContext.repositories.conversations;
+  if (!repository) throw new Error("Chat repository is unavailable");
   return repository;
+}
+
+/** Opens the chat for a channel thread, or finds the one already open. A host
+ *  that predates the chat names offers only `ensureChannelConversation`. */
+function ensureChannelChat(
+  repository: ChatRepository,
+  input: EnsureChannelChatInput,
+): Promise<ChatRecord> {
+  return typeof repository.ensureChannelChat === "function"
+    ? repository.ensureChannelChat(input)
+    : repository.ensureChannelConversation(input);
 }
 
 /**
@@ -541,7 +555,7 @@ async function handleUntrustedMessage(
       channelUserId,
       error: sentinelResult.error,
     });
-    await requireConversationRepository(deps).promoteMessageToUser(conversationId, messageId);
+    await requireChatRepository(deps).promoteMessageToUser(conversationId, messageId);
     return handleTrustedMessage(
       deps,
       { ...args, bondLevel },
@@ -581,7 +595,7 @@ async function handleUntrustedMessage(
   }
 
   if (decision.action === "escalated") {
-    await requireConversationRepository(deps).promoteMessageToUser(conversationId, messageId);
+    await requireChatRepository(deps).promoteMessageToUser(conversationId, messageId);
     return handleTrustedMessage(
       deps,
       { ...args, bondLevel },
@@ -670,7 +684,7 @@ export function createMessageHandlerAction(
         }
 
         const settings = deps.appContext.repositories.settings;
-        const conversations = requireConversationRepository(deps);
+        const conversations = requireChatRepository(deps);
         const requestedAgent =
           typeof args.routedAgentName === "string" && args.routedAgentName.trim()
             ? args.routedAgentName.trim()
@@ -680,7 +694,7 @@ export function createMessageHandlerAction(
           typeof args.parentThreadId === "string" && args.parentThreadId
             ? args.parentThreadId
             : undefined;
-        const conversation = await conversations.ensureChannelConversation({
+        const conversation = await ensureChannelChat(conversations, {
           channel,
           threadId,
           parentThreadId,

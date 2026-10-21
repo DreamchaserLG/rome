@@ -7,6 +7,7 @@ import {
   setCurrentActionContextResolver,
   type ActionConfig,
   type ChannelsService,
+  type ChatRepository,
 } from "@rome-os/app-runtime";
 import { createSendMessageAction, executeSendMessage } from "./index.js";
 import type { AgentNamesService, SendMessageInput } from "./index.js";
@@ -312,7 +313,7 @@ describe("send_message conversation recording", () => {
       messageId: "platform-out-1",
       conversationId: "thread-1",
     });
-    const ensureChannelConversation = rs.fn(async () => ({
+    const ensureChannelChat = rs.fn(async () => ({
       id: "channel:discord:thread-1",
       agentName: null,
     }));
@@ -322,8 +323,8 @@ describe("send_message conversation recording", () => {
       adapter,
       { channel: "discord", threadId: "thread-1", text: "Background update" },
       {
-        conversations: {
-          ensureChannelConversation,
+        chats: {
+          ensureChannelChat,
           recordOutboundMessage,
           addMessage: rs.fn(),
           promoteMessageToUser: rs.fn(),
@@ -332,7 +333,7 @@ describe("send_message conversation recording", () => {
     );
 
     expect(result).toEqual({ status: "ok", data: { messageId: "platform-out-1" } });
-    expect(ensureChannelConversation).toHaveBeenCalledWith(
+    expect(ensureChannelChat).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: "discord",
         threadId: "thread-1",
@@ -350,21 +351,50 @@ describe("send_message conversation recording", () => {
     });
   });
 
+  it("records a delivery through a host that predates the chat names", async () => {
+    const adapter = makeAdapter();
+    (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
+      messageId: "platform-out-1",
+      conversationId: "thread-1",
+    });
+    const recordOutboundMessage = rs.fn(async () => undefined);
+    // Only the old method, reading its own receiver as a host repository can.
+    const legacy = {
+      sessionId: "channel:discord:thread-1",
+      async ensureChannelConversation() {
+        return { id: this.sessionId, agentName: null };
+      },
+      recordOutboundMessage,
+      addMessage: rs.fn(),
+      promoteMessageToUser: rs.fn(),
+    };
+
+    await executeSendMessage(
+      adapter,
+      { channel: "discord", threadId: "thread-1", text: "Background update" },
+      { chats: legacy as unknown as ChatRepository },
+    );
+
+    expect(recordOutboundMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "channel:discord:thread-1" }),
+    );
+  });
+
   it("leaves a webchat send to the channel, which writes it into the chat", async () => {
     const adapter = makeAdapter("webchat");
     (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
       messageId: "webchat-out-1",
       conversationId: "session-1",
     });
-    const ensureChannelConversation = rs.fn();
+    const ensureChannelChat = rs.fn();
     const recordOutboundMessage = rs.fn();
 
     const result = await executeSendMessage(
       adapter,
       { channel: "webchat", threadId: "session-1", text: "Background update" },
       {
-        conversations: {
-          ensureChannelConversation,
+        chats: {
+          ensureChannelChat,
           recordOutboundMessage,
           addMessage: rs.fn(),
           promoteMessageToUser: rs.fn(),
@@ -373,7 +403,7 @@ describe("send_message conversation recording", () => {
     );
 
     expect(result).toEqual({ status: "ok", data: { messageId: "webchat-out-1" } });
-    expect(ensureChannelConversation).not.toHaveBeenCalled();
+    expect(ensureChannelChat).not.toHaveBeenCalled();
     expect(recordOutboundMessage).not.toHaveBeenCalled();
   });
 
@@ -396,8 +426,8 @@ describe("send_message conversation recording", () => {
           turnId: "turn-2",
         },
         {
-          conversations: {
-            ensureChannelConversation: rs.fn(),
+          chats: {
+            ensureChannelChat: rs.fn(),
             recordOutboundMessage: rs.fn(async () => {
               throw new Error("database unavailable");
             }),
