@@ -203,8 +203,9 @@ describe("channel account routes", () => {
   });
 
   it("rejects a cross-site link", async () => {
-    const { records, link, db } = setup();
+    const { records, link, db } = setup({ "sales:agent": "sales:agent", other: "other:agent" });
     records.claim(db, { id: "c1", service: "feishu" }, NOW);
+    records.link("feishu", "other:agent");
 
     const res = await link("feishu", "sales:agent", {
       "sec-fetch-site": "cross-site",
@@ -212,6 +213,6 @@ describe("channel account routes", () => {
     });
 
     expect(res.status).toBe(403);
-    expect(records.byId("feishu")?.agent).toBeNull();
+    expect(records.byId("feishu")?.agent).toBe("other:agent");
   });
 });

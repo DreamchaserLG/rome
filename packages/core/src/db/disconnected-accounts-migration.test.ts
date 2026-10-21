@@ -197,6 +197,16 @@ describe("delete disconnected accounts migration", () => {
         })),
       )
       .run();
+    db.insert(routines)
+      .values({
+        id: "r-bare",
+        name: "notify",
+        trigger: { type: "schedule" },
+        actionName: "send_message",
+        args: { channel: "telegram", threadId: "t1", text: "hi" },
+        createdAt: NOW,
+      })
+      .run();
 
     migrate(db);
 
@@ -232,6 +242,6 @@ describe("delete disconnected accounts migration", () => {
           .all()
           .map((row) => [row.id, row.enabled]),
       ),
-    ).toEqual({ "r-telegram": false, "r-telegram_user": true });
+    ).toEqual({ "r-bare": false, "r-telegram": false, "r-telegram_user": true });
   });
 });
