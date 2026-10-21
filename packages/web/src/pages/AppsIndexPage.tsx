@@ -44,6 +44,8 @@ import { useAppsList, useInvalidateApps } from "@/hooks/use-apps";
 import { useAppLifecycle } from "@/hooks/use-app-lifecycle";
 import { useLongPressMenu } from "@/hooks/use-long-press-menu";
 import { useSidebarPins } from "@/hooks/use-sidebar-pins";
+import { useRecentApps } from "@/hooks/use-recent-apps";
+import { isRequiredBuiltinPin } from "@/shell/AppGrid";
 import { APP_NAV } from "@/shell/builtin-nav";
 
 function isInFlight(phase: AppViewState): boolean {
@@ -70,6 +72,7 @@ interface AppTileProps {
   ariaLabel: string;
   clickTarget: ClickTarget;
   menuLabel: string;
+  /** Null for a tile with no actions, which then shows no kebab at all. */
   menu: ReactNode;
   menuDisabled?: boolean;
   icon: ReactNode;
@@ -103,7 +106,7 @@ function AppTile({
   const nameRef = useRef<HTMLSpanElement>(null);
 
   const longPress = useLongPressMenu({
-    canOpen: !menuDisabled && !menuOpen,
+    canOpen: menu !== null && !menuDisabled && !menuOpen,
     onOpen: () => setMenuOpen(true),
   });
 
@@ -176,57 +179,59 @@ function AppTile({
           link (a sibling, so a swallowed tap never reaches it). pointer-events
           rather than visibility so the trigger inside can still re-enable
           itself on focus/open. */}
-      <div className="absolute -right-1 -top-1 z-20 pointer-coarse:pointer-events-none">
-        <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-          <DropdownMenuTrigger asChild>
-            <IconButton
-              size="sm"
-              label={menuLabel}
-              icon={<Ellipsis aria-hidden />}
-              disabled={menuDisabled}
+      {menu === null ? null : (
+        <div className="absolute -right-1 -top-1 z-20 pointer-coarse:pointer-events-none">
+          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <IconButton
+                size="sm"
+                label={menuLabel}
+                icon={<Ellipsis aria-hidden />}
+                disabled={menuDisabled}
+                onClick={stopTileClick}
+                className={cn(
+                  "h-7 w-7 rounded-8 bg-surface text-subtle-foreground shadow-1 ring-1 ring-border hover:text-foreground",
+                  // Hidden at rest, revealed on tile hover / keyboard focus /
+                  // while open.
+                  "opacity-0 transition-opacity focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100",
+                  // Coarse pointers: transparent and tap-inert, NOT visibility/
+                  // display-hidden — the button must stay focusable and in the
+                  // a11y tree (long-press is pointer-only and some menu items
+                  // have no other path from the tile), stray taps near the icon
+                  // must fall through to the tile, and the long-press menu
+                  // anchors to this button's rect, which display:none would
+                  // collapse. Tile keyboard focus restores tappability along
+                  // with visibility for touch devices with keyboards.
+                  "pointer-coarse:pointer-events-none pointer-coarse:group-focus-within:pointer-events-auto pointer-coarse:data-[state=open]:pointer-events-auto",
+                )}
+              />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              side="bottom"
+              align="end"
+              className="w-56"
               onClick={stopTileClick}
-              className={cn(
-                "h-7 w-7 rounded-8 bg-surface text-subtle-foreground shadow-1 ring-1 ring-border hover:text-foreground",
-                // Hidden at rest, revealed on tile hover / keyboard focus /
-                // while open.
-                "opacity-0 transition-opacity focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100",
-                // Coarse pointers: transparent and tap-inert, NOT visibility/
-                // display-hidden — the button must stay focusable and in the
-                // a11y tree (long-press is pointer-only and some menu items
-                // have no other path from the tile), stray taps near the icon
-                // must fall through to the tile, and the long-press menu
-                // anchors to this button's rect, which display:none would
-                // collapse. Tile keyboard focus restores tappability along
-                // with visibility for touch devices with keyboards.
-                "pointer-coarse:pointer-events-none pointer-coarse:group-focus-within:pointer-events-auto pointer-coarse:data-[state=open]:pointer-events-auto",
-              )}
-            />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            side="bottom"
-            align="end"
-            className="w-56"
-            onClick={stopTileClick}
-            {...longPress.menuContentProps}
-          >
-            {menu}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+              {...longPress.menuContentProps}
+            >
+              {menu}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
     </div>
   );
 }
 
-// Status badge on the icon's top-right corner: an available update (success)
-// or a failed install (destructive). Decorative — the kebab's aria-label and
+// Status badge on the icon's top-right corner: an available update (success),
+// a failed install (destructive), or a recent app not yet opened here (info). Decorative — the kebab's aria-label and
 // the details page carry the accessible equivalents.
-function TileStatusDot({ tone }: { tone: "update" | "error" }) {
+function TileStatusDot({ tone }: { tone: "update" | "error" | "unopened" }) {
   return (
     <span
       aria-hidden
       className={cn(
         "absolute -right-1 -top-1 h-3 w-3 rounded-full ring-2 ring-background",
-        tone === "update" ? "bg-success" : "bg-destructive",
+        tone === "update" ? "bg-success" : tone === "error" ? "bg-destructive" : "bg-info",
       )}
     />
   );
@@ -282,6 +287,9 @@ function SectionHeader({ title, count }: SectionHeaderProps) {
   );
 }
 
+const NO_APPS: InstalledAppCard[] = [];
+const NO_PINS: ReadonlySet<string> = new Set();
+
 export default function AppsIndexPage() {
   const { t } = useTranslation("apps");
   const { t: tCommon } = useTranslation("common");
@@ -329,6 +337,12 @@ export default function AppsIndexPage() {
     return `${app.displayName} ${app.id}`.toLowerCase().includes(normalizedQuery);
   };
   const visibleBuiltins = builtinPages.filter(matchesBuiltin);
+  // Apps installed or opened lately, most recent first, in one row above the
+  // sections. The row is for coming back to something, so a search hides it.
+  const { recent: recentApps, unopenedIds } = useRecentApps(
+    apps?.filter((app) => !isCarrierApp(app.id)) ?? NO_APPS,
+    NO_PINS,
+  );
   // `null` while the installed list is still loading — kept distinct from the
   // empty array so the skeleton (loading) and the empty state (no matches) don't
   // collide. Filtering applies live once the list lands.
@@ -360,13 +374,15 @@ export default function AppsIndexPage() {
         }
         menuLabel={t("installed.moreActionsAria", { name: label })}
         menu={
-          <DropdownMenuItem
-            onClick={() => togglePin("builtin", entry.id)}
-            className="text-foreground"
-          >
-            <Pin className="h-3.5 w-3.5 text-subtle-foreground" aria-hidden />
-            {pinned ? t("installed.unpin") : t("installed.pin")}
-          </DropdownMenuItem>
+          isRequiredBuiltinPin(entry.id) ? null : (
+            <DropdownMenuItem
+              onClick={() => togglePin("builtin", entry.id)}
+              className="text-foreground"
+            >
+              <Pin className="h-3.5 w-3.5 text-subtle-foreground" aria-hidden />
+              {pinned ? t("installed.unpin") : t("installed.pin")}
+            </DropdownMenuItem>
+          )
         }
         icon={<TileIcon size="lg" kind="builtin" displayName={label} BuiltinIcon={entry.Icon} />}
         name={label}
@@ -387,7 +403,7 @@ export default function AppsIndexPage() {
     />
   );
 
-  const renderInstalledTile = (app: InstalledAppCard) => {
+  const renderInstalledTile = (app: InstalledAppCard, unopened = false) => {
     // An app is openable either via its own embedded frontend (`href`) or via a
     // host route registered for a backend-only app (see HOST_APP_ROUTES in
     // lib/auth-routing.ts — shared with App.tsx routing and auth classification).
@@ -439,6 +455,8 @@ export default function AppsIndexPage() {
               <TileStatusDot tone="error" />
             ) : candidate ? (
               <TileStatusDot tone="update" />
+            ) : unopened ? (
+              <TileStatusDot tone="unopened" />
             ) : null}
           </>
         }
@@ -602,6 +620,18 @@ export default function AppsIndexPage() {
           </EmptyState>
         ) : (
           <div className="flex flex-col gap-6" aria-busy={apps === null}>
+            {!isSearching && recentApps.length > 0 ? (
+              <Section aria-label={tCommon("sidebar.recentApps")}>
+                <SectionHeader title={tCommon("sidebar.recent")} count={null} />
+                <div className="-mx-1 flex overflow-x-auto px-1 scrollbar-idle-hidden">
+                  {recentApps.map((app) => (
+                    <div key={app.id} className="w-20 shrink-0 sm:w-28">
+                      {renderInstalledTile(app, unopenedIds.has(app.id))}
+                    </div>
+                  ))}
+                </div>
+              </Section>
+            ) : null}
             {showMySection ? (
               <Section aria-label={t("sections.my.title")}>
                 <SectionHeader title={t("sections.my.title")} count={myAppsCount} />

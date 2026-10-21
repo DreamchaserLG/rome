@@ -1,13 +1,11 @@
 import type { AppOrigin } from "@rome/api-types/apps";
 
-// The sidebar's Recent zone is derived, never stored: which apps show is a pure
+// The Apps page's Recent row is derived, never stored: which apps show is a pure
 // function of the installed cards, the pin set, and a per-app "last opened"
 // map that lives in this browser (see hooks/use-recent-apps.ts). Everything
 // here takes `now` as an argument so the expiry edge is testable.
 
-/** Rows shown before "Show more". */
-export const RECENT_APPS_VISIBLE = 3;
-/** An app leaves the zone after this long without being installed or opened.
+/** An app leaves the row after this long without being installed or opened.
  *  14 days, not 7: a weekly habit would otherwise expire an hour before its
  *  next use. */
 const RECENT_APPS_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
@@ -39,7 +37,7 @@ export function parseAppLastOpened(raw: unknown): AppLastOpened {
   return out;
 }
 
-/** Entries older than the window can no longer affect the zone. Dropping them
+/** Entries older than the window can no longer affect the row. Dropping them
  *  on write keeps the map bounded without needing the installed list. */
 export function pruneAppLastOpened(lastOpened: AppLastOpened, now: number): AppLastOpened {
   const out: AppLastOpened = {};
@@ -51,7 +49,7 @@ export function pruneAppLastOpened(lastOpened: AppLastOpened, now: number): AppL
 }
 
 // Built-in apps all install in one pass on a fresh instance's first boot. If
-// that counted as activity, a new guardian's first sidebar would be a column
+// that counted as activity, a new guardian's first Recent row would be a run
 // of system apps. They earn a place only by being opened.
 function installSignalMs(app: RecentAppCandidate): number | null {
   return app.origin === "builtin" ? null : toMs(app.installedAt);

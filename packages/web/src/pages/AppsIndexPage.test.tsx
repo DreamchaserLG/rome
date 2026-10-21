@@ -37,6 +37,7 @@ rs.mock("@/shell/builtin-nav", () => ({
     { id: "apps", href: "/apps", labelKey: "nav.apps", Icon: () => null },
     { id: "chat", href: "/chat", labelKey: "nav.chat", Icon: () => null },
     { id: "projects", href: "/projects", labelKey: "nav.projects", Icon: () => null },
+    { id: "memory", href: "/memory", labelKey: "nav.memory", Icon: () => null },
   ],
 }));
 rs.mock("@/shell/AppGrid", () => ({
@@ -46,12 +47,14 @@ rs.mock("@/shell/AppGrid", () => ({
     { type: "builtin" as const, id: "projects" },
   ],
   STORAGE_KEY: "rome-sidebar-pins",
+  isRequiredBuiltinPin: (id: string) => ["apps", "chat", "projects"].includes(id),
   normalizeSidebarPins: (
     pins: Array<{ type: "builtin" | "app"; id: string }>,
   ): Array<{ type: "builtin" | "app"; id: string }> => {
     const required = [
       { type: "builtin" as const, id: "apps" },
       { type: "builtin" as const, id: "chat" },
+      { type: "builtin" as const, id: "projects" },
     ];
     const requiredIds = new Set(required.map((pin) => pin.id));
     return [
@@ -806,19 +809,28 @@ describe("AppsIndexPage tile interactions", () => {
   });
 
   it("toggles a built-in surface's sidebar pin from its tile menu", async () => {
-    // Projects starts pinned (it's in DEFAULT_SIDEBAR_PINS), so the menu
-    // offers Unpin; activating it drops the entry from the stored pins.
+    // Memory starts unpinned, so the menu offers Pin; activating it adds the
+    // entry to the stored pins after the fixed three.
     const user = userEvent.setup();
     mockBackend({ installed: [] });
 
     renderPage();
 
-    await user.click(await screen.findByLabelText("More actions for Projects"));
-    await user.click(await screen.findByRole("menuitem", { name: "Unpin from sidebar" }));
+    await user.click(await screen.findByLabelText("More actions for Memory"));
+    await user.click(await screen.findByRole("menuitem", { name: "Pin to sidebar" }));
 
     const stored = JSON.parse(localStorage.getItem("rome-sidebar-pins") ?? "[]");
-    expect(stored).not.toContainEqual({ type: "builtin", id: "projects" });
-    expect(stored).toContainEqual({ type: "builtin", id: "apps" });
+    expect(stored.at(-1)).toEqual({ type: "builtin", id: "memory" });
+    expect(stored).toContainEqual({ type: "builtin", id: "projects" });
+  });
+
+  it("offers no actions menu on Projects, which the sidebar always shows", async () => {
+    mockBackend({ installed: [] });
+
+    renderPage();
+
+    expect(await screen.findByLabelText("Projects")).toBeTruthy();
+    expect(screen.queryByLabelText("More actions for Projects")).toBeNull();
   });
 });
 
@@ -1018,7 +1030,7 @@ describe("AppsIndexPage ghost tiles", () => {
     expect(within(mySection).queryByText("0")).toBeNull();
     expect(within(storeSection).queryByText("0")).toBeNull();
     const builtinSection = screen.getByRole("region", { name: "Built-in apps" });
-    expect(within(builtinSection).getByText("1")).toBeTruthy();
+    expect(within(builtinSection).getByText("2")).toBeTruthy();
   });
 
   it("seeds a chat draft from the New app ghost tile", async () => {
@@ -1064,5 +1076,64 @@ describe("AppsIndexPage ghost tiles", () => {
     expect(screen.getByText("Weather")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "New app" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Browse store" })).toBeNull();
+  });
+});
+
+describe("AppsIndexPage recent apps", () => {
+  const LAST_OPENED_KEY = "rome-app-last-opened";
+  const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
+  const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60_000).toISOString();
+  const openable = (id: string, displayName: string, extra: Partial<InstalledAppCard> = {}) =>
+    installedCard({ id, displayName, hasFrontend: true, href: `/apps/${id}`, ...extra });
+
+  it("shows no Recent row when no app was installed or opened lately", async () => {
+    localStorage.setItem(LAST_OPENED_KEY, JSON.stringify({ weather: daysAgo(30) }));
+    mockBackend({ installed: [openable("weather", "Weather")] });
+
+    renderPage();
+
+    await screen.findByText("Weather");
+    expect(screen.queryByRole("region", { name: "Recent apps" })).toBeNull();
+  });
+
+  it("lists recent apps newest first in one row above the sections", async () => {
+    localStorage.setItem(
+      LAST_OPENED_KEY,
+      JSON.stringify({ alpha: minutesAgo(30), beta: minutesAgo(5) }),
+    );
+    mockBackend({
+      installed: [
+        openable("alpha", "Alpha"),
+        openable("beta", "Beta"),
+        openable("gamma", "Gamma", { installedAt: minutesAgo(1) }),
+        openable("user-skills", "User Skills", { installedAt: minutesAgo(1) }),
+      ],
+    });
+
+    renderPage();
+
+    const row = await screen.findByRole("region", { name: "Recent apps" });
+    // A never-opened install counts by its install time; the carrier never shows.
+    expect(
+      within(row)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href")),
+    ).toEqual(["/apps/gamma", "/apps/beta", "/apps/alpha"]);
+    const mySection = screen.getByRole("region", { name: "My apps" });
+    expect(Boolean(row.compareDocumentPosition(mySection) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(
+      true,
+    );
+  });
+
+  it("hides the Recent row while searching", async () => {
+    const user = userEvent.setup();
+    localStorage.setItem(LAST_OPENED_KEY, JSON.stringify({ weather: minutesAgo(5) }));
+    mockBackend({ installed: [openable("weather", "Weather")] });
+
+    renderPage();
+
+    expect(await screen.findByRole("region", { name: "Recent apps" })).toBeTruthy();
+    await user.type(screen.getByLabelText("Search apps"), "weath");
+    expect(screen.queryByRole("region", { name: "Recent apps" })).toBeNull();
   });
 });
