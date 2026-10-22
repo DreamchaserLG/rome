@@ -30,7 +30,8 @@ function isCrossSiteFetch(site: string | undefined): boolean {
   return site === "cross-site" || site === "same-site";
 }
 
-function hasLoopbackHostname(origin: string): boolean {
+/** Whether an `Origin` value names a loopback host. */
+export function hasLoopbackHostname(origin: string): boolean {
   try {
     return isLoopbackHostname(new URL(origin).hostname);
   } catch {

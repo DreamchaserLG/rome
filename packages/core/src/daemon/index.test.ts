@@ -167,12 +167,22 @@ describe("HealthCheckDaemon", () => {
   });
 
   describe("browser callers", () => {
+    const RESTART_ACTION = { action: "restart_rome", threadId: "sess-1" };
+    // Valid against the daemon's schema, so only the guard keeps it from `configure`.
+    const HOST_FILESYSTEM_CONFIG = {
+      enabled: true,
+      connection: { host: "host.example", port: 22, username: "rome", privateKey: "key" },
+      mounts: [{ name: "home", remotePath: "/home/rome", containerPath: "/mnt/home" }],
+      remoteAccess: null,
+    };
+
     // The file stubs global fetch, so requests to the daemon go through node:http.
     function send(
       port: number,
       method: string,
       path: string,
       headers: Record<string, string> = {},
+      body: unknown = method === "GET" ? undefined : RESTART_ACTION,
     ): Promise<{ status: number; headers: IncomingHttpHeaders }> {
       return new Promise((resolve, reject) => {
         const req = httpRequest({ host: "127.0.0.1", port, method, path, headers }, (res) => {
@@ -180,11 +190,7 @@ describe("HealthCheckDaemon", () => {
           resolve({ status: res.statusCode ?? 0, headers: res.headers });
         });
         req.on("error", reject);
-        req.end(
-          method === "GET"
-            ? undefined
-            : JSON.stringify({ action: "restart_rome", threadId: "sess-1" }),
-        );
+        req.end(body === undefined ? undefined : JSON.stringify(body));
       });
     }
 
@@ -196,7 +202,15 @@ describe("HealthCheckDaemon", () => {
       const { HealthCheckDaemon } = await import("./index.js");
       const { HostFilesystemManager } = await import("./host-filesystem.js");
       rs.spyOn(HostFilesystemManager.prototype, "restore").mockResolvedValue(undefined);
-      const configure = rs.spyOn(HostFilesystemManager.prototype, "configure");
+      const configure = rs.spyOn(HostFilesystemManager.prototype, "configure").mockResolvedValue({
+        configured: true,
+        enabled: true,
+        connection: null,
+        mounts: [],
+        remoteAccess: null,
+        lastAppliedAt: null,
+        lastError: null,
+      });
       const enqueueAction = rs
         .spyOn(
           HealthCheckDaemon.prototype as never as { enqueueAction: () => unknown },
@@ -227,9 +241,13 @@ describe("HealthCheckDaemon", () => {
         expect(restart.status).toBe(403);
         expect(enqueueAction).not.toHaveBeenCalled();
 
-        const configured = await send(port, "PUT", "/host-filesystem/config", {
-          "sec-fetch-site": "cross-site",
-        });
+        const configured = await send(
+          port,
+          "PUT",
+          "/host-filesystem/config",
+          { "sec-fetch-site": "cross-site" },
+          HOST_FILESYSTEM_CONFIG,
+        );
         expect(configured.status).toBe(403);
         expect(configure).not.toHaveBeenCalled();
       } finally {
@@ -238,13 +256,23 @@ describe("HealthCheckDaemon", () => {
     });
 
     it("serves a caller that is not a browser", async () => {
-      const { daemon, port, enqueueAction } = await startDaemon();
+      const { daemon, port, configure, enqueueAction } = await startDaemon();
       try {
         const restart = await send(port, "POST", "/actions", {
           "content-type": "application/json",
         });
         expect(restart.status).toBe(200);
         expect(enqueueAction).toHaveBeenCalledTimes(1);
+
+        const configured = await send(
+          port,
+          "PUT",
+          "/host-filesystem/config",
+          { "content-type": "application/json" },
+          HOST_FILESYSTEM_CONFIG,
+        );
+        expect(configured.status).toBe(200);
+        expect(configure).toHaveBeenCalledTimes(1);
       } finally {
         await daemon.stop();
       }

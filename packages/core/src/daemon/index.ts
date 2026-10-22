@@ -462,6 +462,12 @@ export class HealthCheckDaemon {
     // No browser page calls the daemon, and the in-container browser can reach
     // it over loopback, so a mutation that carries browser headers is refused.
     if (isBrowserMutation({ method: req.method ?? "GET", ...toOriginRequest(req) })) {
+      log.warn("refused a browser mutation", {
+        method: req.method ?? null,
+        path: (req.url ?? "/").split("?")[0],
+        origin: req.headers.origin ?? null,
+        secFetchSite: req.headers["sec-fetch-site"] ?? null,
+      });
       this.writeJson(res, 403, { error: "Forbidden" });
       return;
     }

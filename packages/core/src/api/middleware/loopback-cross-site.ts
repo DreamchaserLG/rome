@@ -1,17 +1,9 @@
-import { getConnInfo } from "@hono/node-server/conninfo";
-import type { Context, MiddlewareHandler } from "hono";
+import type { MiddlewareHandler } from "hono";
 import { isCrossSiteLoopbackMutation } from "../../lib/cross-site-loopback.js";
-import { isLoopbackAddress } from "../../lib/trusted-loopback.js";
+import { isTrustedLoopbackCaller } from "../../lib/guardian-session.js";
+import { createLogger } from "../../logger.js";
 
-function isDirectLoopbackCaller(c: Context): boolean {
-  // Truthiness, not presence, to match lib/guardian-session.ts.
-  if (c.req.header("x-forwarded-for")) return false;
-  try {
-    return isLoopbackAddress(getConnInfo(c).remote.address);
-  } catch {
-    return false;
-  }
-}
+const log = createLogger("api");
 
 /**
  * Answers 403 to a mutation from a direct loopback caller (the trusted
@@ -22,7 +14,13 @@ function isDirectLoopbackCaller(c: Context): boolean {
  */
 export function refuseCrossSiteLoopbackMutations(): MiddlewareHandler {
   return async (c, next) => {
-    if (isDirectLoopbackCaller(c) && isCrossSiteLoopbackMutation(c.req.raw)) {
+    if (isTrustedLoopbackCaller(c) && isCrossSiteLoopbackMutation(c.req.raw)) {
+      log.warn("Refused a cross-site browser mutation over loopback", {
+        method: c.req.method,
+        path: c.req.path,
+        origin: c.req.header("origin") ?? null,
+        secFetchSite: c.req.header("sec-fetch-site") ?? null,
+      });
       return c.json({ error: "Forbidden" }, 403);
     }
     await next();
