@@ -200,6 +200,40 @@ describe("dream", () => {
     ]);
   });
 
+  it("records the files a Codex agent changed", async () => {
+    const deps = makeDeps([
+      {
+        type: "tool_use",
+        id: "c1",
+        tool: "Edit",
+        input: {
+          type: "fileChange",
+          id: "c1",
+          status: "inProgress",
+          changes: [
+            {
+              path: "/p/memory/MEMORY.md",
+              kind: { type: "update", move_path: null },
+              diff: "@@ -1 +1 @@\n-a\n+b\n",
+            },
+            { path: "/p/memory/journal/2026/10/06.md", kind: { type: "add" }, diff: "# Journal\n" },
+          ],
+        },
+      },
+      { type: "tool_result", toolUseId: "c1", tool: "Edit", output: "ok" },
+      { type: "result", content: "Wrote the journal." },
+    ]);
+
+    const result = await createAction(actionConfig, deps).execute({});
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    const { runId } = result.data as { runId: string };
+    expect(createRunsRepository(appDb()).changes(runId)).toMatchObject([
+      { op: "edit", path: "/p/memory/MEMORY.md", previous: "a", content: "b" },
+      { op: "write", path: "/p/memory/journal/2026/10/06.md", content: "# Journal\n" },
+    ]);
+  });
+
   it("reports into a run the page already created", async () => {
     const runs = createRunsRepository(appDb());
     const { id: runId } = runs.reserveDream(24, "queued");

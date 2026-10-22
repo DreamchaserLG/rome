@@ -34,11 +34,15 @@ function str(value: unknown): string | null {
 
 /**
  * The file changes one tool call makes. Covers Claude's `Write`, `Edit`, and
- * `MultiEdit`; any other tool returns nothing.
+ * `MultiEdit`, and Codex `fileChange` items, which the Codex provider reports
+ * as `Edit` with the raw item as input. Any other tool returns nothing.
  */
 export function changesFromToolUse(tool: string, input: unknown): FileChange[] {
   if (!input || typeof input !== "object") return [];
   const record = input as Record<string, unknown>;
+  if (record.type === "fileChange" && Array.isArray(record.changes)) {
+    return codexFileChanges(record.changes);
+  }
   const path = str(record.file_path);
   if (!path) return [];
 
@@ -81,6 +85,91 @@ export function changesFromToolUse(tool: string, input: unknown): FileChange[] {
     default:
       return [];
   }
+}
+
+/**
+ * Reads a Codex `fileChange` item's `changes[]`. An add's `diff` is the new
+ * file and a delete's is the old one; an update's is a unified diff, split
+ * back into before and after text so it renders like a Claude `Edit`.
+ */
+function codexFileChanges(changes: unknown[]): FileChange[] {
+  return changes.flatMap((entry): FileChange[] => {
+    if (!entry || typeof entry !== "object") return [];
+    const { path, kind, diff } = entry as Record<string, unknown>;
+    if (typeof path !== "string" || typeof diff !== "string") return [];
+    if (!kind || typeof kind !== "object") return [];
+    const { type, move_path } = kind as Record<string, unknown>;
+
+    switch (type) {
+      case "add": {
+        const content = clip(diff);
+        return [
+          {
+            op: "write",
+            path,
+            content: content.text,
+            previous: null,
+            truncated: content.truncated,
+          },
+        ];
+      }
+      case "update": {
+        const sides = splitUnifiedDiff(diff);
+        const content = clip(sides.content);
+        const previous = clip(sides.previous);
+        return [
+          {
+            op: "edit",
+            path: str(move_path) ?? path,
+            content: content.text,
+            previous: previous.text,
+            truncated: content.truncated || previous.truncated,
+          },
+        ];
+      }
+      case "delete": {
+        const previous = clip(diff);
+        return [
+          { op: "edit", path, content: "", previous: previous.text, truncated: previous.truncated },
+        ];
+      }
+      default:
+        return [];
+    }
+  });
+}
+
+/**
+ * Splits a unified diff into the text it removed and the text it left, with a
+ * blank line between hunks. Lines are sorted by their first character only,
+ * because a removed `---` frontmatter line arrives as `----`. Anything before
+ * the first `@@`, and any line without a ` `, `-` or `+` prefix, is skipped:
+ * file headers, `\ No newline at end of file`, and the `Moved to:` trailer
+ * Codex appends to a moved file's diff.
+ */
+function splitUnifiedDiff(diff: string): { previous: string; content: string } {
+  const previous: string[] = [];
+  const content: string[] = [];
+  let inHunk = false;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("@@")) {
+      if (previous.length > 0) previous.push("");
+      if (content.length > 0) content.push("");
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk) continue;
+    const text = line.slice(1);
+    if (line.startsWith(" ")) {
+      previous.push(text);
+      content.push(text);
+    } else if (line.startsWith("-")) {
+      previous.push(text);
+    } else if (line.startsWith("+")) {
+      content.push(text);
+    }
+  }
+  return { previous: previous.join("\n"), content: content.join("\n") };
 }
 
 type FileArea = "journal" | "memory" | "skill" | "other";

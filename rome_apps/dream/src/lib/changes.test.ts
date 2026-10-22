@@ -53,6 +53,114 @@ describe("changesFromToolUse", () => {
   });
 });
 
+describe("changesFromToolUse on a Codex fileChange item", () => {
+  const fileChange = (changes: unknown) => ({
+    type: "fileChange",
+    id: "c1",
+    status: "inProgress",
+    changes,
+  });
+
+  it("records an update as its before and after text and an add as the whole file", () => {
+    expect(
+      changesFromToolUse(
+        "Edit",
+        fileChange([
+          {
+            path: `${MEMORY}/MEMORY.md`,
+            kind: { type: "update", move_path: null },
+            diff: "@@ -1,2 +1,2 @@\n keep\n-old\n+new\n",
+          },
+          { path: `${MEMORY}/journal/2026/10/06.md`, kind: { type: "add" }, diff: "# Journal\n" },
+        ]),
+      ),
+    ).toEqual([
+      {
+        op: "edit",
+        path: `${MEMORY}/MEMORY.md`,
+        content: "keep\nnew",
+        previous: "keep\nold",
+        truncated: false,
+      },
+      {
+        op: "write",
+        path: `${MEMORY}/journal/2026/10/06.md`,
+        content: "# Journal\n",
+        previous: null,
+        truncated: false,
+      },
+    ]);
+  });
+
+  it("records a delete as an edit that removes the old content", () => {
+    expect(
+      changesFromToolUse(
+        "Edit",
+        fileChange([{ path: "/x/old.md", kind: { type: "delete" }, diff: "gone\n" }]),
+      ),
+    ).toEqual([
+      { op: "edit", path: "/x/old.md", content: "", previous: "gone\n", truncated: false },
+    ]);
+  });
+
+  it("keeps a removed frontmatter delimiter, whose diff line starts with ---", () => {
+    const [change] = changesFromToolUse(
+      "Edit",
+      fileChange([
+        {
+          path: "/x/skills/x/SKILL.md",
+          kind: { type: "update", move_path: null },
+          diff: "@@ -1,3 +1,2 @@\n----\n name: x\n-old\n+++plus\n",
+        },
+      ]),
+    );
+    expect(change).toMatchObject({ previous: "---\nname: x\nold", content: "name: x\n++plus" });
+  });
+
+  it("records a moved file at its new path and drops the move trailer", () => {
+    const [change] = changesFromToolUse(
+      "Edit",
+      fileChange([
+        {
+          path: "/x/old.md",
+          kind: { type: "update", move_path: "/x/new.md" },
+          diff: "@@ -1 +1 @@\n-a\n+b\n\nMoved to: /x/new.md",
+        },
+      ]),
+    );
+    expect(change).toMatchObject({ op: "edit", path: "/x/new.md", previous: "a", content: "b" });
+  });
+
+  it("separates the hunks of one update", () => {
+    const [change] = changesFromToolUse(
+      "Edit",
+      fileChange([
+        {
+          path: "/x/a.md",
+          kind: { type: "update", move_path: null },
+          diff: "@@ -1 +1 @@\n-a\n+b\n@@ -9 +9 @@\n c\n\\ No newline at end of file\n",
+        },
+      ]),
+    );
+    expect(change).toMatchObject({ previous: "a\n\nc", content: "b\n\nc" });
+  });
+
+  it("skips entries it cannot read", () => {
+    expect(changesFromToolUse("Edit", fileChange([]))).toEqual([]);
+    expect(changesFromToolUse("Edit", fileChange([{ kind: "add" }]))).toEqual([]);
+    expect(
+      changesFromToolUse(
+        "Edit",
+        fileChange([
+          null,
+          { path: "/x/a.md", kind: { type: "add" } },
+          { path: "/x/a.md", kind: { type: "rename" }, diff: "x" },
+        ]),
+      ),
+    ).toEqual([]);
+  });
+});
+
 describe("classifyPath", () => {
   it("recognizes the daily journal", () => {
     expect(classifyPath(`${MEMORY}/journal/2026/10/06.md`)).toMatchObject({

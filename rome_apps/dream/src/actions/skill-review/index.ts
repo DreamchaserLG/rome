@@ -73,7 +73,8 @@ export function createAction(
       // A saved SKILL.md is not a skill until the carrier listing it is
       // installed, so publish and install it here; the save is never silent.
       // Changes are found by diffing the staging copy, not by parsing tool
-      // events, whose shape differs per provider (Codex edits carry no path).
+      // events, because a skill written through a shell command makes no
+      // file-tool call.
       const after = await snapshotCarrierSkills(staging);
       const changed = changedSkills(before, after);
       let installed: string[] | undefined;
