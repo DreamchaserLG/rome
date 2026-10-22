@@ -39,10 +39,8 @@ describe("People through every one of Rome's accounts on a platform", () => {
     const connections = createTestConnections(deps.transports, (service, talk) =>
       service === "telegram" ? { ...talk, directMessaging: { chatFor: async () => null } } : talk,
     );
-    return new Hono().route(
-      "/",
-      peopleRoutes({ ...deps, connections, channels: testChannels(deps, connections) }),
-    );
+    const noBotChat = { ...deps, connections, channels: testChannels(deps, connections) };
+    return new Hono().route("/", peopleRoutes(noBotChat));
   }
 
   it("sends from the first of Rome's accounts that already has a chat with them", async () => {
