@@ -1,7 +1,9 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ChatId, ChannelDirectMessaging } from "@rome-os/app-runtime";
 import { type Channel, ChannelNotConnected, type ChannelSend } from "../channels/channel.js";
-import { readSendStates } from "./send.js";
+import type { Message } from "@rome/api-types/message";
+import type { AccountMessages, Messages } from "../channels/messages.js";
+import { readSendStates, resolveSendTarget } from "./send.js";
 
 function channel(name: string, send: ChannelSend | null): Channel {
   return { name, send, inbound: null, accounts: null, messages: null, directory: null };
@@ -47,5 +49,60 @@ describe("readSendStates", () => {
       "no-conversation",
       "yes",
     ]);
+  });
+});
+
+describe("resolveSendTarget", () => {
+  /** A store that has heard from the address on `talked` alone. */
+  function heardOn(talked: string): Messages {
+    const byAccount: AccountMessages = {
+      read: async () => [],
+      count: async () => 0,
+      latest: async ([account]) =>
+        account?.channel === talked ? ({ timestamp: 5 } as Message) : null,
+    };
+    return { query: async () => [], byAccount } as unknown as Messages;
+  }
+
+  const open = () => sending({ chatFor: async (id) => id as ChatId });
+
+  it("sends from the one of Rome's accounts on the platform that last talked with them", async () => {
+    const history = heardOn("telegram_user");
+    const channels = [
+      { ...channel("telegram", open()), messages: history },
+      { ...channel("telegram_user", open()), messages: history },
+    ];
+
+    const resolved = await resolveSendTarget(
+      { channels },
+      { channel: "telegram", channelUserId: "7" },
+    );
+
+    expect(resolved.ok && resolved.target.channel).toBe("telegram_user");
+  });
+
+  it("sends from the link's own channel when none of them has talked with them", async () => {
+    const channels = [channel("telegram", open()), channel("telegram_user", open())];
+
+    const resolved = await resolveSendTarget(
+      { channels },
+      { channel: "telegram_user", channelUserId: "7" },
+    );
+
+    expect(resolved.ok && resolved.target.channel).toBe("telegram_user");
+  });
+
+  it("falls back to another account on the platform when the link's own cannot send", async () => {
+    const channels = [
+      channel("telegram", open()),
+      channel("telegram_user", sending({ chatFor: async () => null })),
+    ];
+
+    const resolved = await resolveSendTarget(
+      { channels },
+      { channel: "telegram_user", channelUserId: "7" },
+    );
+
+    expect(resolved.ok && resolved.target.channel).toBe("telegram");
   });
 });

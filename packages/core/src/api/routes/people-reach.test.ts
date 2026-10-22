@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
 import type { PersonResource } from "@rome/api-types/people";
 import {
@@ -12,8 +12,9 @@ import {
 import { peopleRoutes } from "./people.js";
 
 // A link names an account on a platform, and every one of Rome's accounts on
-// that platform reaches it (docs/domains/people.md#account). The Telegram bot
-// and the signed-in Telegram are two of Rome's accounts on one platform.
+// that platform reaches it (docs/domains/people.md#account). The two fake
+// Telegram channels here are two of Rome's accounts on one platform that can
+// both send.
 
 const TG = "4242";
 
@@ -34,7 +35,7 @@ describe("People through every one of Rome's accounts on a platform", () => {
   });
   afterEach(() => testDb.close());
 
-  /** The bot has never talked to Mei, and the signed-in account has. */
+  /** The bot cannot open a conversation with Mei, and the other account can. */
   function botWithoutChat(): Hono {
     const connections = createTestConnections(deps.transports, (service, talk) =>
       service === "telegram" ? { ...talk, directMessaging: { chatFor: async () => null } } : talk,
@@ -43,8 +44,9 @@ describe("People through every one of Rome's accounts on a platform", () => {
     return new Hono().route("/", peopleRoutes(noBotChat));
   }
 
-  it("sends from the first of Rome's accounts that already has a chat with them", async () => {
+  it("sends from another of Rome's accounts on the platform when the link's own cannot", async () => {
     const app = botWithoutChat();
+    const recorded = rs.spyOn(deps.webchatRepo, "ensureChannelChat");
 
     const person = (await (await app.request(`/people/${personId}`)).json()) as PersonResource;
     expect(person.accounts).toMatchObject([
@@ -62,9 +64,11 @@ describe("People through every one of Rome's accounts on a platform", () => {
     expect(deps.transports.get("telegram_user")?.sentMessages).toEqual([
       { chatId: TG, message: { text: "hi" } },
     ]);
+    // Rome's transcript files the message under the channel that carried it.
+    expect(recorded).toHaveBeenCalledWith({ channel: "telegram_user", threadId: TG });
   });
 
-  it("sends from the account the link names when it has a chat", async () => {
+  it("sends from the account the link names when none has talked with them", async () => {
     const app = new Hono().route("/", peopleRoutes(deps));
 
     await app.request(`/people/${personId}/messages`, {

@@ -153,7 +153,7 @@ async function attempt(
   // provider's own copy still lands and clears the row; on an unmirrored one
   // the row stays, visibly, which is the outbox doing its job.
   try {
-    await record(deps, row, receipt.messageId);
+    await record(deps, row, target.channel, receipt.messageId);
   } catch (error) {
     log.warn("outbound message delivered but recording failed", {
       outboxId: row.id,
@@ -228,9 +228,16 @@ async function heldBy(
   );
 }
 
-async function record(deps: OutboxDeps, row: OutboxRow, messageId: string | null): Promise<void> {
+/** Rome's transcript of the send, on the channel that carried it. The row keeps
+ *  the link's channel, which names whose message it is. */
+async function record(
+  deps: OutboxDeps,
+  row: OutboxRow,
+  channel: string,
+  messageId: string | null,
+): Promise<void> {
   const conversation = await deps.webchatRepo.ensureChannelChat({
-    channel: row.channel,
+    channel,
     threadId: row.chatId,
   });
   await deps.webchatRepo.recordOutboundConversationMessage({
