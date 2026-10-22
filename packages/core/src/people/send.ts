@@ -8,9 +8,8 @@
 // and picks for them, because every rule that could pick decides who receives
 // a message on evidence too thin to carry it — a timeline entry names its
 // channel and not its address, so "reply where they last wrote" cannot
-// separate two numbers on one channel. Which of Rome's accounts on the
-// account's platform carries the message is chosen here, since the recipient
-// is the same whichever does. `defaultSendAccount` in the
+// separate two numbers on one channel, and reaching for another channel when
+// one is down sends somewhere nobody chose. `defaultSendAccount` in the
 // contract offers surfaces a preselected account; it is a default rendered on
 // screen, not a decision taken off it.
 //
@@ -21,28 +20,15 @@
 
 import type { ChatId } from "@rome-os/app-runtime";
 import type { AccountSendState } from "@rome/api-types/people";
-import {
-  ChannelNotConnected,
-  messageStores,
-  type ChannelSend,
-  type Channels,
-} from "../channels/channel.js";
-import type { AccountMessages } from "../channels/messages.js";
-import type { DrizzleDb } from "../db/index.js";
-import { reachOf, type ReachDeps } from "./link-reach.js";
-import { personMessageStores } from "./timeline-sources.js";
+import { ChannelNotConnected, type ChannelSend, type Channels } from "../channels/channel.js";
 
 export interface SendAccount {
   channel: string;
   channelUserId: string;
 }
 
-export interface SendDeps extends ReachDeps {
+export interface SendDeps {
   channels: Channels;
-  /** Where Rome's own transcript lives, which holds what was said on a channel
-   *  with no store of its own. Without it only the channels' stores say which
-   *  of Rome's accounts has talked to someone. */
-  db?: DrizzleDb;
 }
 
 /** A resolved target: the channel's send port, and the conversation on it
@@ -51,9 +37,6 @@ export interface SendDeps extends ReachDeps {
  *  most one Connection, so that is the one the conversation was resolved on,
  *  unless the Connection was replaced in between. This is deliberate. */
 export interface SendTarget {
-  /** The channel that sends, which may be another of Rome's accounts on the
-   *  link's platform than the one the link names. */
-  channel: string;
   send: ChannelSend;
   chatId: ChatId;
 }
@@ -72,56 +55,6 @@ export type RefusedState = Exclude<AccountSendState, "yes">;
  * the port rejects with {@link ChannelNotConnected} then, as a send would.
  */
 async function sendStateOf(
-  deps: SendDeps,
-  account: SendAccount,
-  /** Whether to pick the sender by history. Only a send needs to: a listing
-   *  asks whether any of them can send, and reading history per link would
-   *  cost it a query per row. */
-  pick: boolean,
-): Promise<{ state: RefusedState } | { state: "yes"; target: SendTarget }> {
-  // Every one of Rome's accounts on the platform reaches the account. Of those
-  // that can send, the one that last talked with it sends, so nobody hears
-  // first from an account of Rome's they never wrote to. A channel's answer to
-  // `chatFor` is no evidence: some hand back any address. With no history on
-  // any of them the link's own channel sends, and with none that can send it
-  // says why.
-  const reach = reachOf(deps, account);
-  const states = await Promise.all(reach.map((address) => sendStateOn(deps, address)));
-  const sendable = states.filter(
-    (state): state is { state: "yes"; target: SendTarget } => state.state === "yes",
-  );
-  if (sendable.length <= 1 || !pick) return sendable[0] ?? states[0]!;
-  const stores = deps.db
-    ? personMessageStores({ db: deps.db, channels: deps.channels })
-    : messageStores(deps.channels);
-  const lastTalked = await Promise.all(
-    sendable.map((state) => latestOn(stores, state.target.channel, account.channelUserId)),
-  );
-  let chosen = 0;
-  for (let i = 1; i < sendable.length; i++) {
-    if ((lastTalked[i] ?? -1) > (lastTalked[chosen] ?? -1)) chosen = i;
-  }
-  return sendable[chosen]!;
-}
-
-/** When Rome's account `channel` last exchanged a message with the address,
- *  across every store, or null when none holds one. */
-async function latestOn(
-  stores: readonly AccountMessages[],
-  channel: string,
-  channelUserId: string,
-): Promise<number | null> {
-  const heads = await Promise.all(
-    stores.map((store) => store.latest([{ channel, addresses: [channelUserId] }])),
-  );
-  let latest: number | null = null;
-  for (const head of heads) {
-    if (head && (latest === null || head.timestamp > latest)) latest = head.timestamp;
-  }
-  return latest;
-}
-
-async function sendStateOn(
   deps: SendDeps,
   account: SendAccount,
 ): Promise<{ state: RefusedState } | { state: "yes"; target: SendTarget }> {
@@ -145,11 +78,11 @@ async function sendStateOn(
     chatId = null;
   }
   if (chatId === null) return { state: "no-conversation" };
-  return { state: "yes", target: { channel: channel.name, send, chatId } };
+  return { state: "yes", target: { send, chatId } };
 }
 
 export async function resolveSendTarget(deps: SendDeps, account: SendAccount): Promise<Resolution> {
-  const resolved = await sendStateOf(deps, account, true);
+  const resolved = await sendStateOf(deps, account);
   return resolved.state === "yes"
     ? { ok: true, target: resolved.target }
     : { ok: false, send: resolved.state };
@@ -168,7 +101,7 @@ export async function readSendStates(
   accounts: readonly SendAccount[],
 ): Promise<AccountSendState[]> {
   return await Promise.all(
-    accounts.map(async (account) => (await sendStateOf(deps, account, false)).state),
+    accounts.map(async (account) => (await sendStateOf(deps, account)).state),
   );
 }
 

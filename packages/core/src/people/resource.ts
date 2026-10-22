@@ -20,7 +20,7 @@ import type { MessageAccount } from "../channels/messages.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { readActivity } from "./activity.js";
-import { reachOf, reachOfAll } from "./link-reach.js";
+import { reachOf, reachOfAll, type PlatformOfChannel } from "./link-reach.js";
 import { readSendStates, type SendDeps } from "./send.js";
 import { personMessageStores, timelineAccounts } from "./timeline-sources.js";
 
@@ -29,6 +29,7 @@ export interface PeopleReadDeps extends SendDeps {
   personMappingRepo: Pick<PersonMappingRepository, "findAllWithMappings" | "findById">;
   channels: Channels;
   accountNames: Pick<AccountNames, "displayNames">;
+  platformOfChannel?: PlatformOfChannel;
 }
 
 /** A person as the repository reads them: the row and the accounts linked to

@@ -1,58 +1,74 @@
-import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
-import type { OutboxPage, PersonResource } from "@rome/api-types/people";
-import {
-  buildTestDeps,
-  createTestConnections,
-  createTestDb,
-  testChannels,
-  type TestDb,
-  type TestDeps,
-} from "../../test/helpers.js";
+import type { OutboxPage, PersonResource, TimelinePage } from "@rome/api-types/people";
+import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { peopleRoutes } from "./people.js";
 
 // A link names an account on a platform, and every one of Rome's accounts on
-// that platform reaches it (docs/domains/people.md#account). The two fake
-// Telegram channels here are two of Rome's accounts on one platform that can
-// both send.
+// that platform reaches it (docs/domains/people.md#account). The bot and the
+// signed-in account here are two of Rome's accounts on Telegram: Mei is linked
+// through the bot, and her conversation lives on the signed-in account.
 
 const TG = "4242";
 
-describe("People through every one of Rome's accounts on a platform", () => {
+const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
+
+describe("People read through every one of Rome's accounts on a platform", () => {
   let testDb: TestDb;
   let deps: TestDeps;
+  let app: Hono;
   let personId: string;
 
   beforeEach(async () => {
     testDb = createTestDb();
     deps = await buildTestDeps(testDb.db, { channels: ["telegram", "telegram_user", "webchat"] });
+    app = new Hono().route("/", peopleRoutes(deps));
     personId = await deps.personMappingRepo.create({
       displayName: "Mei",
       bondLevel: "acquaintance",
       approved: true,
       channelMappings: [{ channel: "telegram", channelUserId: TG }],
     });
+
+    const conversation = await deps.webchatRepo.ensureChannelChat({
+      channel: "telegram_user",
+      threadId: TG,
+      threadType: "private",
+      agentName: "main",
+    });
+    await deps.webchatRepo.addConversationMessage({
+      sessionId: conversation.id,
+      role: "user",
+      content: textContent("from the other account"),
+      platformMessageId: "tgu-1",
+      senderId: TG,
+      senderName: "Mei",
+      createdAt: new Date("2026-08-03T08:00:00Z"),
+    });
   });
   afterEach(() => testDb.close());
 
-  /** The bot cannot open a conversation with Mei, and the other account can. */
-  function botWithoutChat(): Hono {
-    const connections = createTestConnections(deps.transports, (service, talk) =>
-      service === "telegram" ? { ...talk, directMessaging: { chatFor: async () => null } } : talk,
-    );
-    const noBotChat = { ...deps, connections, channels: testChannels(deps, connections) };
-    return new Hono().route("/", peopleRoutes(noBotChat));
-  }
+  it("reads history from another of Rome's accounts on the platform", async () => {
+    const page = (await (await app.request(`/people/${personId}/messages`)).json()) as TimelinePage;
 
-  it("sends from another of Rome's accounts on the platform when the link's own cannot", async () => {
-    const app = botWithoutChat();
-    const recorded = rs.spyOn(deps.webchatRepo, "ensureChannelChat");
+    expect(page.entries.map((entry) => entry.body)).toEqual(["from the other account"]);
+  });
 
+  it("narrows to a link's channel with the platform's whole history", async () => {
+    const page = (await (
+      await app.request(`/people/${personId}/messages?channel=telegram`)
+    ).json()) as TimelinePage;
+
+    expect(page.entries).toHaveLength(1);
+  });
+
+  it("dates the link by its latest message on any of the platform's accounts", async () => {
     const person = (await (await app.request(`/people/${personId}`)).json()) as PersonResource;
-    expect(person.accounts).toMatchObject([
-      { channel: "telegram", channelUserId: TG, send: "yes" },
-    ]);
 
+    expect(person.accounts[0]?.latestAt).not.toBeNull();
+  });
+
+  it("still sends from the account the link names", async () => {
     const res = await app.request(`/people/${personId}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -60,42 +76,11 @@ describe("People through every one of Rome's accounts on a platform", () => {
     });
 
     expect(res.status).toBe(202);
-    expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
-    expect(deps.transports.get("telegram_user")?.sentMessages).toEqual([
-      { chatId: TG, message: { text: "hi" } },
-    ]);
-    // Rome's transcript files the message under the channel that carried it.
-    expect(recorded).toHaveBeenCalledWith({ channel: "telegram_user", threadId: TG });
-  });
-
-  it("sends from the account the link names when none has talked with them", async () => {
-    const app = new Hono().route("/", peopleRoutes(deps));
-
-    await app.request(`/people/${personId}/messages`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ channel: "telegram", channelUserId: TG, text: "hi" }),
-    });
-
     expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(1);
     expect(deps.transports.get("telegram_user")?.sentMessages).toEqual([]);
   });
 
-  it("clears a send from the outbox once it lands on the channel that carried it", async () => {
-    const app = botWithoutChat();
-
-    await app.request(`/people/${personId}/messages`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ channel: "telegram", channelUserId: TG, text: "hi" }),
-    });
-
-    const outbox = (await (await app.request(`/people/${personId}/outbox`)).json()) as OutboxPage;
-    expect(outbox.messages).toEqual([]);
-  });
-
-  it("retries and discards a failed send on any of Rome's accounts the link reaches", async () => {
-    const app = new Hono().route("/", peopleRoutes(deps));
+  it("shows, retries and discards a failed send from any of the platform's accounts", async () => {
     // A send that failed while Mei was linked through the signed-in account,
     // before the link moved to the bot's channel.
     const open = async () => {
@@ -108,11 +93,16 @@ describe("People through every one of Rome's accounts on a platform", () => {
       await deps.outboxRepo.refused(row.id, "down");
       return row.id;
     };
+    const retryId = await open();
+    const discardId = await open();
 
-    const retried = await app.request(`/people/${personId}/outbox/${await open()}/retry`, {
+    const outbox = (await (await app.request(`/people/${personId}/outbox`)).json()) as OutboxPage;
+    expect(outbox.messages).toHaveLength(2);
+
+    const retried = await app.request(`/people/${personId}/outbox/${retryId}/retry`, {
       method: "POST",
     });
-    const discarded = await app.request(`/people/${personId}/outbox/${await open()}`, {
+    const discarded = await app.request(`/people/${personId}/outbox/${discardId}`, {
       method: "DELETE",
     });
 
