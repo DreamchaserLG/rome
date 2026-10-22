@@ -1605,6 +1605,77 @@ describe("AnthropicProvider", () => {
       expect(queryMock.mock.calls[0]![0].options.env.ROME_CHANNEL).toBe(expected);
     });
 
+    function terminalMcpTools(): string[] | undefined {
+      return queryMock.mock.calls[0]![0].options.env.CLAUDE_CODE_TERMINAL_MCP_TOOLS?.split(",");
+    }
+
+    // The env and the handler must agree: a tool listed as terminal on a surface
+    // where ask_question asks in prose would let an empty reply through.
+    it.each([
+      ["an interactive surface", { supportsInteractiveSurface: true }, true],
+      ["a non-interactive surface", { supportsInteractiveSurface: false }, false],
+      [
+        "a detached interactive surface",
+        { supportsInteractiveSurface: true, interactiveSurfaceDetached: true },
+        false,
+      ],
+    ])("lists ask_question as terminal exactly when it parks on a card, on %s", async (_label, overrides, parksOnCard) => {
+      const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
+      const session = await provider.openSession(buildParams(overrides));
+      await collectEvents(session);
+      await session.close();
+
+      // Claude Code matches tool_use names, which are mcp__<server key>__<tool name>,
+      // so the handler is looked up under the same server key and tool name.
+      const { mcpServers } = queryMock.mock.calls[0]![0].options;
+      const askQuestion = mcpServers.ask_user.tools.find(
+        (tool: { name: string }) => tool.name === "ask_question",
+      );
+      const result = await askQuestion.handler(
+        { questions: [{ id: "q1", question: "Which day?", type: "text" }] },
+        {},
+      );
+      const parked = (result.content[0].text as string).includes('"pendingInteraction":true');
+      expect(parked).toBe(parksOnCard);
+      expect(terminalMcpTools()).toEqual(parksOnCard ? ["mcp__ask_user__ask_question"] : undefined);
+    });
+
+    it("appends ask_question after cleaned inherited terminal tools", async () => {
+      const provider = new AnthropicProvider({
+        env: { PATH: "/usr/bin", CLAUDE_CODE_TERMINAL_MCP_TOOLS: " mcp__x__y,,mcp__z__w " },
+      });
+      const session = await provider.openSession(buildParams({ supportsInteractiveSurface: true }));
+      await collectEvents(session);
+      await session.close();
+
+      expect(terminalMcpTools()).toEqual(["mcp__x__y", "mcp__z__w", "mcp__ask_user__ask_question"]);
+    });
+
+    it("does not list ask_question twice when it is already inherited", async () => {
+      const provider = new AnthropicProvider({
+        env: {
+          PATH: "/usr/bin",
+          CLAUDE_CODE_TERMINAL_MCP_TOOLS: "mcp__ask_user__ask_question,mcp__x__y",
+        },
+      });
+      const session = await provider.openSession(buildParams({ supportsInteractiveSurface: true }));
+      await collectEvents(session);
+      await session.close();
+
+      expect(terminalMcpTools()).toEqual(["mcp__ask_user__ask_question", "mcp__x__y"]);
+    });
+
+    it("passes inherited terminal tools through unchanged on a non-interactive surface", async () => {
+      const provider = new AnthropicProvider({
+        env: { PATH: "/usr/bin", CLAUDE_CODE_TERMINAL_MCP_TOOLS: "mcp__x__y" },
+      });
+      const session = await provider.openSession(buildParams());
+      await collectEvents(session);
+      await session.close();
+
+      expect(terminalMcpTools()).toEqual(["mcp__x__y"]);
+    });
+
     it("passes stored Anthropic-compatible provider credentials to the Claude SDK env", async () => {
       const provider = new AnthropicProvider({
         env: { PATH: "/usr/bin", ANTHROPIC_AUTH_TOKEN: "old-token" },
