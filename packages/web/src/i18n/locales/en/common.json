@@ -24,8 +24,8 @@
   "sidebar": {
     "aiApps": "AI Apps",
     "appDisabled": "Disabled",
-    "recent": "Recent",
-    "recentApps": "Recent apps"
+    "moreRecentApps": "More recent apps",
+    "notOpened": "Not opened on this device"
   },
   "recentChats": {
     "myChats": "My chats",

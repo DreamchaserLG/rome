@@ -12,10 +12,10 @@ import {
 // data: it regrows as the guardian uses apps, and a phone and a laptop have
 // different habits, so each device keeps its own list. Only the pin set is a
 // deliberate setting worth syncing. The install time, the other half of the
-// Recent row, comes from the server with each app card.
+// Recent zone, comes from the server with each app card.
 export const APP_LAST_OPENED_STORAGE_KEY = "rome-app-last-opened";
 // Same-document poke, the counterpart of `rome-pins-changed`. An open recorded
-// in another tab reaches the Apps page through the `storage` event instead,
+// in another tab reaches this sidebar through the `storage` event instead,
 // which fires in every other same-origin document.
 const APP_OPENED_EVENT = "rome-app-opened";
 

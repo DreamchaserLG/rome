@@ -44,7 +44,6 @@ import { useAppsList, useInvalidateApps } from "@/hooks/use-apps";
 import { useAppLifecycle } from "@/hooks/use-app-lifecycle";
 import { useLongPressMenu } from "@/hooks/use-long-press-menu";
 import { useSidebarPins } from "@/hooks/use-sidebar-pins";
-import { useRecentApps } from "@/hooks/use-recent-apps";
 import { isRequiredBuiltinPin } from "@/shell/AppGrid";
 import { APP_NAV } from "@/shell/builtin-nav";
 
@@ -222,16 +221,16 @@ function AppTile({
   );
 }
 
-// Status badge on the icon's top-right corner: an available update (success),
-// a failed install (destructive), or a recent app not yet opened here (info). Decorative — the kebab's aria-label and
+// Status badge on the icon's top-right corner: an available update (success)
+// or a failed install (destructive). Decorative — the kebab's aria-label and
 // the details page carry the accessible equivalents.
-function TileStatusDot({ tone }: { tone: "update" | "error" | "unopened" }) {
+function TileStatusDot({ tone }: { tone: "update" | "error" }) {
   return (
     <span
       aria-hidden
       className={cn(
         "absolute -right-1 -top-1 h-3 w-3 rounded-full ring-2 ring-background",
-        tone === "update" ? "bg-success" : tone === "error" ? "bg-destructive" : "bg-info",
+        tone === "update" ? "bg-success" : "bg-destructive",
       )}
     />
   );
@@ -287,9 +286,6 @@ function SectionHeader({ title, count }: SectionHeaderProps) {
   );
 }
 
-const NO_APPS: InstalledAppCard[] = [];
-const NO_PINS: ReadonlySet<string> = new Set();
-
 export default function AppsIndexPage() {
   const { t } = useTranslation("apps");
   const { t: tCommon } = useTranslation("common");
@@ -337,12 +333,6 @@ export default function AppsIndexPage() {
     return `${app.displayName} ${app.id}`.toLowerCase().includes(normalizedQuery);
   };
   const visibleBuiltins = builtinPages.filter(matchesBuiltin);
-  // Apps installed or opened lately, most recent first, in one row above the
-  // sections. The row is for coming back to something, so a search hides it.
-  const { recent: recentApps, unopenedIds } = useRecentApps(
-    apps?.filter((app) => !isCarrierApp(app.id)) ?? NO_APPS,
-    NO_PINS,
-  );
   // `null` while the installed list is still loading — kept distinct from the
   // empty array so the skeleton (loading) and the empty state (no matches) don't
   // collide. Filtering applies live once the list lands.
@@ -403,7 +393,7 @@ export default function AppsIndexPage() {
     />
   );
 
-  const renderInstalledTile = (app: InstalledAppCard, unopened = false) => {
+  const renderInstalledTile = (app: InstalledAppCard) => {
     // An app is openable either via its own embedded frontend (`href`) or via a
     // host route registered for a backend-only app (see HOST_APP_ROUTES in
     // lib/auth-routing.ts — shared with App.tsx routing and auth classification).
@@ -455,8 +445,6 @@ export default function AppsIndexPage() {
               <TileStatusDot tone="error" />
             ) : candidate ? (
               <TileStatusDot tone="update" />
-            ) : unopened ? (
-              <TileStatusDot tone="unopened" />
             ) : null}
           </>
         }
@@ -620,18 +608,6 @@ export default function AppsIndexPage() {
           </EmptyState>
         ) : (
           <div className="flex flex-col gap-6" aria-busy={apps === null}>
-            {!isSearching && recentApps.length > 0 ? (
-              <Section aria-label={tCommon("sidebar.recentApps")}>
-                <SectionHeader title={tCommon("sidebar.recent")} count={null} />
-                <div className="-mx-1 flex overflow-x-auto px-1 scrollbar-idle-hidden">
-                  {recentApps.map((app) => (
-                    <div key={app.id} className="w-20 shrink-0 sm:w-28">
-                      {renderInstalledTile(app, unopenedIds.has(app.id))}
-                    </div>
-                  ))}
-                </div>
-              </Section>
-            ) : null}
             {showMySection ? (
               <Section aria-label={t("sections.my.title")}>
                 <SectionHeader title={t("sections.my.title")} count={myAppsCount} />

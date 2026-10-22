@@ -13,8 +13,10 @@ import { APP_NAV } from "./builtin-nav";
 import { ChatSearchDialog } from "./ChatSearchDialog";
 import { ProfileMenu } from "./ProfileMenu";
 import { RecentChats } from "./RecentChats";
+import { useChatPeek } from "./use-chat-peek";
 import { SUPPORTED_LANGUAGES } from "@/i18n";
 import { saveSetting } from "@/lib/chat-api";
+import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { useDesktop } from "@/hooks/use-desktop";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useSettings } from "@/hooks/use-settings";
@@ -62,6 +64,11 @@ export function RomeShellLayout() {
   const onChat = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
   const showChats = onChat && !(collapsed && isDesktop);
   const sidebarShortcut = sidebarShortcutForPlatform();
+  // The collapsed list can be peeked at by hover, so only where there is one.
+  const coarsePointer = useCoarsePointer();
+  const canPeek = onChat && !showChats && isDesktop && !coarsePointer && !hideSidebar;
+  const peekRef = useRef<HTMLDivElement>(null);
+  const chatPeek = useChatPeek(canPeek, location.pathname, peekRef);
 
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
@@ -245,7 +252,10 @@ export function RomeShellLayout() {
                 </div>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto scrollbar-idle-hidden">
-                <AppGrid onSearch={() => setChatSearchOpen(true)} />
+                <AppGrid
+                  onSearch={() => setChatSearchOpen(true)}
+                  chatPeek={canPeek ? chatPeek.tile : undefined}
+                />
               </div>
               <div className="flex shrink-0 items-center justify-center py-3">
                 <ProfileMenu />
@@ -272,6 +282,28 @@ export function RomeShellLayout() {
                         className="text-subtle-foreground hover:text-foreground md:hidden"
                       />
                     </>
+                  }
+                />
+              </div>
+            ) : null}
+            {/* The collapsed chat list, shown over the page rather than beside
+                it, so a glance does not reflow the chat. */}
+            {chatPeek.open ? (
+              <div
+                ref={peekRef}
+                data-chat-peek
+                className="absolute inset-y-0 left-16 flex w-64 min-w-0 flex-col border-x border-border bg-background shadow-10"
+              >
+                <RecentChats
+                  headerControls={
+                    <IconButton
+                      size="sm"
+                      label={t("nav.expandSidebar")}
+                      title={t("nav.expandSidebarShortcut", { shortcut: sidebarShortcut })}
+                      icon={<PanelLeftOpen aria-hidden />}
+                      onClick={toggleCollapsed}
+                      className="text-subtle-foreground hover:text-foreground"
+                    />
                   }
                 />
               </div>

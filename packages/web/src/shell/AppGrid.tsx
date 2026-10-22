@@ -1,5 +1,5 @@
 import { AppWindow, ExternalLink, Info, MessageCircle, Pin, PinOff, Search } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { AppOrigin, InstalledAppCard } from "@rome/api-types/apps";
@@ -21,9 +21,11 @@ import { useAppCatalogChanges } from "@/hooks/use-app-catalog-events";
 import { hasSession, useAuthStateSnapshot } from "@/lib/auth-state";
 import { useApps, useInvalidateApps } from "@/hooks/use-apps";
 import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
+import { useRecentApps } from "@/hooks/use-recent-apps";
 import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
 import { isCarrierApp } from "@/lib/chat-helpers";
 import { APP_NAV, type BuiltinNavEntry } from "./builtin-nav";
+import { RailAppIcon, RecentAppsRail } from "./RecentAppsRail";
 import { ACTIVE_CLASS, IDLE_CLASS, RAIL_LINK_CLASS, isEntryActive } from "./sidebar-shared";
 
 export interface PinnedEntry {
@@ -135,35 +137,19 @@ function renderBuiltinIcon(entry: BuiltinNavEntry): React.ReactNode {
   );
 }
 
-function RailAppIcon({ app }: { app: InstalledAppCard | CachedApp }) {
-  if (app.iconUrl) {
-    return (
-      <img
-        src={app.iconUrl}
-        alt=""
-        className="h-4 w-4 shrink-0 rounded-4"
-        onError={(e) => {
-          (e.target as HTMLImageElement).style.display = "none";
-        }}
-      />
-    );
-  }
-  return (
-    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-4 bg-surface-muted text-aux text-muted-foreground">
-      {app.displayName.charAt(0).toUpperCase()}
-    </span>
-  );
-}
-
 interface AppGridProps {
   /** Opens the search dialog. It finds pages, apps and chats, so it sits on
    *  the rail, which every page shows, and leads it as an action, not a page. */
   onSearch?: () => void;
+  /** Pointer handlers that make the Chat tile open the collapsed chat list
+   *  as a peek. The peek names the tile better than a tooltip would, so the
+   *  tile shows none while these are set. */
+  chatPeek?: { onPointerEnter: () => void; onPointerLeave: () => void };
 }
 
-// The sidebar's first column: search, Rome's main surfaces, then the
-// guardian's pins, as icon tiles whose tooltip carries the label.
-export function AppGrid({ onSearch }: AppGridProps = {}) {
+// The sidebar's first column: search, Rome's main surfaces, the guardian's
+// pins, then recent apps, as icon tiles whose tooltip carries the label.
+export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
   const { t } = useTranslation("common");
   const { t: tApps } = useTranslation("apps");
   const location = useLocation();
@@ -201,10 +187,15 @@ export function AppGrid({ onSearch }: AppGridProps = {}) {
 
   const { data: settings } = useSettings();
   const { apps: appsFromQuery } = useApps();
+  const pinnedAppIds = useMemo(
+    () => new Set(pins.filter((pin) => pin.type === "app").map((pin) => pin.id)),
+    [pins],
+  );
+  const { recent: recentApps, unopenedIds } = useRecentApps(installedApps, pinnedAppIds);
 
   useEffect(() => {
     if (!appsFromQuery) return;
-    // Carriers (e.g. user-skills) are plumbing, never a pin.
+    // Carriers (e.g. user-skills) are plumbing, never a pin or a recent app.
     const sidebarApps = appsFromQuery.filter((app) => !isCarrierApp(app.id));
     setInstalledApps(sidebarApps);
     writeLocalApps(sidebarApps);
@@ -262,8 +253,8 @@ export function AppGrid({ onSearch }: AppGridProps = {}) {
 
   // A plain click on a sidebar row already opens it in place, so the menu's
   // open is the one a click cannot do: a new tab — wherever there are tabs.
-  const renderOpenMenuItem = (href: string): React.ReactNode => (
-    <ContextMenuItem asChild>
+  const renderOpenMenuItem = (href: string, onSelect?: () => void): React.ReactNode => (
+    <ContextMenuItem asChild onSelect={onSelect}>
       {canOpenNewTab ? (
         <a href={href} target="_blank" rel="noopener noreferrer">
           <ExternalLink aria-hidden />
@@ -312,39 +303,57 @@ export function AppGrid({ onSearch }: AppGridProps = {}) {
     );
   };
 
+  // A recent app offers Pin where a pinned one offers Unpin. onSelect runs
+  // after any item, for a caller that must close its own menu.
   const withAppContextMenu = (
     app: InstalledAppCard | CachedApp,
     trigger: React.ReactNode,
+    pinned = true,
+    onSelect?: () => void,
   ): React.ReactNode => {
     if (!app.href) return trigger;
     return (
       <ContextMenu>
         <ContextMenuTrigger asChild>{trigger}</ContextMenuTrigger>
         <ContextMenuContent>
-          {renderOpenMenuItem(app.href)}
+          {renderOpenMenuItem(app.href, onSelect)}
           <ContextMenuItem
             onSelect={() => {
               openAppInSplitView(app);
+              onSelect?.();
             }}
           >
             <MessageCircle aria-hidden />
             {tApps("installed.chatWithApp")}
           </ContextMenuItem>
-          <ContextMenuItem asChild>
+          <ContextMenuItem asChild onSelect={onSelect}>
             <Link to={`/app-details/${encodeURIComponent(app.id)}`}>
               <Info aria-hidden />
               {tApps("installed.viewDetails")}
             </Link>
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem
-            onSelect={() =>
-              persistPins(pins.filter((pin) => !(pin.type === "app" && pin.id === app.id)))
-            }
-          >
-            <PinOff aria-hidden />
-            {tApps("installed.unpin")}
-          </ContextMenuItem>
+          {pinned ? (
+            <ContextMenuItem
+              onSelect={() => {
+                persistPins(pins.filter((pin) => !(pin.type === "app" && pin.id === app.id)));
+                onSelect?.();
+              }}
+            >
+              <PinOff aria-hidden />
+              {tApps("installed.unpin")}
+            </ContextMenuItem>
+          ) : (
+            <ContextMenuItem
+              onSelect={() => {
+                persistPins([...pins, { type: "app", id: app.id }]);
+                onSelect?.();
+              }}
+            >
+              <Pin aria-hidden />
+              {tApps("installed.pin")}
+            </ContextMenuItem>
+          )}
         </ContextMenuContent>
       </ContextMenu>
     );
@@ -404,6 +413,24 @@ export function AppGrid({ onSearch }: AppGridProps = {}) {
         );
       }
       const active = isEntryActive(location.pathname, entry.href);
+      if (entry.id === "chat" && chatPeek) {
+        return (
+          <Fragment key={`builtin-${pin.id}`}>
+            {withBuiltinContextMenu(
+              entry,
+              <Link
+                to={entry.href}
+                aria-label={label}
+                onPointerEnter={chatPeek.onPointerEnter}
+                onPointerLeave={chatPeek.onPointerLeave}
+                className={`${RAIL_LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
+              >
+                {renderBuiltinIcon(entry)}
+              </Link>,
+            )}
+          </Fragment>
+        );
+      }
       return (
         <Tooltip key={`builtin-${pin.id}`}>
           {withBuiltinContextMenu(
@@ -476,6 +503,14 @@ export function AppGrid({ onSearch }: AppGridProps = {}) {
         {pins.slice(0, fixedCount).map(renderPin)}
         {pins.length > fixedCount ? <Separator className="my-1 w-6" /> : null}
         {pins.slice(fixedCount).map(renderPin)}
+        <RecentAppsRail
+          apps={recentApps}
+          unopenedIds={unopenedIds}
+          pathname={location.pathname}
+          wrapWithContextMenu={(app, trigger, onSelect) =>
+            withAppContextMenu(app, trigger, false, onSelect)
+          }
+        />
       </nav>
       {storeSheet}
     </TooltipProvider>
