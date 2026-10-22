@@ -16,6 +16,7 @@ import {
 
 function account(over: Partial<LinkedAccount> & Pick<LinkedAccount, "channel">): LinkedAccount {
   return {
+    readThrough: [over.channel],
     channelUserId: "u1",
     displayName: "someone",
     send: "yes",
@@ -120,6 +121,21 @@ describe("segmentEntries", () => {
     const scoped = segmentEntries(entries, account({ channel: "telegram" }));
     expect(scoped.map((entry) => entry.body)).toEqual(["tg"]);
   });
+
+  it("keeps the entries on every channel the account is read through", () => {
+    const signedIn: Message = {
+      source: "telegram_user",
+      timestamp: 5,
+      body: "tg user",
+      direction: "inbound",
+      ref: "c",
+    };
+    const scoped = segmentEntries(
+      [...entries, signedIn],
+      account({ channel: "telegram", readThrough: ["telegram", "telegram_user"] }),
+    );
+    expect(scoped.map((entry) => entry.body)).toEqual(["tg", "tg user"]);
+  });
 });
 
 describe("segmentOutbox", () => {
@@ -152,6 +168,15 @@ describe("segmentOutbox", () => {
     // half of the pair that can be told apart.
     const scoped = segmentOutbox(messages, account({ channel: "whatsapp", channelUserId: "b" }));
     expect(scoped.map((message) => message.text)).toEqual(["two"]);
+  });
+
+  it("keeps the account's rows on every channel it is read through", () => {
+    const other = { ...messages[1]!, id: "3", channel: "whatsapp_2", text: "three" };
+    const scoped = segmentOutbox(
+      [...messages, other],
+      account({ channel: "whatsapp", channelUserId: "b", readThrough: ["whatsapp", "whatsapp_2"] }),
+    );
+    expect(scoped.map((message) => message.text)).toEqual(["two", "three"]);
   });
 });
 

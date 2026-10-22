@@ -92,6 +92,7 @@ function personResource(person: PersonFixture): PersonResource {
       channel: a.channel,
       channelUserId: a.channelUserId,
       displayName: nameForAccount(a.channel, a.channelUserId),
+      readThrough: [a.channel],
       send: sendState(a),
       // The account's own head, not the person's: the person's newest entry
       // names a channel and not an address, so it cannot say which of two

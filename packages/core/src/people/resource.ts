@@ -20,7 +20,7 @@ import type { MessageAccount } from "../channels/messages.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { readActivity } from "./activity.js";
-import { reachOf, type PlatformOfChannel } from "./link-reach.js";
+import { linkReach, type LinkReach, type PlatformOfChannel } from "./link-reach.js";
 import { readSendStates, type SendDeps } from "./send.js";
 import { personMessageStores, timelineAccounts } from "./timeline-sources.js";
 
@@ -28,7 +28,7 @@ export interface PeopleReadDeps extends SendDeps {
   db: DrizzleDb;
   personMappingRepo: Pick<
     PersonMappingRepository,
-    "findAllWithMappings" | "findById" | "findByChannelUser"
+    "findAllWithMappings" | "findById" | "findByChannelUser" | "linkKeyOf"
   >;
   channels: Channels;
   accountNames: Pick<AccountNames, "displayNames">;
@@ -42,16 +42,15 @@ export type PersonRow = Awaited<ReturnType<PersonMappingRepository["findAllWithM
 
 /** Every curated person. */
 export async function readPeople(deps: PeopleReadDeps): Promise<PersonResource[]> {
-  const persons = (await deps.personMappingRepo.findAllWithMappings()).filter(
-    (person) => person.id !== STRANGER_PERSON_ID,
-  );
-  return serialize(deps, persons);
+  const everyone = await deps.personMappingRepo.findAllWithMappings();
+  const persons = everyone.filter((person) => person.id !== STRANGER_PERSON_ID);
+  return serialize(deps, persons, linkReach(deps, everyone));
 }
 
 /** One curated person, or null when the id names none. */
 export async function readPerson(deps: PeopleReadDeps, id: string): Promise<PersonResource | null> {
   const person = await findPerson(deps, id);
-  return person && (await serialize(deps, [person]))[0];
+  return person && (await serialize(deps, [person], linkReach(deps)))[0];
 }
 
 /** The person an id names, as stored — for a caller that needs the mappings
@@ -72,6 +71,7 @@ export async function findPerson(
 async function serialize(
   deps: PeopleReadDeps,
   persons: readonly PersonRow[],
+  reach: LinkReach,
 ): Promise<PersonResource[]> {
   // One mapping is one account on the wire, so a client can address the link
   // it sees. The activity fold is the one place two mappings of a single
@@ -82,7 +82,7 @@ async function serialize(
   // platform, so names, history and activity are read at all of them.
   const reaches = await Promise.all(
     persons.flatMap((person) =>
-      person.channelMappings.map((mapping) => reachOf(deps, person.id, mapping)),
+      person.channelMappings.map((mapping) => reach.of(person.id, mapping)),
     ),
   );
   let taken = 0;
@@ -127,6 +127,7 @@ async function serialize(
         channel: mapping.channel,
         channelUserId: mapping.channelUserId,
         displayName: firstNames[index],
+        readThrough: reaches[index]!.map((address) => address.channel),
         send: sendStates[index] ?? ("not-connected" as AccountSendState),
         latestAt: latestAtOf(activity.perAccount, accountsByPerson[i], reaches[index]!),
       };

@@ -81,8 +81,8 @@ export function segmentAccount(
 }
 
 /**
- * The timeline a segment shows: everything on the merged segment, and one
- * channel's entries inside an account segment.
+ * The timeline a segment shows: everything on the merged segment, and the
+ * entries on the channels an account is read through inside an account segment.
  *
  * By channel, because that is all an entry names. A person with two numbers on
  * one channel sees both accounts' history under either of their segments, which
@@ -94,11 +94,13 @@ export function segmentEntries(
   entries: readonly Message[],
   account: LinkedAccount | null,
 ): Message[] {
-  return account ? entries.filter((entry) => entry.source === account.channel) : [...entries];
+  return account
+    ? entries.filter((entry) => account.readThrough.includes(entry.source))
+    : [...entries];
 }
 
 /** The outbox rows a segment shows. Narrowed by the account itself, which an
- *  outbox row does name. */
+ *  outbox row does name, on any of the channels it is read through. */
 export function segmentOutbox(
   messages: readonly OutboxMessage[],
   account: LinkedAccount | null,
@@ -106,7 +108,8 @@ export function segmentOutbox(
   return account
     ? messages.filter(
         (message) =>
-          message.channel === account.channel && message.channelUserId === account.channelUserId,
+          account.readThrough.includes(message.channel) &&
+          message.channelUserId === account.channelUserId,
       )
     : [...messages];
 }

@@ -24,7 +24,7 @@ import { parseMessageCursor } from "@rome/api-types/message";
 import { createPerson } from "../../people/create.js";
 import { mergePeople } from "../../people/merge.js";
 import { discardSend, readOutbox, retrySend, sendToAccount } from "../../people/outbox.js";
-import { reachOfAll, samePlatform } from "../../people/link-reach.js";
+import { linkReach } from "../../people/link-reach.js";
 import { findPerson, readPeople, readPerson } from "../../people/resource.js";
 import { updatePerson } from "../../people/update.js";
 import { readPersonTimeline } from "../../people/timeline.js";
@@ -216,7 +216,7 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     const person = await findPerson(deps, c.req.param("id"));
     if (!person) return c.json({ error: "Unknown person" }, 404);
 
-    const [accounts] = await timelineAccounts(deps, [await reachOfAll(deps, person)]);
+    const [accounts] = await timelineAccounts(deps, [await linkReach(deps).ofAll(person)]);
     return c.json({
       messages: await readOutbox(deps, personMessageStores(deps), accounts),
     } satisfies OutboxPage);
@@ -235,7 +235,11 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     const person = await findPerson(deps, c.req.param("id"));
     if (!person) return c.json({ error: "Unknown person" }, 404);
 
-    const message = await retrySend(deps, await reachOfAll(deps, person), c.req.param("messageId"));
+    const message = await retrySend(
+      deps,
+      await linkReach(deps).ofAll(person),
+      c.req.param("messageId"),
+    );
     return message
       ? c.json(message, 202)
       : c.json({ error: "No failed message of theirs with that id" }, 404);
@@ -250,7 +254,7 @@ export function peopleRoutes(deps: ApiDeps): Hono {
 
     const discarded = await discardSend(
       deps,
-      await reachOfAll(deps, person),
+      await linkReach(deps).ofAll(person),
       c.req.param("messageId"),
     );
     return discarded
@@ -273,14 +277,15 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     // no set of names to check one against, and "no history there" is the true
     // answer for every name that is not a typo.
     const channel = c.req.query("channel");
-    const [accounts] = await timelineAccounts(deps, [await reachOfAll(deps, person)]);
+    const reach = linkReach(deps);
+    const [accounts] = await timelineAccounts(deps, [await reach.ofAll(person)]);
 
     return c.json(
       await readPersonTimeline(
         personMessageStores(deps),
         // A link's channel names its platform's history: every one of Rome's
         // accounts there reaches the same account.
-        accounts.filter((account) => !channel || samePlatform(deps, account.channel, channel)),
+        accounts.filter((account) => !channel || reach.samePlatform(account.channel, channel)),
         { cursor, limit: timelinePageLimit(c.req.query("limit")) },
       ),
     );
