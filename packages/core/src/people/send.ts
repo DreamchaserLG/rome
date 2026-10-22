@@ -21,13 +21,14 @@
 import type { ChatId } from "@rome-os/app-runtime";
 import type { AccountSendState } from "@rome/api-types/people";
 import { ChannelNotConnected, type ChannelSend, type Channels } from "../channels/channel.js";
+import { reachOf, type ReachDeps } from "./link-reach.js";
 
 export interface SendAccount {
   channel: string;
   channelUserId: string;
 }
 
-export interface SendDeps {
+export interface SendDeps extends ReachDeps {
   channels: Channels;
 }
 
@@ -55,6 +56,24 @@ export type RefusedState = Exclude<AccountSendState, "yes">;
  * the port rejects with {@link ChannelNotConnected} then, as a send would.
  */
 async function sendStateOf(
+  deps: SendDeps,
+  account: SendAccount,
+): Promise<{ state: RefusedState } | { state: "yes"; target: SendTarget }> {
+  // Every one of Rome's accounts on the platform reaches the account. The first
+  // that already has a conversation with it sends, so nobody hears first from
+  // an account of Rome's they never wrote to. With none, the link's own channel
+  // says why.
+  const [own, ...others] = reachOf(deps, account);
+  const first = await sendStateOn(deps, own!);
+  if (first.state === "yes") return first;
+  for (const other of others) {
+    const state = await sendStateOn(deps, other);
+    if (state.state === "yes") return state;
+  }
+  return first;
+}
+
+async function sendStateOn(
   deps: SendDeps,
   account: SendAccount,
 ): Promise<{ state: RefusedState } | { state: "yes"; target: SendTarget }> {

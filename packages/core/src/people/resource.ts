@@ -20,6 +20,7 @@ import type { MessageAccount } from "../channels/messages.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { readActivity } from "./activity.js";
+import { reachOf, reachOfAll } from "./link-reach.js";
 import { readSendStates, type SendDeps } from "./send.js";
 import { personMessageStores, timelineAccounts } from "./timeline-sources.js";
 
@@ -72,6 +73,9 @@ async function serialize(
   // account collapse — reporting one person's history twice would be a wrong
   // number, whereas showing both addresses is only what the guardian stored.
   const refs = persons.flatMap((person) => person.channelMappings);
+  // Each link reaches its account at every one of Rome's accounts on its
+  // platform, so names, history and activity are read at all of them.
+  const reaches = refs.map((mapping) => reachOf(deps, mapping));
 
   // Independent of each other, and both reach the same channel mirrors: read
   // together, a mirror that folds its whole address book per call serves both
@@ -79,9 +83,9 @@ async function serialize(
   const [accountsByPerson, names, sendStates, memoryPaths] = await Promise.all([
     timelineAccounts(
       deps,
-      persons.map((person) => person.channelMappings),
+      persons.map((person) => reachOfAll(deps, person.channelMappings)),
     ),
-    deps.accountNames.displayNames(refs),
+    deps.accountNames.displayNames(reaches.flat()),
     // Whether each mapping can be written to, asked of the live connections
     // rather than stored: a channel that went down between two reads has to
     // change this answer, and nothing writes a row when it does.
@@ -89,6 +93,16 @@ async function serialize(
     memoryProfilePaths(persons),
   ]);
   const activity = await readActivity(personMessageStores(deps), accountsByPerson);
+
+  // The first of Rome's accounts on the platform that knows a name for the
+  // account names it. A channel that knows none answers the address itself.
+  const firstNames: string[] = [];
+  let offset = 0;
+  for (const reach of reaches) {
+    const answers = names.slice(offset, offset + reach.length);
+    firstNames.push(answers.find((name, j) => name !== reach[j]!.channelUserId) ?? answers[0]!);
+    offset += reach.length;
+  }
 
   let next = 0;
   return persons.map((person, i) => ({
@@ -100,9 +114,9 @@ async function serialize(
       return {
         channel: mapping.channel,
         channelUserId: mapping.channelUserId,
-        displayName: names[index],
+        displayName: firstNames[index],
         send: sendStates[index] ?? ("not-connected" as AccountSendState),
-        latestAt: latestAtOf(activity.perAccount, accountsByPerson[i], mapping),
+        latestAt: latestAtOf(activity.perAccount, accountsByPerson[i], reaches[index]!),
       };
     }),
     memoryPath: memoryPaths[i],
@@ -153,11 +167,17 @@ async function memoryProfilePaths(persons: readonly PersonRow[]): Promise<(strin
 function latestAtOf(
   heads: Map<MessageAccount, Message>,
   accounts: readonly MessageAccount[] | undefined,
-  mapping: { channel: string; channelUserId: string },
+  reach: readonly { channel: string; channelUserId: string }[],
 ): number | null {
-  const account = accounts?.find(
-    (candidate) =>
-      candidate.channel === mapping.channel && candidate.addresses.includes(mapping.channelUserId),
-  );
-  return (account && heads.get(account)?.timestamp) ?? null;
+  let latest: number | null = null;
+  for (const address of reach) {
+    const account = accounts?.find(
+      (candidate) =>
+        candidate.channel === address.channel &&
+        candidate.addresses.includes(address.channelUserId),
+    );
+    const at = (account && heads.get(account)?.timestamp) ?? null;
+    if (at !== null && (latest === null || at > latest)) latest = at;
+  }
+  return latest;
 }

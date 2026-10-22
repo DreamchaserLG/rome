@@ -24,6 +24,7 @@ import { parseMessageCursor } from "@rome/api-types/message";
 import { createPerson } from "../../people/create.js";
 import { mergePeople } from "../../people/merge.js";
 import { discardSend, readOutbox, retrySend, sendToAccount } from "../../people/outbox.js";
+import { reachOfAll, samePlatform } from "../../people/link-reach.js";
 import { findPerson, readPeople, readPerson } from "../../people/resource.js";
 import { updatePerson } from "../../people/update.js";
 import { readPersonTimeline } from "../../people/timeline.js";
@@ -215,7 +216,7 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     const person = await findPerson(deps, c.req.param("id"));
     if (!person) return c.json({ error: "Unknown person" }, 404);
 
-    const [accounts] = await timelineAccounts(deps, [person.channelMappings]);
+    const [accounts] = await timelineAccounts(deps, [reachOfAll(deps, person.channelMappings)]);
     return c.json({
       messages: await readOutbox(deps, personMessageStores(deps), accounts),
     } satisfies OutboxPage);
@@ -268,12 +269,14 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     // no set of names to check one against, and "no history there" is the true
     // answer for every name that is not a typo.
     const channel = c.req.query("channel");
-    const [accounts] = await timelineAccounts(deps, [person.channelMappings]);
+    const [accounts] = await timelineAccounts(deps, [reachOfAll(deps, person.channelMappings)]);
 
     return c.json(
       await readPersonTimeline(
         personMessageStores(deps),
-        accounts.filter((account) => !channel || account.channel === channel),
+        // A link's channel names its platform's history: every one of Rome's
+        // accounts there reaches the same account.
+        accounts.filter((account) => !channel || samePlatform(deps, account.channel, channel)),
         { cursor, limit: timelinePageLimit(c.req.query("limit")) },
       ),
     );

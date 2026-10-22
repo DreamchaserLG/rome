@@ -53,6 +53,7 @@ import { SessionsRepository } from "../db/repositories/sessions.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { GuardianLinkCodes } from "../channels/guardian-link-code.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
+import { platformOf } from "../channels/platform.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import { OutboxRepository } from "../db/repositories/outbox.js";
 import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
@@ -723,6 +724,8 @@ export async function buildTestDeps(
     linkedInStoreRepo,
     linkedInAccounts,
     channels,
+    platformOfChannel: (name: string) =>
+      new ChannelRecordsRepository(db).platformOf(name) ?? platformOf(name),
     accountNames,
     sentinelLogRepo,
     approvalsRepo,
