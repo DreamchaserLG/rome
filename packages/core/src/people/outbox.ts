@@ -300,7 +300,9 @@ export async function readOutbox(
   const landed = awaiting.filter(
     (row) =>
       row.providerMessageId === null ||
-      refsFor(row, addressesOf(accounts, row)).some((ref) => arrived.has(ref)),
+      refsFor(row, addressesOf(accounts, row), sendersOf(accounts, row)).some((ref) =>
+        arrived.has(ref),
+      ),
   );
   await Promise.all(landed.map((row) => deps.outboxRepo.remove(row.id)));
 
@@ -329,14 +331,38 @@ export async function readOutbox(
  * one cannot be tracked, and the row is cleared rather than left waiting on an
  * answer that will never come.
  */
-function refsFor(row: OutboxRow, addresses: readonly string[]): string[] {
+function refsFor(
+  row: OutboxRow,
+  addresses: readonly string[],
+  senders: readonly string[],
+): string[] {
   const messageId = row.providerMessageId;
   if (messageId === null) return [];
-  const sessionId = channelChatId(row.channel, row.chatId);
   return [
     `${row.chatId}:${messageId}`,
     ...new Set(addresses.map((address) => `${address}:${messageId}`)),
-    `agent:${conversationPlatformMessageId(sessionId, messageId)}`,
+    ...senders.map(
+      (channel) =>
+        `agent:${conversationPlatformMessageId(channelChatId(channel, row.chatId), messageId)}`,
+    ),
+  ];
+}
+
+/**
+ * Every channel that may have carried the row: the link's own and each other
+ * of Rome's accounts the person is read through at that address. The row
+ * names the link's channel, and Rome's transcript files the message under the
+ * channel that sent it (`resolveSendTarget`), so the transcript's ref is
+ * predicted for each of them.
+ */
+function sendersOf(accounts: readonly MessageAccount[], row: OutboxRow): string[] {
+  return [
+    ...new Set([
+      row.channel,
+      ...accounts
+        .filter((account) => account.addresses.includes(row.channelUserId))
+        .map((account) => account.channel),
+    ]),
   ];
 }
 

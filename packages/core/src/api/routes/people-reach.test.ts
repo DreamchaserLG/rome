@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
-import type { PersonResource } from "@rome/api-types/people";
+import type { OutboxPage, PersonResource } from "@rome/api-types/people";
 import {
   buildTestDeps,
   createTestConnections,
@@ -79,5 +79,44 @@ describe("People through every one of Rome's accounts on a platform", () => {
 
     expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(1);
     expect(deps.transports.get("telegram_user")?.sentMessages).toEqual([]);
+  });
+
+  it("clears a send from the outbox once it lands on the channel that carried it", async () => {
+    const app = botWithoutChat();
+
+    await app.request(`/people/${personId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "telegram", channelUserId: TG, text: "hi" }),
+    });
+
+    const outbox = (await (await app.request(`/people/${personId}/outbox`)).json()) as OutboxPage;
+    expect(outbox.messages).toEqual([]);
+  });
+
+  it("retries and discards a failed send on any of Rome's accounts the link reaches", async () => {
+    const app = new Hono().route("/", peopleRoutes(deps));
+    // A send that failed while Mei was linked through the signed-in account,
+    // before the link moved to the bot's channel.
+    const open = async () => {
+      const row = await deps.outboxRepo.open({
+        channel: "telegram_user",
+        channelUserId: TG,
+        chatId: TG,
+        text: "hi",
+      });
+      await deps.outboxRepo.refused(row.id, "down");
+      return row.id;
+    };
+
+    const retried = await app.request(`/people/${personId}/outbox/${await open()}/retry`, {
+      method: "POST",
+    });
+    const discarded = await app.request(`/people/${personId}/outbox/${await open()}`, {
+      method: "DELETE",
+    });
+
+    expect(retried.status).toBe(202);
+    expect(discarded.status).toBe(204);
   });
 });

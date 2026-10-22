@@ -235,7 +235,11 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     const person = await findPerson(deps, c.req.param("id"));
     if (!person) return c.json({ error: "Unknown person" }, 404);
 
-    const message = await retrySend(deps, person.channelMappings, c.req.param("messageId"));
+    const message = await retrySend(
+      deps,
+      reachOfAll(deps, person.channelMappings),
+      c.req.param("messageId"),
+    );
     return message
       ? c.json(message, 202)
       : c.json({ error: "No failed message of theirs with that id" }, 404);
@@ -248,7 +252,11 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     const person = await findPerson(deps, c.req.param("id"));
     if (!person) return c.json({ error: "Unknown person" }, 404);
 
-    const discarded = await discardSend(deps, person.channelMappings, c.req.param("messageId"));
+    const discarded = await discardSend(
+      deps,
+      reachOfAll(deps, person.channelMappings),
+      c.req.param("messageId"),
+    );
     return discarded
       ? c.body(null, 204)
       : c.json({ error: "No dismissable message of theirs with that id" }, 404);

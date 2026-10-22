@@ -74,6 +74,10 @@ export type RefusedState = Exclude<AccountSendState, "yes">;
 async function sendStateOf(
   deps: SendDeps,
   account: SendAccount,
+  /** Whether to pick the sender by history. Only a send needs to: a listing
+   *  asks whether any of them can send, and reading history per link would
+   *  cost it a query per row. */
+  pick: boolean,
 ): Promise<{ state: RefusedState } | { state: "yes"; target: SendTarget }> {
   // Every one of Rome's accounts on the platform reaches the account. Of those
   // that can send, the one that last talked with it sends, so nobody hears
@@ -86,7 +90,7 @@ async function sendStateOf(
   const sendable = states.filter(
     (state): state is { state: "yes"; target: SendTarget } => state.state === "yes",
   );
-  if (sendable.length <= 1) return sendable[0] ?? states[0]!;
+  if (sendable.length <= 1 || !pick) return sendable[0] ?? states[0]!;
   const stores = deps.db
     ? personMessageStores({ db: deps.db, channels: deps.channels })
     : messageStores(deps.channels);
@@ -145,7 +149,7 @@ async function sendStateOn(
 }
 
 export async function resolveSendTarget(deps: SendDeps, account: SendAccount): Promise<Resolution> {
-  const resolved = await sendStateOf(deps, account);
+  const resolved = await sendStateOf(deps, account, true);
   return resolved.state === "yes"
     ? { ok: true, target: resolved.target }
     : { ok: false, send: resolved.state };
@@ -164,7 +168,7 @@ export async function readSendStates(
   accounts: readonly SendAccount[],
 ): Promise<AccountSendState[]> {
   return await Promise.all(
-    accounts.map(async (account) => (await sendStateOf(deps, account)).state),
+    accounts.map(async (account) => (await sendStateOf(deps, account, false)).state),
   );
 }
 
