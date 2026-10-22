@@ -20,16 +20,20 @@ import type { MessageAccount } from "../channels/messages.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { readActivity } from "./activity.js";
-import { reachOf, reachOfAll, type PlatformOfChannel } from "./link-reach.js";
+import { reachOf, type PlatformOfChannel } from "./link-reach.js";
 import { readSendStates, type SendDeps } from "./send.js";
 import { personMessageStores, timelineAccounts } from "./timeline-sources.js";
 
 export interface PeopleReadDeps extends SendDeps {
   db: DrizzleDb;
-  personMappingRepo: Pick<PersonMappingRepository, "findAllWithMappings" | "findById">;
+  personMappingRepo: Pick<
+    PersonMappingRepository,
+    "findAllWithMappings" | "findById" | "findByChannelUser"
+  >;
   channels: Channels;
   accountNames: Pick<AccountNames, "displayNames">;
   platformOfChannel?: PlatformOfChannel;
+  recordedChannels?: () => readonly string[];
 }
 
 /** A person as the repository reads them: the row and the accounts linked to
@@ -76,16 +80,23 @@ async function serialize(
   const refs = persons.flatMap((person) => person.channelMappings);
   // Each link reaches its account at every one of Rome's accounts on its
   // platform, so names, history and activity are read at all of them.
-  const reaches = refs.map((mapping) => reachOf(deps, mapping));
+  const reaches = await Promise.all(
+    persons.flatMap((person) =>
+      person.channelMappings.map((mapping) => reachOf(deps, person.id, mapping)),
+    ),
+  );
+  let taken = 0;
+  const reachByPerson = persons.map((person) => {
+    const own = reaches.slice(taken, taken + person.channelMappings.length).flat();
+    taken += person.channelMappings.length;
+    return own;
+  });
 
   // Independent of each other, and both reach the same channel mirrors: read
   // together, a mirror that folds its whole address book per call serves both
   // from one read of it instead of two.
   const [accountsByPerson, names, sendStates, memoryPaths] = await Promise.all([
-    timelineAccounts(
-      deps,
-      persons.map((person) => reachOfAll(deps, person.channelMappings)),
-    ),
+    timelineAccounts(deps, reachByPerson),
     deps.accountNames.displayNames(reaches.flat()),
     // Whether each mapping can be written to, asked of the live connections
     // rather than stored: a channel that went down between two reads has to

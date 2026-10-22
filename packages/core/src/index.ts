@@ -1605,6 +1605,7 @@ async function main() {
       outboxRepo,
       channels,
       platformOfChannel,
+      recordedChannels: () => channelRecords.all().map((record) => record.id),
       accountNames,
       webchatRepo,
       webhookInvocationsRepo,

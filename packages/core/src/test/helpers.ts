@@ -726,6 +726,7 @@ export async function buildTestDeps(
     channels,
     platformOfChannel: (name: string) =>
       new ChannelRecordsRepository(db).platformOf(name) ?? platformOf(name),
+    recordedChannels: () => new ChannelRecordsRepository(db).all().map((record) => record.id),
     accountNames,
     sentinelLogRepo,
     approvalsRepo,

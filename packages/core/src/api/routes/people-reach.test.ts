@@ -109,4 +109,55 @@ describe("People read through every one of Rome's accounts on a platform", () =>
     expect(retried.status).toBe(202);
     expect(discarded.status).toBe(204);
   });
+
+  it("leaves out an address on the platform that another person holds", async () => {
+    // Links are still keyed by connection kind, so another person can hold
+    // the same id through the signed-in account.
+    const otherId = await deps.personMappingRepo.create({
+      displayName: "Bo",
+      bondLevel: "acquaintance",
+      approved: true,
+      channelMappings: [{ channel: "telegram_user", channelUserId: TG }],
+    });
+    const row = await deps.outboxRepo.open({
+      channel: "telegram_user",
+      channelUserId: TG,
+      chatId: TG,
+      text: "for Bo",
+    });
+    await deps.outboxRepo.refused(row.id, "down");
+
+    const page = (await (await app.request(`/people/${personId}/messages`)).json()) as TimelinePage;
+    const outbox = (await (await app.request(`/people/${personId}/outbox`)).json()) as OutboxPage;
+    const discarded = await app.request(`/people/${personId}/outbox/${row.id}`, {
+      method: "DELETE",
+    });
+    const theirs = (await (
+      await app.request(`/people/${otherId}/messages`)
+    ).json()) as TimelinePage;
+
+    expect(page.entries).toEqual([]);
+    expect(outbox.messages).toEqual([]);
+    expect(discarded.status).toBe(404);
+    expect(theirs.entries).toHaveLength(1);
+  });
+
+  it("keeps reading an account of Rome's that is no longer connected", async () => {
+    // A restart drops a disconnected channel from the live list, and its
+    // record and Rome's transcript of it stay.
+    const disconnected = new Hono().route(
+      "/",
+      peopleRoutes({
+        ...deps,
+        channels: deps.channels.filter((channel) => channel.name !== "telegram_user"),
+        recordedChannels: () => ["telegram", "telegram_user"],
+      }),
+    );
+
+    const page = (await (
+      await disconnected.request(`/people/${personId}/messages`)
+    ).json()) as TimelinePage;
+
+    expect(page.entries.map((entry) => entry.body)).toEqual(["from the other account"]);
+  });
 });
