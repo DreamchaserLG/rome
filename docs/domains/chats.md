@@ -14,9 +14,11 @@ A place where people and agents talk: a group, a direct message, the chat built 
 
 ## Thread
 
-A chat inside a chat, started from one of its messages. A thread is not a chat of its own: it lives in one and is seen from it.
+A chat inside a chat, usually started from one of its messages. A thread is not a chat of its own: it lives in one and is seen from it.
 
-- A thread belongs to the chat it was started in. The message it was started from is its first, and every message said in it is a message of the chat, marked as said in that thread.
+- A thread is known by its chat and the platform's own id for it. The message it was opened from is kept when there is one. A private thread may have none in the chat.
+- A thread starts existing in Rome when the first message said in it reaches Rome. Opening it from a message does not move that message: it stays a message of the open chat.
+- A thread belongs to the chat it was started in. The message it was opened from, when there is one, is its first, and every message said in it is a message of the chat, marked as said in that thread.
 - A thread has its own participants: those the platform lists in it, and writing in it makes you one.
 - Everyone in the chat whom the platform lets see a thread sees it: who is in it and what is said. An agent in the chat sees its threads the same way, and can write in them. A thread the platform hides from some members, such as a private thread, is hidden from them in Rome too.
 - The chat's reply rule applies in its threads. A thread has no reply rule of its own.
@@ -48,10 +50,22 @@ A setting on a chat, for each of Rome's accounts in it, saying when that account
 
 ## Message
 
-One thing a participant said in a chat.
+One thing a participant said or did in a chat.
 
 - Every message goes one way: to Rome or from Rome.
+- A message is made of text, attachments and [widgets](#widget).
+- Every message reads as plain text, so any person on any platform, and any agent, can follow the chat. A widget brings its own plain-text line.
+- Acting on a widget is a message of its own, from whoever did it, in the place the widget is in. It says what they meant, such as answering Q3, approving or picking a place, not how they did it: a button on one platform may be a typed reply on another. Without it, someone reading the chat later could not tell what was chosen.
 - A delegate's reply is recorded as said by the agent on the guardian's behalf, under the guardian's account.
+
+## Widget
+
+Something shown in a chat that people can look at or act on: a question with choices, an approval request, a map from an app.
+
+- Widgets come from one shared catalog. Each kind has a name, what it holds, what people can do with it (answer, approve or deny, pick), and how each of those reads as plain text. Rome's own question and approval are kinds in it, beside the kinds apps add.
+- Each platform draws the kinds it can as its own cards, and sends the plain-text line for the rest. Feishu draws a question as a card. Email sends it as text.
+- A widget's live state belongs to what it is about. An approval request shows as approved because the approval is.
+- An agent shows a widget by calling a tool.
 
 ## Platform
 
