@@ -1431,10 +1431,14 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
         invocationCounts: {},
       };
       let text = "";
+      // The stream is opened under `active.turnId`; the transcript knows a
+      // backend turn by its `agentTurnId`, which the listing may already carry
+      // or the stream may report after attaching.
+      let runningTurnId = active.agentTurnId ?? active.turnId;
       const publish = () => {
         if (!cancelled) {
           setLiveTurn({
-            turnId: active.turnId,
+            turnId: runningTurnId,
             snapshot: { segments: segments.slice(), summary },
             text,
           });
@@ -1481,6 +1485,10 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
           } else if (event.event === "assistant_text") {
             const payload = JSON.parse(event.data) as { text?: string };
             text = payload.text ?? "";
+            publish();
+          } else if (event.event === "turn_id") {
+            const payload = JSON.parse(event.data) as { turnId?: string };
+            if (payload.turnId) runningTurnId = payload.turnId;
             publish();
           } else if (event.event === "done" || event.event === "stream_error") {
             finished = true;
