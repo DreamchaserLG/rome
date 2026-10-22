@@ -42,7 +42,7 @@ function remainingSites(): string[] {
 }
 
 /** Lower this when you convert one. Never raise it. */
-const REMAINING = 53;
+const REMAINING = 49;
 
 describe("the ring-based focus backlog", () => {
   it("never grows, and shrinks only with the pin", () => {
