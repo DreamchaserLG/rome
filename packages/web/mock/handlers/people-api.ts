@@ -570,9 +570,20 @@ export const peopleHandlers = [
     if (!person) return notFound("person");
     const search = new URL(request.url).searchParams;
     const channel = search.get("channel");
-    const all = (personTimeline(person.id) ?? []).filter(
-      (entry) => !channel || entry.source === channel,
-    );
+    const channelUserId = search.get("channelUserId");
+    // With an address too, that one account's own history, as the route reads it.
+    const account =
+      channel && channelUserId
+        ? person.channelMappings.find(
+            (mapping) => mapping.channel === channel && mapping.channelUserId === channelUserId,
+          )
+        : undefined;
+    const all =
+      channel && channelUserId
+        ? account
+          ? accountTimeline(account)
+          : []
+        : (personTimeline(person.id) ?? []).filter((entry) => !channel || entry.source === channel);
     const rawCursor = search.get("cursor");
     const cursor = parseMessageCursor(rawCursor);
     if (rawCursor != null && rawCursor !== "" && cursor === null) {

@@ -6,7 +6,6 @@ import {
   accountHandle,
   accountSegments,
   segmentAccount,
-  segmentEntries,
   segmentOutbox,
 } from "./send-model";
 
@@ -104,56 +103,6 @@ describe("segmentAccount", () => {
     // scoping to an account nobody holds would show an empty history under a
     // heading naming somebody else's address.
     expect(segmentAccount(segments, "discord:gone")).toBeNull();
-  });
-});
-
-describe("segmentEntries", () => {
-  const entries: Message[] = [
-    { source: "whatsapp", timestamp: 20, body: "wa", direction: "inbound", ref: "a" },
-    { source: "telegram", timestamp: 10, body: "tg", direction: "inbound", ref: "b" },
-  ];
-
-  it("shows everything on the merged segment", () => {
-    expect(segmentEntries(entries, null, [])).toHaveLength(2);
-  });
-
-  it("narrows to the segment's channel, which is all an entry names", () => {
-    const telegram = account({ channel: "telegram" });
-    const scoped = segmentEntries(entries, telegram, [telegram]);
-    expect(scoped.map((entry) => entry.body)).toEqual(["tg"]);
-  });
-
-  const signedIn: Message = {
-    source: "telegram_user",
-    timestamp: 5,
-    body: "tg user",
-    direction: "inbound",
-    ref: "c",
-  };
-
-  it("keeps the entries on every channel the account is read through", () => {
-    const bot = account({ channel: "telegram", readThrough: ["telegram", "telegram_user"] });
-    const scoped = segmentEntries([...entries, signedIn], bot, [bot]);
-    expect(scoped.map((entry) => entry.body)).toEqual(["tg", "tg user"]);
-  });
-
-  it("keeps two accounts on one platform apart", () => {
-    // Two ids, so two people's worth of conversation: each segment shows its
-    // own channel, and the other's stays on the merged segment.
-    const bot = account({
-      channel: "telegram",
-      channelUserId: "111",
-      readThrough: ["telegram", "telegram_user"],
-    });
-    const user = account({
-      channel: "telegram_user",
-      channelUserId: "222",
-      readThrough: ["telegram_user", "telegram"],
-    });
-    const all = [...entries, signedIn];
-
-    expect(segmentEntries(all, bot, [bot, user]).map((entry) => entry.body)).toEqual(["tg"]);
-    expect(segmentEntries(all, user, [bot, user]).map((entry) => entry.body)).toEqual(["tg user"]);
   });
 });
 

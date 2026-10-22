@@ -80,39 +80,6 @@ export function segmentAccount(
   return segments.find((segment) => segment.value === value)?.account ?? null;
 }
 
-/**
- * The timeline a segment shows: everything on the merged segment, and the
- * account's own entries inside an account segment.
- *
- * By channel, because that is all an entry names. A person with two numbers on
- * one channel sees both accounts' history under either of their segments, which
- * is the honest answer — the contract is explicit that a timeline entry carries
- * no address to narrow by, and inventing one here is the guess the composer
- * refuses to make.
- *
- * An account is also read through Rome's other accounts on its platform
- * (`readThrough`). Those channels' entries are its own only when none of the
- * person's other accounts is read through them too. When two do, the entries
- * there could be either's, so they stay on the merged segment alone.
- */
-export function segmentEntries(
-  entries: readonly Message[],
-  account: LinkedAccount | null,
-  accounts: readonly LinkedAccount[],
-): Message[] {
-  if (!account) return [...entries];
-  const shared = new Set(
-    accounts
-      .filter((other) => accountRef(other) !== accountRef(account))
-      .flatMap((other) => other.readThrough),
-  );
-  const channels = new Set([
-    account.channel,
-    ...account.readThrough.filter((channel) => !shared.has(channel)),
-  ]);
-  return entries.filter((entry) => channels.has(entry.source));
-}
-
 /** The outbox rows a segment shows. Narrowed by the account itself, which an
  *  outbox row does name, on any of the channels it is read through. */
 export function segmentOutbox(

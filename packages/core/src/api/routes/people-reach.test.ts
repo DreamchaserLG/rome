@@ -62,6 +62,26 @@ describe("People read through every one of Rome's accounts on a platform", () =>
     expect(page.entries).toHaveLength(1);
   });
 
+  it("reads one account's own history when the page names its address", async () => {
+    // A second account of Mei's on the platform, under another id. Both
+    // accounts are read through both channels, and only the server, which
+    // reads by address, can tell their histories apart.
+    await deps.personMappingRepo.addChannelMapping(personId, "telegram_user", "999");
+
+    const read = async (channel: string, channelUserId: string) =>
+      (
+        (await (
+          await app.request(
+            `/people/${personId}/messages?channel=${channel}&channelUserId=${channelUserId}`,
+          )
+        ).json()) as TimelinePage
+      ).entries.map((entry) => entry.body);
+
+    expect(await read("telegram", TG)).toEqual(["from the other account"]);
+    expect(await read("telegram_user", "999")).toEqual([]);
+    expect(await read("telegram", "not-theirs")).toEqual([]);
+  });
+
   it("dates the link by its latest message on any of the platform's accounts", async () => {
     const person = (await (await app.request(`/people/${personId}`)).json()) as PersonResource;
 
