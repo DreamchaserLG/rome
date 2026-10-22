@@ -59,7 +59,7 @@ export function PersonConversation({ person }: { person: PersonResource }) {
     override && person.accounts.some((a) => sameAccount(a, override)) ? override : null;
   const target = scoped ?? chosen ?? defaultSendAccount(person.accounts);
 
-  const entries = segmentEntries(timeline.entries, scoped);
+  const entries = segmentEntries(timeline.entries, scoped, person.accounts);
   const days = useMemo(() => groupByDay(entries), [entries]);
 
   return (
