@@ -180,6 +180,7 @@ import { assertCoreRequiredAppsPacked, deriveCoreRequiredApps } from "./apps/cor
 import { installFirstPartyAppsAtBoot } from "./apps/boot-upgrade.js";
 import { createRomeCloudListingClient } from "./apps/rome-cloud-listing-client.js";
 import { createArtifactReferenceResolver } from "./apps/artifact-reference.js";
+import { createArtifactLoadFailureReporter } from "./apps/artifact-load-failure-reporter.js";
 import {
   ensureProfileDevAppsDirInitialized,
   getProfileAppsLockfilePath,
@@ -458,7 +459,7 @@ async function main() {
   const appStore = createAppStoreService({ appCatalog });
 
   // Subscribers ordered agentLoader → actionLoader → skillCatalog →
-  // actionRegistry → channelHook → runtimeStatus.
+  // artifactLoadFailures → actionRegistry → channelHook → runtimeStatus.
   const artifactIdentity = {
     legacyBindings: parseLegacyArtifactBindings(
       await settingsRepo.get(ARTIFACT_LEGACY_BINDINGS_SETTING),
@@ -498,6 +499,17 @@ async function main() {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  });
+  const artifactLoadFailureReporter = createArtifactLoadFailureReporter({
+    sources: [agentLoader, actionLoader, skillCatalog],
+    log: appsLog,
+  });
+  // Subscribes after the three loaders so it reads their reloaded failures.
+  // Boot replays one refresh per installed app, so the failure list grows an
+  // app at a time. The first report runs once the first-party apps converge.
+  let artifactLoadFailuresBooted = false;
+  appCatalog.subscribe(function artifactLoadFailureSubscriber(event) {
+    if (artifactLoadFailuresBooted) artifactLoadFailureReporter.report(event.appId);
   });
   appCatalog.subscribe(async function artifactLegacyBindingsSubscriber() {
     await settingsRepo.set(ARTIFACT_LEGACY_BINDINGS_SETTING, artifactIdentity.legacyBindings);
@@ -564,6 +576,8 @@ async function main() {
     actions: Object.keys(artifactIdentity.legacyBindings.action).length,
     skills: Object.keys(artifactIdentity.legacyBindings.skill).length,
   });
+  artifactLoadFailuresBooted = true;
+  artifactLoadFailureReporter.report("boot");
   const sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
 
   // Set once the email adapter is created (further down). Lets the main-agent
