@@ -14,9 +14,22 @@ export interface FileChange {
   path: string;
   /** The full file for a write, the replacement text for an edit. */
   content: string;
-  /** The text an edit replaced. Null for a write. */
+  /**
+   * The text an edit replaced. Null for a write. An edit with null previous
+   * text is the dream action's record of practice notes appended to the
+   * journal (`RunsRepository.practiceNotes` reads them back), so no other
+   * source may emit one.
+   */
   previous: string | null;
   truncated: boolean;
+}
+
+/** `.env` files can hold secrets, so only their path is recorded. `.env.example` is source. */
+const SECRET_FILE = /(?:^|\/)\.env(?!\.example$)[^/]*$/;
+export const SECRET_PLACEHOLDER = "(contents not recorded)";
+
+export function isSecretFile(path: string): boolean {
+  return SECRET_FILE.test(path);
 }
 
 /** Caps one stored change, so a full-file rewrite of a large memory file
@@ -33,14 +46,48 @@ function str(value: unknown): string | null {
 }
 
 /**
+ * The dream memory agent writes through `write_memory_file` and
+ * `edit_memory_file` actions, called via `execute_action`. Read as the `Write`
+ * or `Edit` they stand for.
+ */
+function memoryFileCall(
+  tool: string,
+  input: Record<string, unknown>,
+): { tool: string; input: Record<string, unknown> } | null {
+  if (tool !== "execute_action" || typeof input.action_name !== "string") return null;
+  const args = input.json_args;
+  if (!args || typeof args !== "object") return null;
+  const { path, ...rest } = args as Record<string, unknown>;
+  const name = input.action_name.split(":").at(-1);
+  if (name === "write_memory_file") return { tool: "Write", input: { file_path: path, ...rest } };
+  if (name === "edit_memory_file") return { tool: "Edit", input: { file_path: path, ...rest } };
+  return null;
+}
+
+/**
  * The file changes one tool call makes. Covers Claude's `Write`, `Edit`, and
  * `MultiEdit`; any other tool returns nothing.
  */
 export function changesFromToolUse(tool: string, input: unknown): FileChange[] {
   if (!input || typeof input !== "object") return [];
+  const memoryWrite = memoryFileCall(tool, input as Record<string, unknown>);
+  if (memoryWrite) return changesFromToolUse(memoryWrite.tool, memoryWrite.input);
   const record = input as Record<string, unknown>;
   const path = str(record.file_path);
   if (!path) return [];
+  if (isSecretFile(path)) {
+    const op: ChangeOp = tool === "Write" ? "write" : "edit";
+    if (!["Write", "Edit", "MultiEdit"].includes(tool)) return [];
+    return [
+      {
+        op,
+        path,
+        content: SECRET_PLACEHOLDER,
+        previous: op === "edit" ? "" : null,
+        truncated: false,
+      },
+    ];
+  }
 
   const edit = (oldText: unknown, newText: unknown): FileChange | null => {
     const next = str(newText);
@@ -97,6 +144,7 @@ export interface ClassifiedPath {
 }
 
 const MEMORY_RE = /^(?:.*?\/)?memory\/(.+)$/;
+const APP_SOURCE_RE = /(?:^|\/)(?:projects\/apps|apps\/installed|rome_apps)\/[^/]+\//;
 const JOURNAL_RE = /^journal\/\d{4}\/\d{2}\/\d{2}\.md$/;
 const SKILL_RE = /(?:^|\/)skills\/([^/]+)\/SKILL\.md$/i;
 /** Where a skill's app lives: the repo seed, an installed artifact, or a
@@ -120,7 +168,8 @@ export function classifyPath(path: string): ClassifiedPath {
     };
   }
 
-  const memory = MEMORY_RE.exec(path);
+  // An app's own `memory/` folder is app source, not the guardian's memory.
+  const memory = APP_SOURCE_RE.test(path) ? null : MEMORY_RE.exec(path);
   if (memory?.[1]) {
     const memoryFile = memory[1];
     return {
