@@ -107,15 +107,19 @@ if [ -S "$FAKE_SOCKET" ]; then echo socket >"$FAKE_SUPERVISOR_STATE"; else echo 
     );
 
     // The entrypoint hard-codes /tmp and the image's supervisor path. Point both into the temp dir
-    // so the test never touches the host's /tmp or a real supervisor.
+    // so the test never touches the host's /tmp or a real supervisor. The /tmp rewrite runs first
+    // because on Linux the temp dir itself sits under /tmp and would be rewritten a second time.
     const source = readFileSync(ENTRYPOINT, "utf8");
     expect(source).toContain("exec /opt/rome/scripts/docker/rome-start-chrome-cdp.sh");
     const scriptPath = join(tempDir, "entrypoint.sh");
     writeFileSync(
       scriptPath,
       source
-        .replace("exec /opt/rome/scripts/docker/rome-start-chrome-cdp.sh", `exec ${supervisorPath}`)
-        .replaceAll("/tmp/", `${tempDir}/`),
+        .replaceAll("/tmp/", `${tempDir}/`)
+        .replace(
+          "exec /opt/rome/scripts/docker/rome-start-chrome-cdp.sh",
+          `exec ${supervisorPath}`,
+        ),
     );
 
     const entrypoint = spawn("bash", [scriptPath], {
