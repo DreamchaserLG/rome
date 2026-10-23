@@ -1,3 +1,4 @@
+import type { ExternalAgents } from "../channels/agents-accounts.js";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import Database from "better-sqlite3";
@@ -478,6 +479,8 @@ export interface TestDeps extends ApiDeps {
 
 export interface BuildTestDepsOptions {
   channels?: string[];
+  /** The agents Rome Cloud lists. Agents is not connected by default. */
+  assistants?: ExternalAgents;
 }
 
 const unavailableFavorService: FavorService = {
@@ -724,6 +727,7 @@ export async function buildTestDeps(
     linkedInAccounts,
     channels,
     accountNames,
+    assistants: options.assistants ?? { connected: () => false, list: async () => [] },
     sentinelLogRepo,
     approvalsRepo,
     approvalHandler,
