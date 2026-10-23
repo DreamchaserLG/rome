@@ -31,3 +31,36 @@ export function replyStreamingSwitch(
     }
   };
 }
+
+/**
+ * The guardian setting that chooses how a reply streams to Feishu, beside the
+ * reply streaming switch, while the two styles are compared. Any value but
+ * `card` streams as messages.
+ */
+export const FEISHU_STREAMING_STYLE_SETTING_KEY = "feishuReplyStreamingStyle";
+
+/**
+ * How a streamed reply shows on Feishu: `message` edits rich-text posts, which
+ * Feishu lets be edited 20 times each, and `card` streams into cards, which
+ * show the text as it is typed and take any number of edits.
+ */
+export type FeishuStreamingStyle = "message" | "card";
+
+/** The Feishu streaming style, read for each message a reply creates. A
+ *  setting that cannot be read counts as `message`. */
+export function feishuStreamingStyle(
+  settings: Pick<SettingsRepository, "get">,
+): () => Promise<FeishuStreamingStyle> {
+  return async () => {
+    try {
+      return (await settings.get(FEISHU_STREAMING_STYLE_SETTING_KEY)) === "card"
+        ? "card"
+        : "message";
+    } catch (error) {
+      log.warn("Feishu streaming style unreadable, streaming as messages", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return "message";
+    }
+  };
+}
