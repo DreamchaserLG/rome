@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { REST, type RequestMethod, Routes } from "discord.js";
-import type { DiscordAdapter } from "../../../channels/discord.js";
+import { DiscordAdapter } from "../../../channels/discord.js";
 import { comparable, loadCapture } from "./capture.js";
 import textCapture from "./captures/discord-text.capture.json" with { type: "json" };
 import { DISCORD_DM, DISCORD_TOKEN, DiscordPeer } from "./discord.js";
@@ -103,6 +103,36 @@ describe("DiscordAdapter.send against the peer", () => {
     expect(sent.map((message) => message.text.length)).toEqual([2000, 500]);
     // The receipt names only the first part.
     expect(receipt.messageId).toBe(sent[0]?.id);
+    peer.server.assertClean();
+  });
+
+  // discord.js sends a request again when it times out, a create included, so
+  // only Discord's nonce check keeps the message from showing twice.
+  it("shows a create that discord.js sent again after a timeout once", async () => {
+    const impatient = new DiscordAdapter({
+      botToken: DISCORD_TOKEN,
+      rest: { ...peer.restOptions(), timeout: 100 },
+    });
+    try {
+      await impatient.start();
+      const late = deferred();
+      peer.server.once({
+        method: "POST",
+        path: `/api/v10/channels/${DISCORD_DM}/messages`,
+        holdAnswer: () => late.promise,
+      });
+
+      const receipt = await impatient.replyDelivery().create(DISCORD_DM, "hello");
+      late.resolve();
+
+      const creates = peer.server.exchanges.filter((e) => e.request.path.endsWith("/messages"));
+      expect(creates.map((e) => e.dropped === true)).toEqual([true, false]);
+      expect(peer.visible()).toEqual([
+        expect.objectContaining({ id: receipt.messageId, from: "rome", text: "hello" }),
+      ]);
+    } finally {
+      await impatient.stop();
+    }
     peer.server.assertClean();
   });
 });
