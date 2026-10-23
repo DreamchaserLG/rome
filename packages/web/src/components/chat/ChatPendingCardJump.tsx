@@ -7,10 +7,12 @@ export function ChatPendingCardJump({
   scroller,
   content,
   floor,
+  currentReplyMessageIds,
 }: {
   scroller: HTMLElement | null;
   content: HTMLElement | null;
   floor: HTMLElement | null;
+  currentReplyMessageIds: ReadonlySet<string>;
 }) {
   const { t } = useTranslation("chat");
   const [target, setTarget] = useState<HTMLElement | null>(null);
@@ -29,6 +31,11 @@ export function ChatPendingCardJump({
       // a routine that was already turned on, or an approval resolved elsewhere.
       const cards = content.querySelectorAll<HTMLElement>("[data-chat-pending-card]");
       const next = Array.from(cards).find((card) => {
+        if (card.dataset.chatPendingCard === "proposal") {
+          const messageId = card.closest<HTMLElement>("[data-chat-card-message]")?.dataset
+            .chatCardMessage;
+          if (!messageId || !currentReplyMessageIds.has(messageId)) return false;
+        }
         const rect = card.getBoundingClientRect();
         return rect.height > 0 && (rect.bottom <= viewport.top || rect.top >= bottom);
       });
@@ -46,7 +53,7 @@ export function ChatPendingCardJump({
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: ["data-chat-pending-card"],
+      attributeFilter: ["data-chat-pending-card", "data-chat-card-message"],
     });
     scroller.addEventListener("scroll", schedule, { passive: true });
     schedule();
@@ -56,7 +63,7 @@ export function ChatPendingCardJump({
       mutations.disconnect();
       scroller.removeEventListener("scroll", schedule);
     };
-  }, [scroller, content, floor]);
+  }, [scroller, content, floor, currentReplyMessageIds]);
 
   if (!target || !scroller || !content?.contains(target)) return null;
 
@@ -66,7 +73,6 @@ export function ChatPendingCardJump({
       size="md"
       aria-label={t("jumpToWaitingCard")}
       onClick={() => {
-        target.tabIndex = -1;
         target.focus({ preventScroll: true });
         scroller.scrollTo({
           top:

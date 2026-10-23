@@ -3,6 +3,7 @@ import type { ChatMessage } from "@/lib/chat-types";
 import {
   buildChatView,
   buildRows,
+  currentReplyMessages,
   interactionResultKey,
   isAwaitingGuardian,
   isLastTurnFailed,
@@ -401,5 +402,29 @@ describe("isAwaitingGuardian", () => {
         [mk(CHILD, "assistant", "c1", [questionCard("q_0")])],
       ),
     ).toBe(true);
+  });
+});
+
+describe("currentReplyMessages", () => {
+  it("keeps every assistant message in the current floor reply, not older or other-session cards", () => {
+    const old = mk(MAIN, "assistant", "old", []);
+    const input = mk(MAIN, "user", "current", []);
+    const card = mk(MAIN, "assistant", "current", []);
+    const text = mk(MAIN, "assistant", "current", []);
+    const child = mk(CHILD, "assistant", "child", []);
+    const view = { displayMessages: [old, input, card, child, text], floorSessionId: MAIN };
+    expect(currentReplyMessages(view)).toEqual([card, text]);
+    expect(currentReplyMessages({ ...view, floorSessionId: CHILD })).toEqual([child]);
+    expect(currentReplyMessages(view, "unpersisted-backend-turn")).toEqual([]);
+  });
+
+  it("stops reminding as soon as the guardian sends another input, including legacy rows without turn IDs", () => {
+    for (const turnId of ["turn", undefined]) {
+      const card = mk(MAIN, "assistant", "turn", [], { turnId });
+      const input = mk(MAIN, "user", "turn", [], { turnId });
+      expect(
+        currentReplyMessages({ displayMessages: [card, input], floorSessionId: MAIN }),
+      ).toEqual([]);
+    }
   });
 });

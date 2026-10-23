@@ -12,7 +12,7 @@ for (const viewport of [
       hasTouch: viewport.hasTouch,
     });
 
-    for (const kind of ["routine", "plan", "question"] satisfies WaitingCardKind[]) {
+    for (const kind of ["routine", "plan", "question", "ai"] satisfies WaitingCardKind[]) {
       test(`${kind}: an off-screen waiting card can be reached without losing jump to latest`, async ({
         page,
       }) => {
@@ -28,14 +28,44 @@ for (const viewport of [
         await page.screenshot({
           path: test.info().outputPath(`${kind}-${viewport.name}-indicator.png`),
         });
-        await jump.click();
+        const scroller = page
+          .locator("[data-chat-transcript]")
+          .locator("xpath=ancestor::*[contains(@class, 'overflow-y-auto')][1]");
+        const center = await page.locator("[data-chat-composer-box]").evaluate((el) => {
+          const rect = el.getBoundingClientRect();
+          return rect.left + rect.width / 2;
+        });
+        await expect
+          .poll(async () => {
+            const box = (await jump.boundingBox())!;
+            return Math.abs(box.x + box.width / 2 - center);
+          })
+          .toBeLessThan(1);
+        await jump.focus();
+        await page.keyboard.press("Enter");
         await expect(card).toBeInViewport();
         await expect(card).toBeFocused();
+        expect(await card.evaluate((el) => getComputedStyle(el).outlineStyle)).toBe("solid");
+        expect(
+          await card.evaluate((el) => parseFloat(getComputedStyle(el).outlineWidth)),
+        ).toBeGreaterThan(0);
         await expect(jump).toHaveCount(0);
         await page.screenshot({
           path: test.info().outputPath(`${kind}-${viewport.name}-card.png`),
         });
-        await page.getByRole("button", { name: "Jump to the latest message" }).click();
+        await scroller.evaluate(
+          (el, delta) => el.scrollBy({ top: delta, behavior: "instant" }),
+          (await card.boundingBox())!.height + 24,
+        );
+        await expect(jump).toBeVisible();
+        const latest = page.getByRole("button", { name: "Jump to the latest message" });
+        await expect
+          .poll(async () => {
+            const box = (await latest.boundingBox())!;
+            return Math.abs(box.x + box.width / 2 - center);
+          })
+          .toBeLessThan(1);
+        await latest.click();
         await expect(jump).toBeVisible();
         await expect(card).not.toBeInViewport();
       });
@@ -52,15 +82,46 @@ for (const viewport of [
         } else if (kind === "plan") {
           await page.getByRole("button", { name: "Approve", exact: true }).click();
           await expect(page.getByText("Approved", { exact: true })).toBeVisible();
+        } else if (kind === "ai") {
+          await page.getByRole("button", { name: "Skip for now", exact: true }).click();
+          await expect(page.getByText("Skipped for now", { exact: true })).toBeVisible();
         } else {
           await page.getByRole("button", { name: "Dismiss", exact: true }).click();
           await expect(page.getByText("Dismissed", { exact: true })).toBeVisible();
         }
         await expect(page.locator("[data-chat-pending-card]")).toHaveCount(0);
-        const latest = page.getByRole("button", { name: "Jump to the latest message" });
-        if (await latest.isVisible()) await latest.click();
+        await page.locator("[data-chat-transcript]").evaluate((el) => {
+          const scroller = el.closest<HTMLElement>(".overflow-y-auto")!;
+          scroller.scrollTo({ top: scroller.scrollHeight, behavior: "instant" });
+        });
         await expect(jump).toHaveCount(0);
       });
     }
   });
+}
+
+for (const kind of ["routine", "app"] as const) {
+  for (const followUp of ["text", "proposal"] as const) {
+    test(`${kind}: ${followUp === "text" ? "ignored" : "replaced"} proposals do not keep the reminder on the old card`, async ({
+      page,
+    }) => {
+      await openWaitingCard(page, kind, followUp);
+      const cards = page.locator("[data-chat-pending-card=proposal]");
+      await expect(cards).toHaveCount(followUp === "text" ? 1 : 2);
+      const jump = page.getByRole("button", { name: "Jump to waiting card" });
+      if (followUp === "text") {
+        await expect(page.locator("[data-chat-composer-box]")).toBeVisible();
+        await expect(cards.first()).not.toBeInViewport();
+        await expect(jump).toHaveCount(0);
+        await page.reload({ waitUntil: "commit" });
+        await expect(cards).toHaveCount(1);
+        await expect(jump).toHaveCount(0);
+      } else {
+        await expect(jump).toBeVisible();
+        await jump.click();
+        await expect(cards.last()).toBeInViewport();
+        await expect(cards.first()).not.toBeInViewport();
+      }
+    });
+  }
 }

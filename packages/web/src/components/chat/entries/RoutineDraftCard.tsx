@@ -152,9 +152,10 @@ export function RoutineDraftCard({
 
   return (
     <div
+      tabIndex={-1}
       data-chat-pending-card={
         state.kind === "draft" || state.kind === "error" || state.kind === "creating"
-          ? ""
+          ? "proposal"
           : undefined
       }
       className="mb-3 overflow-hidden rounded-12 border border-border bg-surface"

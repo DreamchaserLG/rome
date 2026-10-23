@@ -5,6 +5,7 @@ import { useState } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { ChatPendingCardJump } from "./ChatPendingCardJump";
 import { RoutineDraftCard } from "./entries/RoutineDraftCard";
+import { AiToolsCard } from "./entries/AiToolsCard";
 import { QuestionCard } from "./entries/QuestionCard";
 import { createRoutine, listRoutineRefs } from "@/lib/chat-api";
 import "@/i18n";
@@ -18,7 +19,17 @@ let cardTop = -200;
 const scrollTo = rs.fn();
 const originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTo");
 
-function Harness({ questionResult }: { questionResult?: Record<string, unknown> }) {
+function Harness({
+  questionResult,
+  currentReplyMessageIds = new Set(["message"]),
+  kind = "routine",
+  aiResult,
+}: {
+  questionResult?: Record<string, unknown>;
+  currentReplyMessageIds?: ReadonlySet<string>;
+  kind?: "routine" | "app" | "ai" | "approval";
+  aiResult?: Record<string, unknown>;
+}) {
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   const [content, setContent] = useState<HTMLDivElement | null>(null);
   const [floor, setFloor] = useState<HTMLDivElement | null>(null);
@@ -26,31 +37,44 @@ function Harness({ questionResult }: { questionResult?: Record<string, unknown> 
     <MemoryRouter>
       <div ref={setScroller} data-testid="scroller">
         <div ref={setContent}>
-          {questionResult ? (
-            <QuestionCard
-              toolUseId="question"
-              props={{ questions: [{ id: "q", question: "When?", type: "text" }] }}
-              result={questionResult.resolved as Record<string, unknown> | undefined}
-              onSubmit={() => {}}
-              onDismiss={() => {}}
-            />
-          ) : (
-            <RoutineDraftCard
-              routineKey="chat-routine:test"
-              draft={{
-                name: "Weekly update",
-                sentence: "Every Monday, remind me to send an update.",
-                watchLabel: "Mondays",
-                thenSummary: "Send a reminder",
-                trigger: { type: "manual" },
-                actionName: "summon",
-                args: {},
-              }}
-            />
-          )}
+          <div data-chat-card-message="message">
+            {kind === "approval" ? (
+              <div data-chat-pending-card="">Pending approval</div>
+            ) : kind === "app" ? (
+              <div data-chat-pending-card="proposal">App form</div>
+            ) : kind === "ai" ? (
+              <AiToolsCard toolUseId="ai" result={aiResult} onSubmit={() => {}} />
+            ) : questionResult ? (
+              <QuestionCard
+                toolUseId="question"
+                props={{ questions: [{ id: "q", question: "When?", type: "text" }] }}
+                result={questionResult.resolved as Record<string, unknown> | undefined}
+                onSubmit={() => {}}
+                onDismiss={() => {}}
+              />
+            ) : (
+              <RoutineDraftCard
+                routineKey="chat-routine:test"
+                draft={{
+                  name: "Weekly update",
+                  sentence: "Every Monday, remind me to send an update.",
+                  watchLabel: "Mondays",
+                  thenSummary: "Send a reminder",
+                  trigger: { type: "manual" },
+                  actionName: "summon",
+                  args: {},
+                }}
+              />
+            )}
+          </div>
         </div>
         <div ref={setFloor} data-testid="floor">
-          <ChatPendingCardJump scroller={scroller} content={content} floor={floor} />
+          <ChatPendingCardJump
+            scroller={scroller}
+            content={content}
+            floor={floor}
+            currentReplyMessageIds={currentReplyMessageIds}
+          />
         </div>
       </div>
     </MemoryRouter>
@@ -59,6 +83,15 @@ function Harness({ questionResult }: { questionResult?: Record<string, unknown> 
 
 beforeEach(() => {
   cardTop = -200;
+  rs.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+    Response.json(
+      String(input) === "/api/ai-tools/status"
+        ? { claude: { loggedIn: false }, codex: { loggedIn: false } }
+        : String(input) === "/api/ai-tools/rome-credits"
+          ? { credits: null }
+          : { providers: [], configured: null },
+    ),
+  );
   rs.mocked(listRoutineRefs).mockResolvedValue([]);
   rs.mocked(createRoutine).mockResolvedValue({ ok: true, status: 201, routineId: "routine" });
   rs.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
@@ -96,9 +129,60 @@ afterEach(() => {
 });
 
 describe("ChatPendingCardJump", () => {
+  it("keeps a server-owned approval eligible even after a newer reply", async () => {
+    render(<Harness kind="approval" currentReplyMessageIds={new Set(["other-message"])} />);
+    await screen.findByRole("button", { name: "Jump to waiting card" });
+  });
+  for (const kind of ["routine", "app"] as const) {
+    it(`stops reminding about an ignored ${kind} when the current reply changes`, async () => {
+      const view = render(<Harness kind={kind} />);
+      await screen.findByRole("button", { name: "Jump to waiting card" });
+      view.rerender(
+        <Harness kind={kind} currentReplyMessageIds={new Set(["replacement-message"])} />,
+      );
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "Jump to waiting card" })).toBeNull(),
+      );
+      expect(document.querySelector("[data-chat-pending-card]")).not.toBeNull();
+      if (kind === "routine")
+        expect(screen.getByRole("button", { name: "Turn it on" })).toBeTruthy();
+    });
+  }
+
+  it("navigates to an AI connection card and stops after skipping", async () => {
+    render(<Harness kind="ai" />);
+    const jump = await screen.findByRole("button", { name: "Jump to waiting card" });
+    fireEvent.click(jump);
+    expect(scrollTo).toHaveBeenCalled();
+    cardTop = -200;
+    fireEvent.scroll(screen.getByTestId("scroller"));
+    await screen.findByRole("button", { name: "Jump to waiting card" });
+    fireEvent.click(await screen.findByRole("button", { name: "Skip for now" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Jump to waiting card" })).toBeNull(),
+    );
+  });
+
+  for (const result of [
+    { connected: true },
+    { connected: true, credits: true },
+    { dismissed: true },
+  ]) {
+    it(`stops reminding about a resolved AI card (${JSON.stringify(result)})`, async () => {
+      const view = render(<Harness kind="ai" />);
+      await screen.findByRole("button", { name: "Jump to waiting card" });
+      view.rerender(<Harness kind="ai" aiResult={result} />);
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "Jump to waiting card" })).toBeNull(),
+      );
+    });
+  }
+
   it("finds an unresolved routine above the viewport and brings it into view", async () => {
     render(<Harness />);
-    fireEvent.click(await screen.findByRole("button", { name: "Jump to waiting card" }));
+    const jump = await screen.findByRole("button", { name: "Jump to waiting card" });
+    expect(document.querySelector("[data-chat-pending-card]")?.getAttribute("tabindex")).toBe("-1");
+    fireEvent.click(jump);
     expect(scrollTo).toHaveBeenCalledWith({ top: -200, behavior: "instant" });
     expect(document.activeElement?.hasAttribute("data-chat-pending-card")).toBe(true);
     await waitFor(() =>

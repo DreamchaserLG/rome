@@ -1,10 +1,14 @@
 import type { Page } from "@playwright/test";
 import type { ChatMessage, TranscriptPart } from "../src/lib/chat-types";
 
-export type WaitingCardKind = "routine" | "plan" | "question";
+export type WaitingCardKind = "routine" | "plan" | "question" | "ai" | "app";
 
-export async function openWaitingCard(page: Page, kind: WaitingCardKind) {
-  const card: TranscriptPart =
+export async function openWaitingCard(
+  page: Page,
+  kind: WaitingCardKind,
+  followUp?: "text" | "proposal",
+) {
+  let card: TranscriptPart =
     kind === "routine"
       ? {
           type: "routine_draft_card",
@@ -58,6 +62,18 @@ export async function openWaitingCard(page: Page, kind: WaitingCardKind) {
               },
             },
           };
+  if (kind === "ai" || kind === "app")
+    card = {
+      type: "pending_interaction",
+      toolUseId: "waiting-card",
+      appId: kind === "ai" ? "core" : "waiting-app",
+      render: {
+        kind: "inline",
+        componentId: kind === "ai" ? "ai-tools-card" : "form",
+        ...(kind === "ai" ? { builtin: true } : {}),
+        props: { title: "Original app form" },
+      },
+    };
   const sessionId = "mock-chat-3";
   const messages: ChatMessage[] = [
     {
@@ -87,6 +103,42 @@ export async function openWaitingCard(page: Page, kind: WaitingCardKind) {
       ]),
     },
   ];
+  if (followUp) {
+    const original = JSON.parse(messages[1].content) as TranscriptPart[];
+    const replacement = structuredClone(card);
+    if (replacement.type === "routine_draft_card") {
+      replacement.toolUseId = "replacement-card";
+      replacement.routineKey = "chat-routine:replacement-card";
+      replacement.draft.name = "Replacement routine";
+      replacement.draft.sentence = "Replacement routine proposal";
+    } else if (replacement.type === "pending_interaction") {
+      replacement.toolUseId = "replacement-card";
+      replacement.render.props = { title: "Replacement app form" };
+    }
+    messages.push(
+      {
+        id: "follow-up",
+        sessionId,
+        role: "user",
+        turnId: "next-turn",
+        createdAt: "2026-09-15T09:01:00Z",
+        content: JSON.stringify([
+          { type: "text", content: "Ignore that proposal and try another approach." },
+        ]),
+      },
+      {
+        id: "replacement-reply",
+        sessionId,
+        role: "assistant",
+        turnId: "next-turn",
+        createdAt: "2026-09-15T09:01:01Z",
+        content: JSON.stringify([
+          ...(followUp === "proposal" ? [replacement] : []),
+          ...original.filter((b) => b.type === "text"),
+        ]),
+      },
+    );
+  }
   // Intercept before MSW so these scenarios control the card's server state.
   // Every write stays local, including the interaction result that resumes a turn.
   await page.addInitScript(
@@ -102,6 +154,23 @@ export async function openWaitingCard(page: Page, kind: WaitingCardKind) {
           init?.method ?? (input instanceof Request ? input.method : "GET")
         ).toUpperCase();
         if (path === `/api/chat/sessions/${sessionId}/messages`) return Response.json(messages);
+        if (path === "/api/ai-tools/status")
+          return Response.json({ claude: { loggedIn: false }, codex: { loggedIn: false } });
+        if (path === "/api/ai-tools/rome-credits") return Response.json({ credits: null });
+        if (path === "/api/ai-tools/anthropic-compatible-providers")
+          return Response.json({ providers: [], configured: null });
+        if (path.startsWith("/api/apps/waiting-app/manifest"))
+          return Response.json({
+            appId: "waiting-app",
+            appName: "Waiting app",
+            styleUrls: [],
+            bootstrap: { shell: {} },
+            entryUrl:
+              "data:text/javascript," +
+              encodeURIComponent(
+                'export function mountComponent(container, id, ctx) { const label = document.createElement("p"); label.textContent = ctx.props.title; const button = document.createElement("button"); button.textContent = "Submit form"; button.disabled = ctx.host.resolved; button.onclick = () => ctx.host.submit({ approved: true }); container.append(label, button); }',
+              ),
+          });
         if (path === "/api/routines" && method === "GET")
           return Response.json(routine ? [routine] : []);
         if (path === "/api/routines" && method === "POST") {
