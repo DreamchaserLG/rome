@@ -802,6 +802,53 @@ describe("New chat draft", () => {
     expect(onSend.mock.calls[0][0].personaId).toBe(draft.personaId);
   });
 
+  it("restores a draft device folder and sends it with the first turn", async () => {
+    const deviceFolder = {
+      deviceId: "mac",
+      deviceName: "macbook",
+      path: "/Users/ray/code",
+      home: "/Users/ray",
+    };
+    saveNewChatDraft({ ...empty, text: "run tests", deviceFolder });
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderComposer({ persistNewChatDraft: true, showProjectSelector: true, onSend });
+    expect(screen.getByRole("button", { name: "Project" }).textContent).toContain("macbook:~/code");
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][0]).toMatchObject({ projectPath: "default", deviceFolder });
+  });
+
+  it("opens on the device folder a sidebar folder group passes in", async () => {
+    saveNewChatDraft({ ...empty, text: "run tests", projectPath: "research" });
+    const deviceFolder = { deviceId: "mac", deviceName: "macbook", path: "/w", home: null };
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderComposer({
+      persistNewChatDraft: true,
+      showProjectSelector: true,
+      onSend,
+      initialDeviceFolder: deviceFolder,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][0]).toMatchObject({ projectPath: "default", deviceFolder });
+  });
+
+  it("drops a saved device folder when the composer opens with a project", async () => {
+    const deviceFolder = { deviceId: "mac", deviceName: "macbook", path: "/w", home: null };
+    saveNewChatDraft({ ...empty, text: "run tests", deviceFolder });
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderComposer({
+      persistNewChatDraft: true,
+      showProjectSelector: true,
+      onSend,
+      initialProjectName: "research",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][0].projectPath).toBe("research");
+    expect(onSend.mock.calls[0][0].deviceFolder).toBeUndefined();
+  });
+
   it("focuses without moving the current selection after restoring the end caret", () => {
     saveNewChatDraft(draft);
     const composerRef = createRef<ChatComposerHandle>();

@@ -438,6 +438,7 @@ describe("AgentRunner", () => {
             romeSessionId: "parent-chat",
             threadName: "Fixing the build",
             threadType: "private",
+            deviceFolder: { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" },
           },
           parentTurnId: "parent-turn-1",
           label: "recap",
@@ -456,6 +457,8 @@ describe("AgentRunner", () => {
         triggerName: "recap",
         sourceChannel: "webchat",
         sourceThreadId: "parent-chat",
+        // Follow-up turns of the side chat rebuild their context from this row.
+        deviceFolder: { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" },
       });
 
       const transcript = await repo.getMessages("fork-session");
@@ -4082,6 +4085,33 @@ describe("AgentRunner", () => {
 
       expect(initUserPrompt(messages)).not.toContain("<thread_context>");
       await manager.shutdown();
+    });
+
+    it("prepends <device_folder> on every turn, subagents included", async () => {
+      const withFolder = {
+        ...webchatThreadContext,
+        deviceFolder: { deviceId: "mac-1", deviceName: "macbook", platform: "macos", path: "/w" },
+      };
+      for (const isSubagent of [false, true]) {
+        const manager = createAgentSessionManager(
+          managerDeps(createTestModelResolver({ providers: [alwaysResultProvider()] })),
+          { keepAliveAcrossTurns: true, isSubagent },
+        );
+        const session = await manager.acquire(
+          { agentName: "test-main", channelThreadKey: `webchat:tc-folder-${isSubagent}` },
+          { threadContext: withFolder, workingDir: projectWorkingDir },
+        );
+        for (const prompt of ["First", "Second"]) {
+          const userPrompt = initUserPrompt(
+            await collectMessages(
+              session.sendTurn({ prompt }, { threadContext: withFolder }).events,
+            ),
+          );
+          expect(userPrompt).toContain('Work in folder "/w" on Rome node device "macbook"');
+          expect(userPrompt.indexOf("<device_folder>")).toBeLessThan(userPrompt.indexOf(prompt));
+        }
+        await manager.shutdown();
+      }
     });
 
     it("skips stored-message context for a channel whose surface needs none", async () => {

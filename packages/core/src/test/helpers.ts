@@ -771,6 +771,8 @@ export async function buildTestDeps(
     relayDrainer: new RelayDrainer([], async () => ({ status: 200 })),
     nodeDevices: {
       start: async () => {},
+      listFiles: async () => ({ ok: false, code: "offline" }),
+      listDevices: async () => ({ devices: [] }),
       getStatus: async () => ({
         connection: "not_configured",
         checkedAt: new Date().toISOString(),

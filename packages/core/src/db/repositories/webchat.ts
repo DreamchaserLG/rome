@@ -1,3 +1,4 @@
+import type { DeviceFolder } from "@rome/api-types/devices";
 import { createHash, randomUUID } from "node:crypto";
 import { posix as pathPosix } from "node:path";
 import {
@@ -249,6 +250,8 @@ export interface EnsureRomeSessionInput {
   agentName: string | null;
   projectName?: string;
   projectPath?: string | null;
+  /** A side chat keeps the folder of the chat it branched from. */
+  deviceFolder?: DeviceFolder | null;
   sourceChannel?: string | null;
   sourceThreadId?: string | null;
   sourceThreadName?: string | null;
@@ -299,6 +302,8 @@ const sessionSelectFields = {
   largeModelSelection: romeSessions.largeModelSelection,
   projectName: romeSessions.projectName,
   projectPath: romeSessions.projectPath,
+  // The sidebar groups a device-folder chat under its folder, not its project.
+  deviceFolder: romeSessions.deviceFolder,
   agentName: romeSessions.agentName,
   archivedAt: romeSessions.archivedAt,
   pinnedAt: romeSessions.pinnedAt,
@@ -891,6 +896,8 @@ export class WebChatRepository {
     // JSON handback contract for a 'webchat_handoff' session (see schema comment).
     handoffSpec: string | null = null,
     ownership: { ownerKey?: string | null; inheritOwnerFrom?: string } = {},
+    // Set only here: a chat's device folder never changes after creation.
+    deviceFolder: DeviceFolder | null = null,
   ) {
     const now = new Date();
     if (projectPath?.trim()) {
@@ -907,6 +914,7 @@ export class WebChatRepository {
       personaId: personaId ?? null,
       projectName,
       projectPath,
+      deviceFolder,
       largeModelSelection: largeModelSelection ?? null,
       agentName,
       type: storedSessionType(type),
@@ -936,6 +944,7 @@ export class WebChatRepository {
         personaId: null,
         projectName: input.projectName ?? DEFAULT_WEBCHAT_PROJECT_NAME,
         projectPath: input.projectPath ?? null,
+        deviceFolder: input.deviceFolder ?? null,
         largeModelSelection: null,
         agentName: input.agentName,
         type: storedSessionType(input.type),

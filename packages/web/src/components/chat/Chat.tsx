@@ -1,3 +1,4 @@
+import type { DraftDeviceFolder } from "@/lib/device-folder";
 import {
   useCallback,
   useEffect,
@@ -281,6 +282,7 @@ export interface ChatProps {
   centerDraftComposer?: boolean;
   /** Draft seeds for the composer, read when it mounts. */
   initialProjectName?: string;
+  initialDeviceFolder?: DraftDeviceFolder;
   initialAgentMention?: AgentMention | null;
   /** Receives the composer's handle, for a host that seeds or focuses the draft. */
   composerRef?: RefObject<ChatComposerHandle | null>;
@@ -301,6 +303,7 @@ export function Chat({
   emptyState,
   centerDraftComposer = false,
   initialProjectName,
+  initialDeviceFolder,
   initialAgentMention,
   composerRef: hostComposerRef,
   navbarSlot,
@@ -1426,13 +1429,21 @@ export function Chat({
             largeModelSelection: snapshot.largeModelSelection,
             reasoningEffort: snapshot.reasoningEffort,
             agentName: snapshot.agentMention?.agentName,
+            deviceFolder: snapshot.deviceFolder
+              ? { deviceId: snapshot.deviceFolder.deviceId, path: snapshot.deviceFolder.path }
+              : undefined,
           });
           sendingSessionId = created.id;
           controls.onSessionCreated?.();
         } catch (error) {
           setStreamError(
             error instanceof ChatApiError && error.message
-              ? error.message
+              ? snapshot.deviceFolder && error.status === 409
+                ? // Core answers a folder it could not check with a DeviceFilesErrorCode.
+                  t(`project.devices.errors.${error.message}`, {
+                    defaultValue: t("project.devices.errors.unavailable"),
+                  })
+                : error.message
               : t("stream.errors.createChatFallback"),
           );
           throw error;
@@ -2108,6 +2119,7 @@ export function Chat({
                       showProjectSelector={!mainSessionId}
                       showModelSelector={!mainSessionId}
                       initialProjectName={initialProjectName}
+                      initialDeviceFolder={initialDeviceFolder}
                       initialAgentMention={initialAgentMention}
                       isStreaming={displayedStreaming}
                       onStop={() => void stopMessage()}

@@ -61,6 +61,7 @@ import {
   saveNewChatDraft,
 } from "@/lib/new-chat-draft-storage";
 import { randomUUID } from "@/lib/random-uuid";
+import type { DraftDeviceFolder } from "@/lib/device-folder";
 
 export interface ChatComposerSnapshot {
   text: string;
@@ -69,6 +70,8 @@ export interface ChatComposerSnapshot {
   largeModelSelection?: string;
   reasoningEffort: ReasoningEffort;
   projectPath: string;
+  // Set only in draft mode, and only when no project is: the two exclude each other.
+  deviceFolder?: DraftDeviceFolder;
   // Set only in draft mode when the user picked an `@app/agent` from the
   // mention menu. Active sessions inherit their agent from `pinnedAgentMention`
   // instead — `onSend` for those should ignore this field.
@@ -129,6 +132,10 @@ export interface ChatComposerProps {
   // Seed for the draft project name. Honored once at mount and again when it
   // changes from undefined → defined (i.e., transitioning into a new draft).
   initialProjectName?: string;
+  // Seed for the draft device folder, e.g. "New chat in this folder" in the
+  // sidebar. Same timing as initialProjectName, and it wins over both the
+  // project and a saved draft.
+  initialDeviceFolder?: DraftDeviceFolder;
   // Pinned agent for an active session — once set, the chip is non-removable
   // and the `@` menu is suppressed (session is locked to this agent).
   pinnedAgentMention?: AgentMention | null;
@@ -198,6 +205,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     showProjectSelector = false,
     showModelSelector = false,
     initialProjectName,
+    initialDeviceFolder,
     pinnedAgentMention = null,
     initialAgentMention = null,
     lockAgentMention = false,
@@ -297,8 +305,17 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [reasoningMenuOpen, setReasoningMenuOpen] = useState(false);
 
-  const [draftProjectName, setDraftProjectName] = useState(
-    () => initialProjectName?.trim() || storedDraft?.projectPath || DEFAULT_PROJECT_NAME,
+  const [draftProjectName, setDraftProjectName] = useState(() =>
+    initialDeviceFolder
+      ? DEFAULT_PROJECT_NAME
+      : initialProjectName?.trim() || storedDraft?.projectPath || DEFAULT_PROJECT_NAME,
+  );
+  // A project and a device folder exclude each other: a project the composer
+  // opens with wins over a folder left in the saved draft.
+  const [draftDeviceFolder, setDraftDeviceFolder] = useState<DraftDeviceFolder | null>(
+    () =>
+      initialDeviceFolder ??
+      (initialProjectName?.trim() ? null : (storedDraft?.deviceFolder ?? null)),
   );
   const [projectCatalog, setProjectCatalog] = useState<ProjectCatalog | null>(null);
   const [projectsLoading, setProjectsLoading] = useState(false);
@@ -365,8 +382,15 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const textareaFocusedAtPressRef = useRef(false);
 
   useEffect(() => {
-    if (initialProjectName) setDraftProjectName(initialProjectName.trim());
+    if (!initialProjectName) return;
+    setDraftProjectName(initialProjectName.trim());
+    setDraftDeviceFolder(null);
   }, [initialProjectName]);
+  useEffect(() => {
+    if (!initialDeviceFolder) return;
+    setDraftDeviceFolder(initialDeviceFolder);
+    setDraftProjectName(DEFAULT_PROJECT_NAME);
+  }, [initialDeviceFolder]);
   useEffect(() => {
     if (initialAgentMention && !agentMentionLocked) setDraftAgentMention(initialAgentMention);
   }, [initialAgentMention, agentMentionLocked]);
@@ -385,6 +409,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         agentMention: draftAgentMention,
         skill: draftSkill,
         personaId: selectedPersonId,
+        ...(draftDeviceFolder ? { deviceFolder: draftDeviceFolder } : {}),
       },
       authEpoch,
     );
@@ -393,6 +418,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     authEpoch,
     inputText,
     draftProjectName,
+    draftDeviceFolder,
     draftAgentMention,
     draftSkill,
     selectedPersonId,
@@ -473,6 +499,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       setCreateProjectFormOpen(false);
       setProjectSearchQuery("");
       setDraftProjectName(data.name);
+      setDraftDeviceFolder(null);
       setDraftProjectMenuOpen(false);
       if (connectOnCreate) {
         setPendingConnectPath(data.name);
@@ -568,6 +595,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             showModelSelector && modelSelectorEnabled ? largeModelSelection : undefined,
           reasoningEffort,
           projectPath: draftProjectName,
+          deviceFolder: draftDeviceFolder ?? undefined,
           agentMention: draftAgentMention ?? undefined,
           skillName,
         };
@@ -597,6 +625,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       modelSelectorEnabled,
       largeModelSelection,
       draftProjectName,
+      draftDeviceFolder,
       draftAgentMention,
       onSend,
       invokeOnSend,
@@ -649,6 +678,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         showModelSelector && modelSelectorEnabled ? largeModelSelection : undefined,
       reasoningEffort,
       projectPath: draftProjectName,
+      deviceFolder: draftDeviceFolder ?? undefined,
       // Pinned sessions ignore this; draft hosts read it to lock the new
       // session to the picked agent.
       agentMention: draftAgentMention ?? undefined,
@@ -702,6 +732,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             agentMention: draftAgentMention,
             skill,
             personaId: selectedPersonId,
+            ...(draftDeviceFolder ? { deviceFolder: draftDeviceFolder } : {}),
           },
           authEpoch,
         );
@@ -726,6 +757,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     largeModelSelection,
     reasoningEffort,
     draftProjectName,
+    draftDeviceFolder,
     draftAgentMention,
     uploadInFlight,
     invokeOnSend,
@@ -1194,6 +1226,16 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 onPickProject={(name) => {
                   if (uploadInFlightRef.current) return;
                   setDraftProjectName(name);
+                  setDraftDeviceFolder(null);
+                  setDraftProjectMenuOpen(false);
+                  setProjectSearchQuery("");
+                  setCreateProjectFormOpen(false);
+                }}
+                deviceFolder={draftDeviceFolder}
+                onPickDeviceFolder={(folder) => {
+                  if (uploadInFlightRef.current) return;
+                  setDraftDeviceFolder(folder);
+                  setDraftProjectName(DEFAULT_PROJECT_NAME);
                   setDraftProjectMenuOpen(false);
                   setProjectSearchQuery("");
                   setCreateProjectFormOpen(false);

@@ -1,3 +1,4 @@
+import type { DeviceFolder } from "@rome/api-types/devices";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -1342,6 +1343,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         threadType: "private" as const,
         projectName: project.name,
         projectPath: project.path,
+        ...(input.session.deviceFolder ? { deviceFolder: input.session.deviceFolder } : {}),
         senderBondLevel: "guardian",
       };
       // The in-memory source is intentionally short-lived (15s in production),
@@ -2177,6 +2179,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         largeModelSelection?: string;
         reasoningEffort?: string;
         agentName?: string | null;
+        deviceFolder?: { deviceId?: unknown; path?: unknown } | null;
       }>()
       .catch(
         () =>
@@ -2188,8 +2191,44 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             largeModelSelection?: string;
             reasoningEffort?: string;
             agentName?: string | null;
+            deviceFolder?: { deviceId?: unknown; path?: unknown } | null;
           },
       );
+    let deviceFolder: DeviceFolder | null = null;
+    if (body.deviceFolder) {
+      const { deviceId, path } = body.deviceFolder;
+      if (typeof deviceId !== "string" || !deviceId || typeof path !== "string" || !path) {
+        return c.json({ error: "deviceFolder requires deviceId and path" }, 400);
+      }
+      // A chat works in a project or a device folder, never both.
+      let requestedProject: string;
+      try {
+        requestedProject = normalizeSelectedWebchatProjectPath(
+          body.projectPath ?? body.projectName,
+        );
+      } catch {
+        requestedProject = "";
+      }
+      if (requestedProject !== DEFAULT_WEBCHAT_PROJECT_NAME) {
+        return c.json({ error: "A chat cannot have both a project and a device folder" }, 400);
+      }
+      // Store the real path the device reports, plus a name and platform snapshot,
+      // so the prompt names the folder even while the device is offline.
+      // The listing is the only request to the device; the name and platform
+      // come from Cloud's list, which probes nothing.
+      const [listing, list] = await Promise.all([
+        deps.nodeDevices.listFiles(deviceId, path),
+        deps.nodeDevices.listDevices(),
+      ]);
+      if (!listing.ok) return c.json({ error: listing.code }, 409);
+      const device = list?.devices.find((item) => item.id === deviceId);
+      deviceFolder = {
+        deviceId,
+        deviceName: device?.name ?? deviceId,
+        platform: device?.platform ?? null,
+        path: listing.folder.path,
+      };
+    }
     const id = randomUUID();
     const name = body.name || "New Chat";
     let project;
@@ -2229,6 +2268,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       "webchat",
       null,
       { ownerKey: sessionOwnerKey(await currentSessionActor()) },
+      deviceFolder,
     );
     const createdSession = await deps.webchatRepo.getSession(id);
     if (!createdSession) {
@@ -2243,6 +2283,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       agentName: storedAgentName ?? "main",
       projectPath: project.path ?? project.name,
       largeModelSelection: modelSelection?.id ?? null,
+      deviceFolder: deviceFolder !== null,
       ...(await sessionActorLogAttributes()),
     });
     return c.json(toWebchatSessionResponse(createdSession, 0));
@@ -3217,6 +3258,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       threadType: "private" as const,
       projectName: sessionProjectName,
       projectPath: sessionProjectPath,
+      ...(session.deviceFolder ? { deviceFolder: session.deviceFolder } : {}),
       // The web dashboard is guardian-only, so a webchat turn is always from
       // the guardian.
       senderBondLevel: "guardian",
@@ -3701,6 +3743,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                         // backend restart) re-derives its submit_output tool.
                         suspension.handback ? JSON.stringify(suspension.handback) : null,
                         { inheritOwnerFrom: sessionId },
+                        // The specialist keeps working in the parent chat's folder.
+                        session.deviceFolder ?? null,
                       );
                     } catch (err) {
                       log.warn("failed to mint handoff child session", {
