@@ -406,6 +406,28 @@ describe("isAwaitingGuardian", () => {
 });
 
 describe("currentReplyMessages", () => {
+  for (const toolUseId of ["question", "app"]) {
+    it(`retires sibling proposals when a ${toolUseId} resolution starts a new turn`, () => {
+      const routine = mk(MAIN, "assistant", "proposal-turn", [
+        { type: "text", content: "Routine" },
+      ]);
+      const app = mk(MAIN, "assistant", "proposal-turn", []);
+      const view = { displayMessages: [routine, app], floorSessionId: MAIN };
+      expect(currentReplyMessages(view)).toEqual([routine, app]);
+      expect(currentReplyMessages(view, "resolution-turn")).toEqual([]);
+      const resolution = mk(MAIN, "user", "resolution-turn", [
+        { type: "interaction_result", toolUseId, output: {} },
+      ]);
+      const resumed = mk(MAIN, "assistant", "resolution-turn", []);
+      expect(
+        currentReplyMessages({ ...view, displayMessages: [routine, app, resolution] }),
+      ).toEqual([]);
+      expect(
+        currentReplyMessages({ ...view, displayMessages: [routine, app, resolution, resumed] }),
+      ).toEqual([resumed]);
+    });
+  }
+
   it("keeps every assistant message in the current floor reply, not older or other-session cards", () => {
     const old = mk(MAIN, "assistant", "old", []);
     const input = mk(MAIN, "user", "current", []);

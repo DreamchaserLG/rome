@@ -8,7 +8,7 @@ import { RoutineDraftCard } from "./entries/RoutineDraftCard";
 import { AiToolsCard } from "./entries/AiToolsCard";
 import { QuestionCard } from "./entries/QuestionCard";
 import { createRoutine, listRoutineRefs } from "@/lib/chat-api";
-import "@/i18n";
+import i18n from "@/i18n";
 
 rs.mock("@/lib/chat-api", () => ({
   createRoutine: rs.fn(),
@@ -120,8 +120,9 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  await i18n.changeLanguage("en");
   if (originalScrollTo) Object.defineProperty(HTMLElement.prototype, "scrollTo", originalScrollTo);
   else Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
   rs.restoreAllMocks();
@@ -129,33 +130,47 @@ afterEach(() => {
 });
 
 describe("ChatPendingCardJump", () => {
+  for (const [language, visibleLabel] of [
+    ["en", "Needs you"],
+    ["zh-CN", "待你处理"],
+  ]) {
+    it(`starts its accessible name with the visible label in ${language}`, async () => {
+      await i18n.changeLanguage(language);
+      render(<Harness kind="app" />);
+      const jump = await screen.findByText(visibleLabel);
+      expect(screen.getByRole("button", { name: new RegExp(`^${visibleLabel}`) })).toBe(jump);
+    });
+  }
+
   it("keeps the reminder mounted and focused when the current reply is recomputed", async () => {
     const view = render(<Harness kind="app" currentReplyMessageIds={new Set(["message"])} />);
-    const jump = await screen.findByRole("button", { name: "Jump to waiting card" });
+    const jump = await screen.findByRole("button", { name: "Needs you: jump to waiting card" });
     jump.focus();
     view.rerender(<Harness kind="app" currentReplyMessageIds={new Set(["message"])} />);
-    expect(screen.queryByRole("button", { name: "Jump to waiting card" })).toBe(jump);
+    expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBe(jump);
     expect(document.activeElement).toBe(jump);
     await act(async () => {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     });
-    expect(screen.queryByRole("button", { name: "Jump to waiting card" })).toBe(jump);
+    expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBe(jump);
     expect(document.activeElement).toBe(jump);
   });
 
   it("keeps a server-owned approval eligible even after a newer reply", async () => {
     render(<Harness kind="approval" currentReplyMessageIds={new Set(["other-message"])} />);
-    await screen.findByRole("button", { name: "Jump to waiting card" });
+    await screen.findByRole("button", { name: "Needs you: jump to waiting card" });
   });
   for (const kind of ["routine", "app"] as const) {
     it(`stops reminding about an ignored ${kind} when the current reply changes`, async () => {
       const view = render(<Harness kind={kind} />);
-      await screen.findByRole("button", { name: "Jump to waiting card" });
+      await screen.findByRole("button", { name: "Needs you: jump to waiting card" });
       view.rerender(
         <Harness kind={kind} currentReplyMessageIds={new Set(["replacement-message"])} />,
       );
       await waitFor(() =>
-        expect(screen.queryByRole("button", { name: "Jump to waiting card" })).toBeNull(),
+        expect(
+          screen.queryByRole("button", { name: "Needs you: jump to waiting card" }),
+        ).toBeNull(),
       );
       expect(document.querySelector("[data-chat-pending-card]")).not.toBeNull();
       if (kind === "routine")
@@ -165,15 +180,15 @@ describe("ChatPendingCardJump", () => {
 
   it("navigates to an AI connection card and stops after skipping", async () => {
     render(<Harness kind="ai" />);
-    const jump = await screen.findByRole("button", { name: "Jump to waiting card" });
+    const jump = await screen.findByRole("button", { name: "Needs you: jump to waiting card" });
     fireEvent.click(jump);
     expect(scrollTo).toHaveBeenCalled();
     cardTop = -200;
     fireEvent.scroll(screen.getByTestId("scroller"));
-    await screen.findByRole("button", { name: "Jump to waiting card" });
+    await screen.findByRole("button", { name: "Needs you: jump to waiting card" });
     fireEvent.click(await screen.findByRole("button", { name: "Skip for now" }));
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Jump to waiting card" })).toBeNull(),
+      expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBeNull(),
     );
   });
 
@@ -184,33 +199,35 @@ describe("ChatPendingCardJump", () => {
   ]) {
     it(`stops reminding about a resolved AI card (${JSON.stringify(result)})`, async () => {
       const view = render(<Harness kind="ai" />);
-      await screen.findByRole("button", { name: "Jump to waiting card" });
+      await screen.findByRole("button", { name: "Needs you: jump to waiting card" });
       view.rerender(<Harness kind="ai" aiResult={result} />);
       await waitFor(() =>
-        expect(screen.queryByRole("button", { name: "Jump to waiting card" })).toBeNull(),
+        expect(
+          screen.queryByRole("button", { name: "Needs you: jump to waiting card" }),
+        ).toBeNull(),
       );
     });
   }
 
   it("finds an unresolved routine above the viewport and brings it into view", async () => {
     render(<Harness />);
-    const jump = await screen.findByRole("button", { name: "Jump to waiting card" });
+    const jump = await screen.findByRole("button", { name: "Needs you: jump to waiting card" });
     expect(document.querySelector("[data-chat-pending-card]")?.getAttribute("tabindex")).toBe("-1");
     fireEvent.click(jump);
     expect(scrollTo).toHaveBeenCalledWith({ top: -200, behavior: "instant" });
     expect(document.activeElement?.hasAttribute("data-chat-pending-card")).toBe(true);
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Jump to waiting card" })).toBeNull(),
+      expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBeNull(),
     );
   });
 
   it("finds a card covered by the sticky composer even inside the scroller's bounds", async () => {
     cardTop = 510;
     render(<Harness />);
-    fireEvent.click(await screen.findByRole("button", { name: "Jump to waiting card" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Needs you: jump to waiting card" }));
     expect(scrollTo).toHaveBeenCalledWith({ top: 510, behavior: "instant" });
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Jump to waiting card" })).toBeNull(),
+      expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBeNull(),
     );
   });
 
@@ -218,13 +235,13 @@ describe("ChatPendingCardJump", () => {
     cardTop = 20;
     const view = render(<Harness />);
     await screen.findByRole("button", { name: "Turn it on" });
-    expect(screen.queryByRole("button", { name: "Jump to waiting card" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBeNull();
     cardTop = -200;
     fireEvent.scroll(screen.getByTestId("scroller"));
-    await screen.findByRole("button", { name: "Jump to waiting card" });
+    await screen.findByRole("button", { name: "Needs you: jump to waiting card" });
     fireEvent.click(screen.getByRole("button", { name: "Turn it on" }));
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Jump to waiting card" })).toBeNull(),
+      expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBeNull(),
     );
     view.unmount();
     rs.mocked(listRoutineRefs).mockResolvedValue([
@@ -232,7 +249,7 @@ describe("ChatPendingCardJump", () => {
     ]);
     render(<Harness />);
     await screen.findByText("On");
-    expect(screen.queryByRole("button", { name: "Jump to waiting card" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBeNull();
   });
 
   for (const resolved of [
@@ -241,10 +258,12 @@ describe("ChatPendingCardJump", () => {
   ]) {
     it(`removes an off-screen question after ${"dismissed" in resolved ? "dismissal" : "an answer"}`, async () => {
       const view = render(<Harness questionResult={{}} />);
-      await screen.findByRole("button", { name: "Jump to waiting card" });
+      await screen.findByRole("button", { name: "Needs you: jump to waiting card" });
       view.rerender(<Harness questionResult={{ resolved }} />);
       await waitFor(() =>
-        expect(screen.queryByRole("button", { name: "Jump to waiting card" })).toBeNull(),
+        expect(
+          screen.queryByRole("button", { name: "Needs you: jump to waiting card" }),
+        ).toBeNull(),
       );
     });
   }

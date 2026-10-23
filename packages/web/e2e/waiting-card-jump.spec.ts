@@ -15,7 +15,7 @@ for (const viewport of [
 
     test("jump to latest fades out in place", async ({ page }) => {
       await openWaitingCard(page, "routine");
-      await page.getByRole("button", { name: "Jump to waiting card" }).click();
+      await page.getByRole("button", { name: "Needs you: jump to waiting card" }).click();
       const latest = page.getByRole("button", { name: "Jump to the latest message" });
       await expect(latest).toHaveCSS("opacity", "1");
       const positions = await latest.evaluate(async (button) => {
@@ -52,7 +52,7 @@ for (const viewport of [
         page,
       }) => {
         await openWaitingCard(page, kind);
-        const jump = page.getByRole("button", { name: "Jump to waiting card" });
+        const jump = page.getByRole("button", { name: "Needs you: jump to waiting card" });
         const card = page.locator("[data-chat-pending-card]");
         await expect(jump).toBeVisible();
         await expect(card).not.toBeInViewport();
@@ -109,7 +109,7 @@ for (const viewport of [
         page,
       }) => {
         await openWaitingCard(page, kind);
-        const jump = page.getByRole("button", { name: "Jump to waiting card" });
+        const jump = page.getByRole("button", { name: "Needs you: jump to waiting card" });
         await jump.click();
         if (kind === "routine") {
           await page.getByRole("button", { name: "Turn it on", exact: true }).click();
@@ -143,7 +143,7 @@ for (const kind of ["routine", "app"] as const) {
       await openWaitingCard(page, kind, followUp);
       const cards = page.locator("[data-chat-pending-card=proposal]");
       await expect(cards).toHaveCount(followUp === "text" ? 1 : 2);
-      const jump = page.getByRole("button", { name: "Jump to waiting card" });
+      const jump = page.getByRole("button", { name: "Needs you: jump to waiting card" });
       if (followUp === "text") {
         await expect(page.locator("[data-chat-composer-box]")).toBeVisible();
         await expect(cards.first()).not.toBeInViewport();
