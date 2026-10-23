@@ -174,5 +174,12 @@ export function AppComponentView({
     );
   }
 
-  return <div data-ui-scale={scale} ref={rootRef} className="mb-4" />;
+  return (
+    <div
+      data-chat-pending-card={!resolved ? "" : undefined}
+      data-ui-scale={scale}
+      ref={rootRef}
+      className="mb-4"
+    />
+  );
 }
