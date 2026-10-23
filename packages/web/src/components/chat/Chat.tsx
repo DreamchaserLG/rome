@@ -2079,7 +2079,14 @@ export function Chat({
                     clicks and leaves the tab order instead of lurking invisibly
                     over the transcript. */}
                 <div className="pointer-events-none absolute bottom-full left-1/2 mb-3 -translate-x-1/2">
-                  <div className={cn(mainSessionId && !isAtBottom && "absolute right-full mr-2")}>
+                  <div
+                    className={cn(
+                      "absolute bottom-0",
+                      mainSessionId && !isAtBottom
+                        ? "right-full mr-2"
+                        : "left-1/2 -translate-x-1/2",
+                    )}
+                  >
                     {mainSessionId && (
                       <ChatPendingCardJump
                         scroller={scrollerEl}
@@ -2103,9 +2110,7 @@ export function Chat({
                       // rail, has no width gate: it is reachable on a phone, where
                       // the 36px step is under the 44px floor.
                       "touch-target pointer-events-auto rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 backdrop-blur-md transition-[opacity,visibility] duration-150 ease-out supports-[backdrop-filter]:bg-surface/80 hover:text-foreground motion-reduce:transition-none",
-                      !mainSessionId || isAtBottom
-                        ? "invisible absolute opacity-0"
-                        : "visible opacity-100",
+                      !mainSessionId || isAtBottom ? "invisible opacity-0" : "visible opacity-100",
                     )}
                   />
                 </div>

@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { ChatPendingCardJump } from "./ChatPendingCardJump";
@@ -129,6 +129,20 @@ afterEach(() => {
 });
 
 describe("ChatPendingCardJump", () => {
+  it("keeps the reminder mounted and focused when the current reply is recomputed", async () => {
+    const view = render(<Harness kind="app" currentReplyMessageIds={new Set(["message"])} />);
+    const jump = await screen.findByRole("button", { name: "Jump to waiting card" });
+    jump.focus();
+    view.rerender(<Harness kind="app" currentReplyMessageIds={new Set(["message"])} />);
+    expect(screen.queryByRole("button", { name: "Jump to waiting card" })).toBe(jump);
+    expect(document.activeElement).toBe(jump);
+    await act(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+    expect(screen.queryByRole("button", { name: "Jump to waiting card" })).toBe(jump);
+    expect(document.activeElement).toBe(jump);
+  });
+
   it("keeps a server-owned approval eligible even after a newer reply", async () => {
     render(<Harness kind="approval" currentReplyMessageIds={new Set(["other-message"])} />);
     await screen.findByRole("button", { name: "Jump to waiting card" });

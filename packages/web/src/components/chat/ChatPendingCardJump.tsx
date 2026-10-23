@@ -18,7 +18,6 @@ export function ChatPendingCardJump({
   const [target, setTarget] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
-    setTarget(null);
     if (!scroller || !content || !floor) return;
     let frame = 0;
     const measure = () => {

@@ -10,6 +10,41 @@ for (const viewport of [
     test.use({
       viewport: { width: viewport.width, height: viewport.height },
       hasTouch: viewport.hasTouch,
+      reducedMotion: "no-preference",
+    });
+
+    test("jump to latest fades out in place", async ({ page }) => {
+      await openWaitingCard(page, "routine");
+      await page.getByRole("button", { name: "Jump to waiting card" }).click();
+      const latest = page.getByRole("button", { name: "Jump to the latest message" });
+      await expect(latest).toHaveCSS("opacity", "1");
+      const positions = await latest.evaluate(async (button) => {
+        const before = button.getBoundingClientRect().toJSON();
+        return new Promise<{ before: DOMRect; during: DOMRect; opacity: number }>((resolve) => {
+          const onTransition = (event: TransitionEvent) => {
+            if (event.target !== button || event.propertyName !== "opacity") return;
+            button.removeEventListener("transitionrun", onTransition);
+            const fade = button
+              .getAnimations()
+              .find(
+                (animation) =>
+                  animation instanceof CSSTransition && animation.transitionProperty === "opacity",
+              )!;
+            fade.pause();
+            fade.currentTime = Number(fade.effect!.getComputedTiming().duration) / 2;
+            const during = button.getBoundingClientRect().toJSON();
+            const opacity = Number(getComputedStyle(button).opacity);
+            fade.finish();
+            resolve({ before, during, opacity });
+          };
+          button.addEventListener("transitionrun", onTransition);
+          button.click();
+        });
+      });
+      expect(positions.opacity).toBeGreaterThan(0);
+      expect(positions.opacity).toBeLessThan(1);
+      expect(Math.abs(positions.during.x - positions.before.x)).toBeLessThan(1);
+      expect(Math.abs(positions.during.y - positions.before.y)).toBeLessThan(1);
     });
 
     for (const kind of ["routine", "plan", "question", "ai"] satisfies WaitingCardKind[]) {
