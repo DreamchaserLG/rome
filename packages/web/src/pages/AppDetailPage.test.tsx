@@ -14,6 +14,11 @@ rs.mock("@/components/markdown", () => ({
   default: ({ children }: { children?: string }) => <div data-testid="markdown">{children}</div>,
 }));
 
+// jsdom serves the page on localhost, which the Share action treats as
+// unshareable; tests pick the origin they need.
+const origin = rs.hoisted(() => ({ value: "https://jessie.romeos.cc" as string | null }));
+rs.mock("@/lib/shareable-origin", () => ({ shareableOrigin: () => origin.value }));
+
 beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
@@ -21,6 +26,9 @@ beforeAll(async () => {
 afterEach(() => {
   cleanup();
   rs.restoreAllMocks();
+  origin.value = "https://jessie.romeos.cc";
+  // jsdom has no Clipboard API; tests that need one define it.
+  Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
 });
 
 function installedCard(
@@ -425,6 +433,57 @@ describe("AppDetailPage", () => {
     expect(container.querySelector("[aria-busy]")).toBeNull();
     // Not the not-found copy either — the list never loaded, so we can't say.
     expect(screen.queryByText("This app is not installed.")).toBeNull();
+  });
+});
+
+describe("AppDetailPage share", () => {
+  const standalone = () =>
+    installedCard({
+      id: "@ray/demo",
+      displayName: "Demo",
+      hasFrontend: true,
+      href: "/apps/%40ray%2Fdemo",
+      fullHref: "/full/apps/%40ray%2Fdemo",
+    });
+
+  it("copies the app's standalone link to the clipboard", async () => {
+    const user = userEvent.setup();
+    const writeText = rs.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    mockBackend({ installed: [standalone()] });
+
+    renderPage("@ray/demo");
+
+    await user.click(await screen.findByRole("button", { name: "Share" }));
+    expect(writeText).toHaveBeenCalledWith("https://jessie.romeos.cc/full/apps/%40ray%2Fdemo");
+  });
+
+  it("offers no Share on a loopback host, without a clipboard, or without a standalone page", async () => {
+    const writeText = rs.fn(() => Promise.resolve());
+
+    origin.value = null;
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    mockBackend({ installed: [standalone()] });
+    renderPage("@ray/demo");
+    expect(await screen.findByRole("heading", { name: "Demo" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Share" })).toBeNull();
+    cleanup();
+    rs.restoreAllMocks();
+
+    origin.value = "https://jessie.romeos.cc";
+    Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+    mockBackend({ installed: [standalone()] });
+    renderPage("@ray/demo");
+    expect(await screen.findByRole("heading", { name: "Demo" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Share" })).toBeNull();
+    cleanup();
+    rs.restoreAllMocks();
+
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    mockBackend({ installed: [{ ...standalone(), fullHref: null }] });
+    renderPage("@ray/demo");
+    expect(await screen.findByRole("heading", { name: "Demo" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Share" })).toBeNull();
   });
 });
 

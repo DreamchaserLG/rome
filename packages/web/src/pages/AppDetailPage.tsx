@@ -1,8 +1,16 @@
-import { ArrowLeft, ExternalLink, GitFork, MessageSquare, TriangleAlert } from "lucide-react";
+import {
+  ArrowLeft,
+  ExternalLink,
+  GitFork,
+  Link2,
+  MessageSquare,
+  TriangleAlert,
+} from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   Page,
   PageActions,
@@ -33,6 +41,7 @@ import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { getHostAppRoute } from "@/lib/auth-routing";
 import { fetchJson } from "@/lib/fetch-json";
+import { shareableOrigin } from "@/lib/shareable-origin";
 import { useAppsList, useStoreListingVersion } from "@/hooks/use-apps";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useAppLifecycle } from "@/hooks/use-app-lifecycle";
@@ -316,16 +325,45 @@ export default function AppDetailPage() {
     );
   };
 
+  // The link to share is the standalone route, the same one the access dialog
+  // hands out: it opens without the guardian's shell around the app. None is
+  // offered on a loopback host, whose links open nowhere else, or where the
+  // browser has no Clipboard API (an insecure context).
+  const shareOrigin = shareableOrigin();
+  const canCopy = typeof navigator !== "undefined" && Boolean(navigator.clipboard);
+  const shareUrl = (app: InstalledAppCard): string | null =>
+    app.fullHref && shareOrigin && canCopy ? `${shareOrigin}${app.fullHref}` : null;
+
+  const shareApp = (app: InstalledAppCard, url: string) => {
+    const mode = app.accessMode ?? (app.isPublic ? "public" : "private");
+    void navigator.clipboard.writeText(url).then(
+      () =>
+        toast.success(t("detail.shareCopied"), {
+          // A private app's link opens for nobody else, so say so where the
+          // guardian is about to paste it.
+          description: mode === "private" ? t("detail.sharePrivateHint") : undefined,
+        }),
+      () => toast.error(t("detail.shareCopyFailed")),
+    );
+  };
+
   const renderHeaderActions = (app: InstalledAppCard) => {
     const embeddedHref = app.hasFrontend && app.href ? app.href : null;
     const targetHref = embeddedHref ?? getHostAppRoute(app.id);
     const remixable = canRemixApp(app);
+    const url = shareUrl(app);
     if (!targetHref && !app.fullHref && !remixable) return null;
     return (
       // PageActions keeps its intrinsic width so it does not shrink beside the
-      // heading. Capped at the header's width, three actions wrap on a phone
+      // heading. Capped at the header's width, the actions wrap on a phone
       // instead of running off the screen.
       <PageActions className="max-w-full">
+        {url ? (
+          <Button type="button" variant="outline" onClick={() => shareApp(app, url)}>
+            <Link2 data-icon="inline-start" aria-hidden />
+            {t("detail.share")}
+          </Button>
+        ) : null}
         {app.fullHref ? (
           <Button asChild variant="outline">
             <Link to={app.fullHref}>

@@ -92,6 +92,10 @@
     "publishHint": "将已安装的应用包（v{{version}}）上传到 Rome 应用商店。",
     "publishHintListed": "将已安装的应用包（v{{version}}）上传到 Rome 应用商店。商店最新版本：v{{storeVersion}}。",
     "publishHintUnlisted": "将已安装的应用包（v{{version}}）上传到 Rome 应用商店。尚未发布到商店。",
+    "share": "分享",
+    "shareCopied": "链接已复制",
+    "sharePrivateHint": "目前只有你可以打开此应用。要让其他人打开此链接，请更改访问权限。",
+    "shareCopyFailed": "无法复制链接",
     "uninstallHint": "移除应用，数据会保留以便日后重装。",
     "uninstallPurgeHint": "此应用的数据会被永久删除，无法恢复。"
   },
