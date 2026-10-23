@@ -244,6 +244,56 @@ describe("composer Enter key", () => {
   });
 });
 
+describe("composer lock", () => {
+  const reason = "Answer the card above to continue.";
+
+  it("disables typing and Send while a card is the only way to answer, and says why", () => {
+    stubCoarsePointer(false);
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderComposer({ onSend, lockedReason: reason });
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(textarea.disabled).toBe(true);
+    expect(textarea.placeholder).toBe(reason);
+    expect((screen.getByRole("button", { name: /send/i }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(
+      (screen.getByRole("button", { name: "Upload files" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("reopens with the draft intact once the lock lifts", () => {
+    stubCoarsePointer(false);
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    const { rerender } = renderComposer({ onSend });
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: "build me X" } });
+    // Same tree as renderComposer, so the composer keeps its state across the
+    // prop change.
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const withLock = (lockedReason: string | null) => (
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <ChatComposer onSend={onSend} lockedReason={lockedReason} />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+
+    rerender(withLock(reason));
+    expect(textarea.disabled).toBe(true);
+    expect(textarea.value).toBe("build me X");
+
+    rerender(withLock(null));
+    expect(textarea.disabled).toBe(false);
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend.mock.calls[0][0].text).toBe("build me X");
+  });
+});
+
 // Upload progress now rides inside each attachment chip as a ring, so there is
 // no reveal delay to wait out — and, crucially, nothing that mounts or unmounts
 // under the tray and shifts the composer.

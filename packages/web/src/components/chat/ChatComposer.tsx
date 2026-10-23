@@ -166,6 +166,11 @@ export interface ChatComposerProps {
     onApprove?: () => void;
     onCancel?: () => void;
   } | null;
+  // Why typing is off right now, shown in the empty box: a card in the
+  // transcript is the only way to answer. Null or undefined keeps the
+  // composer open. The draft text stays, so an answer typed before the lock
+  // is not lost.
+  lockedReason?: string | null;
   // Styling for the input box itself (border, surface, padding, blur). The
   // composer owns the box so the pre-send chip row can sit *outside* it; each
   // mount passes its own box look (the floating composer adds backdrop-blur).
@@ -213,6 +218,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     onStop,
     streamError,
     designingInteraction = null,
+    lockedReason = null,
     boxClassName,
     onSend,
   },
@@ -653,8 +659,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     [addPendingFiles],
   );
 
+  const locked = lockedReason !== null && lockedReason !== undefined;
   const runSend = useCallback(async () => {
-    if (uploadInFlight || uploadInFlightRef.current) return;
+    if (locked || uploadInFlight || uploadInFlightRef.current) return;
     // A skill chip alone is a sendable turn — the server-expanded prompt asks
     // the agent to read the skill and ask what to do with it.
     if (!inputText.trim() && pendingUploads.length === 0 && !draftSkill) return;
@@ -1164,9 +1171,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                         onKeyDown={handleKeyDown}
                         onPaste={handlePaste}
                         placeholder={
-                          pendingUploads.length > 0
-                            ? t("composer.placeholderWithUploads")
-                            : t("composer.placeholderDefault")
+                          locked
+                            ? lockedReason
+                            : pendingUploads.length > 0
+                              ? t("composer.placeholderWithUploads")
+                              : t("composer.placeholderDefault")
                         }
                         rows={1}
                         className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:text-subtle-foreground focus:outline-none focus:ring-0"
@@ -1177,7 +1186,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                         onInput={(e) =>
                           clampTextareaHeight(e.target as HTMLTextAreaElement, textareaMaxHeight)
                         }
-                        disabled={uploadInFlight}
+                        disabled={locked || uploadInFlight}
                       />
                     }
                   />
@@ -1274,7 +1283,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               variant="ghost"
               size="icon-sm"
               onClick={() => fileInputRef.current?.click()}
-              disabled={uploadInFlight}
+              disabled={locked || uploadInFlight}
               aria-label={t("composer.uploadFiles")}
               title={t("composer.uploadFiles")}
               className="touch-target"
@@ -1356,6 +1365,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                   void runSend();
                 }}
                 disabled={
+                  locked ||
                   uploadInFlight ||
                   (!inputText.trim() && pendingUploads.length === 0 && !draftSkill)
                 }
