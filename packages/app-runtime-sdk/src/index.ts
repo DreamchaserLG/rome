@@ -2709,6 +2709,37 @@ export interface EventCatalogEntry {
    * (pre-registration); a declared schema is authoritative and is never
    * overwritten by an observed one. */
   schemaOrigin?: "observed" | "declared";
+  /** True when an installed app declares this type under `eventSources` in
+   * its app.yaml, so waiting on it can subscribe at the provider (`defer`
+   * does that). Absent for types that only show up by being emitted. */
+  subscribable?: boolean;
+  /** For a subscribable type: the equality-filter fields that pick where to
+   * subscribe. A wait must filter on every field of at least one inner list
+   * (e.g. `[["repository.full_name"], ["organization.login"]]`). Empty when
+   * the subscription follows the connected account. */
+  keys?: string[][];
+  /** Only present when the search was given `match`: whether the producer
+   * already delivers this type for that target. */
+  active?: boolean;
+}
+
+/** Result of {@link EventCatalogReader.search}. */
+export interface EventCatalogSearchResult {
+  entries: EventCatalogEntry[];
+  /** Full match count before `limit`. */
+  total: number;
+  /** Why `active` is missing on a subscribable entry when `match` was given,
+   * e.g. the provider is not connected or `match` names no target field. */
+  matchError?: string;
+}
+
+/** Options for {@link EventCatalogReader.search}. */
+export interface EventCatalogSearchOptions {
+  /** Payload field values that name a subscription target, e.g.
+   * `{ "repository.full_name": "acme/widgets" }`. When given, each
+   * subscribable match reports `active`; this asks the producer, so it costs
+   * one provider API call per returned type. */
+  match?: Record<string, string>;
 }
 
 export interface PollTrigger {
@@ -2804,7 +2835,11 @@ export interface EventPublisher {
 }
 
 export interface EventCatalogReader {
-  search(query: string, limit: number): Promise<{ entries: EventCatalogEntry[]; total: number }>;
+  search(
+    query: string,
+    limit: number,
+    options?: EventCatalogSearchOptions,
+  ): Promise<EventCatalogSearchResult>;
 }
 
 /** A system-initiated turn re-enters an established session rather than

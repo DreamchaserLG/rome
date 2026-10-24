@@ -507,6 +507,12 @@ export class AppInstaller {
               }),
             }))
           : data.suggestedChannelBindings,
+      eventSources: data.eventSources?.map((source) => ({
+        events: source.events,
+        keys: source.keys ?? [],
+        types: source.types ?? [],
+        ensureAction: source.ensureAction,
+      })),
     };
   }
 

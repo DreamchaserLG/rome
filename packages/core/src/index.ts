@@ -145,6 +145,7 @@ import { stopActiveConversationTurn } from "./core/chat-stop.js";
 import { CapabilityDiscovery } from "./core/capability-discovery.js";
 import { EventBus } from "./events/event-bus.js";
 import { EventService } from "./events/event-service.js";
+import { EventSources } from "./events/event-sources.js";
 import { RoutinesRepository } from "./db/repositories/routines.js";
 import { RoutineRunsRepository } from "./db/repositories/routine-runs.js";
 import { RoutineEngine } from "./routines/engine.js";
@@ -759,7 +760,22 @@ async function main() {
   // action depends on. The same instances back both the in-process action path
   // (injected into appActionDeps) and the WorkerRPC handlers, so a worker's
   // proxy and a main-process call resolve to identical behavior.
-  const eventService = new EventService(eventBus, eventCatalog);
+  // Event types apps declare in app.yaml (`eventSources`). `defer` subscribes
+  // through them; catalog search lists their types before the first emission
+  // and, given `match`, probes them as the system.
+  const eventSources = new EventSources({
+    listSources: () =>
+      appCatalog
+        .listResolved()
+        .flatMap((app) =>
+          (app.manifest.eventSources ?? []).map((source) => ({ ...source, appId: app.appId })),
+        ),
+    isKnownEventType: (eventName) => eventCatalog.get(eventName) !== undefined,
+  });
+  const eventService = new EventService(eventBus, eventCatalog, {
+    sources: eventSources,
+    run: (name, args) => actionEngine.run(name, args, { initiator: "system:event-catalog" }),
+  });
   const chatSettings = new ChatSettingsService({
     repository: new ChatSettingsRepository(db),
     connections: connectionRegistry,
@@ -871,6 +887,7 @@ async function main() {
         return talker ? talkerChannelSurface(talker) : null;
       },
       connectionKindOfChannel,
+      eventSources,
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
   );

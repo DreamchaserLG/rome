@@ -43,8 +43,9 @@ import type {
   ChatSettingsControl,
   ChatSettingsPage,
   ChatSettingsSnapshot,
-  EventCatalogEntry,
   EventCatalogReader,
+  EventCatalogSearchOptions,
+  EventCatalogSearchResult,
   EventPublisher,
   Routine,
   RoutineEngine,
@@ -147,10 +148,12 @@ export class EventCatalogProxy implements EventCatalogReader {
   async search(
     query: string,
     limit: number,
-  ): Promise<{ entries: EventCatalogEntry[]; total: number }> {
-    return await callMain<{ entries: EventCatalogEntry[]; total: number }>("events.searchCatalog", {
+    options: EventCatalogSearchOptions = {},
+  ): Promise<EventCatalogSearchResult> {
+    return await callMain<EventCatalogSearchResult>("events.searchCatalog", {
       query,
       limit,
+      ...(options.match ? { match: options.match } : {}),
     });
   }
 }

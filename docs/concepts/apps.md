@@ -238,3 +238,20 @@ An app sets up the state it depends on, such as a routine it must always have, w
 
 - **[Action](actions.md)** — a hook reacts to a system event and routes into an action. The action is what runs.
 - **[Routine](data.md#routines)** — a routine is a guardian- or agent-authored trigger→action binding managed as data. A hook is app-owned code declared in the app's manifest.
+
+## Event sources
+
+An event source is an app's declaration, under `eventSources` in its manifest, that it delivers a family of event-bus events and can subscribe to them at the provider. Each entry names the event-name glob (`events`, one `*`), the event `types` that fill the `*`, the filter fields that pick the subscription target (`keys`), and the action that checks or creates the subscription (`ensureAction`). The connector app declares `provider:event:github.*`, keyed by `repository.full_name` or `organization.login`.
+
+**Contracts:**
+
+- A `defer` on a declared event calls the `ensureAction` before it creates the wait, and fails with the action's reason when the subscription cannot be made. The filter must cover every field of one `keys` entry.
+- A `defer` on an event no app declares always creates the wait. When nothing has emitted the event since Rome started, the result carries a warning, because the event catalog starts empty on every start and cannot tell a misspelled name from an event that has not happened yet.
+- Rome runs one subscribing call per event source at a time, because a provider subscription can be shared state that two concurrent calls would overwrite.
+- Rome never removes a subscription that a wait created, because other routines may depend on it.
+- `search_event_catalog` lists every declared type, even one not yet emitted, with `subscribable` and `keys`. Its `match` input calls the `ensureAction` in check-only mode (`dryRun`) and reports `active` per type. Without `match` it makes no provider calls.
+- The `ensureAction` takes `{ eventName, filter, dryRun }` and returns `subscription`: `existing` or `created`, or with `dryRun`, `active` or `inactive`.
+
+**Not to be confused with:**
+
+- **[Hook](#hooks)** — a hook is app code that reacts to a Rome event. An event source tells Rome which provider events an app can deliver onto the bus.

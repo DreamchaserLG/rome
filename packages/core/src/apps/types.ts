@@ -118,6 +118,25 @@ export interface RomeAppSuggestedChannelBinding {
   reason?: string;
 }
 
+/**
+ * An event type family the app delivers on the bus. Core uses it so a wait on
+ * one of these events (`defer` with `event`) also subscribes at the provider,
+ * and so `search_event_catalog` lists the types before they are first emitted.
+ */
+export interface RomeAppEventSource {
+  /** Event-name glob with one `*`, e.g. `provider:event:github.*`. */
+  events: string;
+  /** Equality-filter fields that pick the subscription target. A wait must
+   * filter on every field of at least one inner list. Empty when the
+   * subscription follows the connected account. */
+  keys: string[][];
+  /** Values for the `*` in `events` that the source can deliver. */
+  types: string[];
+  /** Action core calls with `{ eventName, filter, dryRun }` to check or create
+   * the subscription. */
+  ensureAction: string;
+}
+
 export interface RomeAppManifest {
   formatVersion?: 1 | 2;
   id: string;
@@ -155,6 +174,8 @@ export interface RomeAppManifest {
    * `RomeAppSuggestedChannelBinding`.
    */
   suggestedChannelBindings?: RomeAppSuggestedChannelBinding[];
+  /** Event types this app delivers. See {@link RomeAppEventSource}. */
+  eventSources?: RomeAppEventSource[];
 }
 
 export interface RomeAppDefinition extends RomeAppManifest {

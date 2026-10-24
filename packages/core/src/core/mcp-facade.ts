@@ -1154,11 +1154,13 @@ const DEFER_DESCRIPTION =
   "Schedule a wake-up later in THIS SAME conversation, with full context intact — use it when you're " +
   "watching something that isn't ready yet (a CI run, a build, a reply) instead of ending the turn empty. " +
   "Give a short `name` for what you're watching (it becomes the routine's name) and exactly one of " +
-  "`afterMinutes`, `at`, or `event`. Use `event` to wake as soon as a matching event-bus event is published " +
-  "(find event types with the search_event_catalog action); it fires once, on the first match, and has no " +
-  "timeout. Events are not replayed: after an " +
-  "event defer, check the current state once more, and if what you're waiting for already happened, handle " +
-  "it now. When you wake you're pinged back in this thread with the whole conversation still in context, so " +
+  "`afterMinutes`, `at`, or `event`. Prefer `event` when something announces completion (CI finished, a PR " +
+  "merged, a reply): it wakes as soon as a matching event-bus event is published, once, on the first match, " +
+  "with no timeout. Look up the event name and payload fields with the search_event_catalog action first. " +
+  "For a `subscribable` type, filter on one of its `keys` (e.g. repository.full_name); defer then subscribes " +
+  "at the provider and fails with the reason if it can't. Events are not replayed and a new subscription " +
+  "only sees future events: after an event defer, check the current state once more, and if what you're " +
+  "waiting for already happened, handle it now. When you wake you're pinged back in this thread with the whole conversation still in context, so " +
   "just re-evaluate and either finish or `defer` again (minimum one minute, no limit on re-defers). " +
   "After calling defer, write one short line confirming you'll keep watch, then end your turn.";
 
@@ -1197,7 +1199,8 @@ function buildDeferFacadeTool(
           properties: {
             eventName: {
               type: "string",
-              description: "The exact event type, from search_event_catalog.",
+              description:
+                "The exact event type, from search_event_catalog, e.g. provider:event:github.workflow_run.",
             },
             sourcePattern: {
               type: "string",

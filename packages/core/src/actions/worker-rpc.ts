@@ -157,6 +157,7 @@ const EventsPublishParams = z.object({
 const EventsSearchCatalogParams = z.object({
   query: z.string().default(""),
   limit: z.number().int().positive().max(50).default(10),
+  match: z.record(z.string(), z.string()).optional(),
 });
 
 const SessionContinueParams = z.object({
@@ -493,7 +494,11 @@ export class WorkerRpcServer {
   }
 
   private async handleEventsSearchCatalog(params: unknown): Promise<unknown> {
-    const { query, limit } = parseParams("events.searchCatalog", EventsSearchCatalogParams, params);
-    return await this.services.eventService.search(query, limit);
+    const { query, limit, match } = parseParams(
+      "events.searchCatalog",
+      EventsSearchCatalogParams,
+      params,
+    );
+    return await this.services.eventService.search(query, limit, match ? { match } : {});
   }
 }
