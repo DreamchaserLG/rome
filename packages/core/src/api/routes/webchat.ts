@@ -41,6 +41,7 @@ import {
   toWebchatProjectOption,
 } from "../../webchat/projects.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../../webchat/constants.js";
+import { sessionTraceCutoff } from "../../webchat/trace-retention.js";
 import { appendUploadPathsToPrompt, saveWebchatUploads } from "../../webchat/uploads.js";
 import {
   TURN_BRANCH_PROMPT_MAX_LENGTH,
@@ -995,22 +996,21 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const collectDescendantUsage = async (
     blocks: TraceEventDto[],
     visited: Set<string>,
+    sessionActivityCutoff?: Date,
   ): Promise<DescendantUsage> => {
-    const refs = blocks.filter((block) => block.type === "subagent_start");
+    const refs = blocks
+      .filter((block) => block.type === "subagent_start")
+      .filter((ref) => {
+        const key = `${ref.sessionId}:${ref.turnId}`;
+        if (visited.has(key)) return false;
+        visited.add(key);
+        return true;
+      });
+    const rows = await deps.webchatRepo.getTraceContentsByTurns(refs, { sessionActivityCutoff });
+    const rowsByTurn = new Map(rows.map((row) => [`${row.sessionId}:${row.turnId}`, row]));
     const children = await Promise.all(
       refs.map(async (ref): Promise<DescendantUsage> => {
-        const key = `${ref.sessionId}:${ref.turnId}`;
-        if (visited.has(key)) {
-          return {
-            usage: emptyTokenUsage(),
-            costUsd: 0,
-            costComplete: true,
-            count: 0,
-            usageByModel: [],
-          };
-        }
-        visited.add(key);
-        const row = await deps.webchatRepo.getTraceContentByTurn(ref.sessionId, ref.turnId);
+        const row = rowsByTurn.get(`${ref.sessionId}:${ref.turnId}`);
         if (!row) {
           return {
             usage: emptyTokenUsage(),
@@ -1022,7 +1022,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         }
         const childEvents = parseStoredTraceEvents(row.content);
         const accounting = terminalAccounting(childEvents);
-        const nested = await collectDescendantUsage(childEvents, visited);
+        const nested = await collectDescendantUsage(childEvents, visited, sessionActivityCutoff);
         return {
           usage: accounting ? addTokenUsage(accounting.usage, nested.usage) : nested.usage,
           costUsd: (accounting?.costUsd ?? 0) + nested.costUsd,
@@ -1053,7 +1053,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       },
     );
   };
-  const includeSubagentUsage = async (blocks: TraceEventDto[]): Promise<TraceEventDto[]> => {
+  const includeSubagentUsage = async (
+    blocks: TraceEventDto[],
+    sessionActivityCutoff?: Date,
+  ): Promise<TraceEventDto[]> => {
     let terminalIndex = -1;
     for (let index = blocks.length - 1; index >= 0; index -= 1) {
       const block = blocks[index];
@@ -1067,7 +1070,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (terminal.type !== "result" && terminal.type !== "error") return blocks;
     const accounting = terminal.accounting;
     if (!accounting) return blocks;
-    const descendants = await collectDescendantUsage(blocks, new Set());
+    const descendants = await collectDescendantUsage(blocks, new Set(), sessionActivityCutoff);
     if (descendants.count === 0) return blocks;
     const nextAccounting: TraceAccounting = {
       ...accounting,
@@ -1089,10 +1092,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const buildStoredTraceSnapshot = async (
     idPrefix: string,
     content: string,
-    options: { includeSubagentUsage?: boolean } = {},
+    options: { includeSubagentUsage?: boolean; sessionActivityCutoff?: Date } = {},
   ): Promise<TraceSnapshot> => {
     let blocks = parseStoredTraceEvents(content);
-    if (options.includeSubagentUsage) blocks = await includeSubagentUsage(blocks);
+    if (options.includeSubagentUsage)
+      blocks = await includeSubagentUsage(blocks, options.sessionActivityCutoff);
     return buildTraceSnapshot({
       idPrefix,
       blocks,
@@ -1117,9 +1121,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const attachTraceSummaries = async (sessionId: string, messages: StoredMessages) => {
     const hasTrace = messages.some((m) => m.role === "trace");
     if (!hasTrace) return messages;
-    const traceContents = await deps.webchatRepo.getTraceContents(sessionId);
+    const sessionActivityCutoff = sessionTraceCutoff();
+    const traceContents = await deps.webchatRepo.getTraceContents(sessionId, {
+      sessionActivityCutoff,
+    });
     if (traceContents.length === 0) return messages;
-    const contentById = new Map(traceContents.map((r) => [r.id, r.content]));
+    const contentById = new Map(
+      traceContents.filter((r) => !r.traceArchived).map((r) => [r.id, r.content]),
+    );
+    const archivedIds = new Set(traceContents.filter((r) => r.traceArchived).map((r) => r.id));
     const snapshotsByMessageId = new Map<string, TraceSnapshot>();
     for (const message of messages) {
       if (message.role !== "trace") continue;
@@ -1136,7 +1146,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         .filter((subagent) => subagent.status !== "running")
         .map((subagent) => ({ sessionId: subagent.sessionId, turnId: subagent.turnId })),
     );
-    const childTraces = await deps.webchatRepo.getTraceContentsByTurns(childRefs);
+    const childTraces = await deps.webchatRepo.getTraceContentsByTurns(childRefs, {
+      sessionActivityCutoff,
+    });
     const childSummaries = new Map<string, TraceSnapshot["summary"]>();
     for (const childTrace of childTraces) {
       const snapshot = await buildStoredTraceSnapshot(`msg-${childTrace.id}`, childTrace.content);
@@ -1144,6 +1156,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
 
     return messages.map((message) => {
+      if (archivedIds.has(message.id)) return { ...message, traceArchived: true };
       const snapshot = snapshotsByMessageId.get(message.id);
       return snapshot
         ? {
@@ -1985,9 +1998,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   app.get("/sessions/messages/:id/content", async (c) => {
     const messageId = c.req.param("id");
-    const content = await deps.webchatRepo.getMessageContent(messageId);
-    if (content === null) return c.json({ error: "Message not found" }, 404);
-    const snapshot = await buildStoredTraceSnapshot(`msg-${messageId}`, content, {
+    const sessionActivityCutoff = sessionTraceCutoff();
+    const row = await deps.webchatRepo.getMessageContentForDisplay(messageId, {
+      sessionActivityCutoff,
+    });
+    if (row === null) return c.json({ error: "Message not found" }, 404);
+    if (row.traceArchived) return c.json({ trace: null, traceArchived: true });
+    const snapshot = await buildStoredTraceSnapshot(`msg-${messageId}`, row.content, {
+      sessionActivityCutoff,
       includeSubagentUsage: c.req.query("includeSubagentUsage") !== "false",
     });
     return c.json({ trace: snapshot });
@@ -1998,9 +2016,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const turnId = c.req.param("turnId");
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
-    const row = await deps.webchatRepo.getTraceContentByTurn(sessionId, turnId);
+    const sessionActivityCutoff = sessionTraceCutoff();
+    const row = await deps.webchatRepo.getTraceContentByTurn(sessionId, turnId, {
+      sessionActivityCutoff,
+    });
+    if (row?.traceArchived) return c.json({ trace: null, traceArchived: true });
     if (!row) return c.json({ error: "Trace not found" }, 404);
     const snapshot = await buildStoredTraceSnapshot(`msg-${row.id}`, row.content, {
+      sessionActivityCutoff,
       includeSubagentUsage: c.req.query("includeSubagentUsage") !== "false",
     });
     return c.json({ trace: snapshot });
@@ -2011,7 +2034,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const turnId = c.req.param("turnId");
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
-    const row = await deps.webchatRepo.getTraceContentByTurn(sessionId, turnId);
+    const sessionActivityCutoff = sessionTraceCutoff();
+    const row = await deps.webchatRepo.getTraceContentByTurn(sessionId, turnId, {
+      sessionActivityCutoff,
+    });
+    if (row?.traceArchived) return c.json({ trace: null, traceArchived: true });
     if (!row) return c.json({ error: "Trace not found" }, 404);
     const safeFilenamePart = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, "_");
     const filename = `trace-${safeFilenamePart(sessionId)}-${safeFilenamePart(turnId)}.json`;
@@ -2629,9 +2656,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   app.get("/chat/messages/:id/content", async (c) => {
     const messageId = c.req.param("id");
-    const content = await deps.webchatRepo.getMessageContent(messageId);
-    if (content === null) return c.json({ error: "Message not found" }, 404);
-    const snapshot = await buildStoredTraceSnapshot(`msg-${messageId}`, content, {
+    const sessionActivityCutoff = sessionTraceCutoff();
+    const row = await deps.webchatRepo.getMessageContentForDisplay(messageId, {
+      sessionActivityCutoff,
+    });
+    if (row === null) return c.json({ error: "Message not found" }, 404);
+    if (row.traceArchived) return c.json({ trace: null, traceArchived: true });
+    const snapshot = await buildStoredTraceSnapshot(`msg-${messageId}`, row.content, {
+      sessionActivityCutoff,
       includeSubagentUsage: c.req.query("includeSubagentUsage") !== "false",
     });
     return c.json({ trace: snapshot });
@@ -2647,7 +2679,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const lookup = await getStoredWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
     let content: string | null = null;
-    const row = await deps.webchatRepo.getTraceContentByTurn(sessionId, turnId);
+    const sessionActivityCutoff = sessionTraceCutoff();
+    const row = await deps.webchatRepo.getTraceContentByTurn(sessionId, turnId, {
+      sessionActivityCutoff,
+    });
+    if (row?.traceArchived) return c.json({ trace: null, traceArchived: true });
     if (row) {
       content = row.content;
     } else {
