@@ -18,6 +18,7 @@
 import { callMain, isTransportUncertain } from "./worker-rpc-client.js";
 import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
 import type { AgentFeedback, FeedbackOutcome, FeedbackService } from "../lib/feedback-client.js";
+import type { CloudProfileOutcome, CloudProfileService } from "../lib/cloud-profile.js";
 import type { AgentNameResolution, AgentNamesService } from "../channels/agent-names.js";
 import type { NotifyContent, NotifyService, SendOutcome } from "../lib/notify-client.js";
 import type {
@@ -337,6 +338,13 @@ export class EmailInboundControlProxy implements EmailInboundControl {
 export class AgentNamesProxy implements AgentNamesService {
   resolve(name: string): Promise<AgentNameResolution> {
     return callMain<AgentNameResolution>("agentNames.resolve", { name });
+  }
+}
+
+/** The instance token that reads the guardian's profile stays in main. */
+export class CloudProfileProxy implements CloudProfileService {
+  get(): Promise<CloudProfileOutcome> {
+    return callMain<CloudProfileOutcome>("cloudProfile.get", {});
   }
 }
 

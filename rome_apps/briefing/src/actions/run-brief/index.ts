@@ -13,6 +13,7 @@ import {
 import { createSettingsRepository, type BriefingSettings } from "../../db/repositories/settings.js";
 import { isSupportedChannel, channelSetupHint } from "../../lib/channels.js";
 import { unwrap, summonText } from "../../lib/action-result.js";
+import { gatherGuardianContext, type GuardianContext } from "../../lib/guardian-context.js";
 
 const log = createAppLogger("briefing_run_brief");
 
@@ -46,7 +47,60 @@ function describeScoutResults(results: ScoutResult[]): string {
     .join("\n\n");
 }
 
-function buildPrompt(kind: string, tz: string, results: ScoutResult[]): string {
+const SUGGESTIONS_HEADER = "**Try with Rome**";
+
+/** The "Try with Rome" section of a stored brief, so the next one does not repeat it. */
+export function suggestionsSection(content: string | null | undefined): string | null {
+  const start = content?.indexOf(SUGGESTIONS_HEADER) ?? -1;
+  if (!content || start < 0) return null;
+  const rest = content.slice(start + SUGGESTIONS_HEADER.length);
+  const next = rest.search(/\n\*\*[^*\n]+\*\*\s*\n/);
+  return (next < 0 ? rest : rest.slice(0, next)).trim() || null;
+}
+
+/** Briefs that leave the guardian's hands carry no personal context. */
+export function deliversToGuardian(settings: BriefingSettings, shouldDeliver: boolean): boolean {
+  if (!shouldDeliver) return true;
+  if (settings.channel === "email") {
+    return ["", "guardian"].includes(settings.emailTo.trim().toLowerCase());
+  }
+  return settings.channel === "whatsapp" && !settings.whatsappThreadId.trim();
+}
+
+function suggestionsInstructions(context: GuardianContext | null, previous: string[]): string[] {
+  if (!context || (!context.chats && !context.profile)) {
+    return [
+      "4. TRY WITH ROME — no personal context is available for this brief. Leave this section out.",
+    ];
+  }
+  return [
+    "4. TRY WITH ROME — optional. Suggest at most two things the guardian could do with Rome that they would very likely want. Precision matters more than coverage: a wrong or generic suggestion costs their trust, so leave the section out entirely unless a suggestion clearly passes every rule below.",
+    "   - Ground it in something the guardian said themselves: a need, frustration or repeated task in their recent chats below, or a goal from their survey. The strongest signal is a task they keep doing by hand in chat. Do not infer tastes, personality, mood or private life.",
+    "   - Rome must be able to do it today: with an installed app, action, skill or connectable toolkit, or by building a small app, routine or workflow for it. Check rather than assume, and never promise access to a service Rome cannot connect to. Skip anything Rome already handles for them through an app, routine or workflow.",
+    "   - Do not repeat a suggestion from a recent brief (listed below).",
+    "   - Word it as an offer tied to its basis, e.g. 'You mentioned re-checking X by hand on Oct 22. Rome could do that every morning — try: \"<one-line request>\"'. Never write 'you'd love', 'you probably want', 'as a <role>', or any other guess about what they like or who they are.",
+    "   - Privacy: this context is private to the guardian. Refer to a chat only by its topic; do not quote it at length or mention other people named in it. Do not restate their profile, employer or background, and do not mention that Rome Cloud holds or researched it. Never base a suggestion on health, money, relationships, legal matters or other sensitive personal topics.",
+    "   - Only suggest. Do not run, create, install or schedule anything.",
+    "   - Use the context below only for this section; the other sections come from their own sources.",
+    "",
+    "--- THE GUARDIAN'S RECENT WEBCHAT MESSAGES (their own words, last 48 hours) ---",
+    context.chats ?? "(none)",
+    "",
+    "--- WHAT THE GUARDIAN SHARED WITH ROME CLOUD ABOUT THEIR WORK ---",
+    context.profile ?? "(not available)",
+    "",
+    "--- SUGGESTIONS IN RECENT BRIEFS (do not repeat) ---",
+    previous.length > 0 ? previous.join("\n\n") : "(none)",
+  ];
+}
+
+export function buildPrompt(
+  kind: string,
+  tz: string,
+  results: ScoutResult[],
+  context: GuardianContext | null,
+  previousSuggestions: string[],
+): string {
   const { date, time } = nowLabel(tz);
   const isMorning = kind === "morning";
   const windowHint = isMorning
@@ -61,12 +115,13 @@ function buildPrompt(kind: string, tz: string, results: ScoutResult[]): string {
     "1. CALENDAR — check the guardian's Google Calendar for relevant events (today, and tomorrow morning for an evening brief).",
     "2. MESSAGES — check recent messages on connected channels: WhatsApp (use fetch_channel_history) and email (Gmail). Surface only what needs attention or a reply; summarize, don't dump.",
     "3. SCOUTING FINDINGS — the findings below were already gathered by scheduled scouting tasks. Integrate the key points.",
+    ...suggestionsInstructions(context, previousSuggestions),
     "",
     "ROBUSTNESS: Some sources may not be connected. If a source is unavailable, errors, or has nothing relevant, skip it gracefully and add a brief one-line note like '_Calendar not connected._' — NEVER fail or refuse the whole brief because one source is missing.",
     "",
     windowHint,
     "",
-    "FORMAT: Start with a one-line greeting and date. Then short sections, each with a bold header on its own line, in this order: **Summary** (a 2–3 sentence executive summary of the day), **Action Items** (a short prioritized to-do list — one concrete action per bullet, most urgent first), then **Calendar**, **Messages**, **Scouting**. Keep it skimmable and tight. Return ONLY the briefing markdown.",
+    "FORMAT: Start with a one-line greeting and date. Then short sections, each with a bold header on its own line, in this order: **Summary** (a 2–3 sentence executive summary of the day), **Action Items** (a short prioritized to-do list — one concrete action per bullet, most urgent first), then **Calendar**, **Messages**, **Scouting**, and last **Try with Rome** only when a suggestion qualifies. Keep it skimmable and tight. Return ONLY the briefing markdown.",
     "",
     "--- SCOUTING FINDINGS SINCE LAST BRIEF ---",
     describeScoutResults(results),
@@ -170,6 +225,12 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       const briefsRepo = createBriefsRepository(appContext.db);
 
       const scoutResults = await resultsRepo.listUnconsumed();
+      const previousSuggestions = (await briefsRepo.listRecent(5)).flatMap(
+        (brief) => suggestionsSection(brief.content) ?? [],
+      );
+      const context = deliversToGuardian(settings, shouldDeliver)
+        ? await gatherGuardianContext(appContext, tz)
+        : null;
       const briefId = await briefsRepo.start(kind);
 
       // Synthesize the brief via the assistant agent; fall back deterministically.
@@ -179,7 +240,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         const summoned = unwrap(
           await appContext.runAction("summon", {
             agentName: "assistant",
-            prompt: buildPrompt(kind, tz, scoutResults),
+            prompt: buildPrompt(kind, tz, scoutResults, context, previousSuggestions),
           }),
         );
         if (summoned.ok) content = summonText(summoned.data);

@@ -118,6 +118,8 @@ describe("hydrateInstanceToken / seedInstanceTokenFromEnv", () => {
   });
 });
 
+const NO_PROFILE = { name: null, survey: null, publicProfile: null };
+
 describe("proveIdentity", () => {
   beforeEach(() => {
     setInstanceTokenInMemory(TOKEN);
@@ -154,7 +156,7 @@ describe("proveIdentity", () => {
 
     expect(await proveIdentity({ fetch: http.fetch })).toEqual({
       status: "ok",
-      identity: { accountId: "acct-789", instanceId: "inst-123" },
+      identity: { accountId: "acct-789", instanceId: "inst-123", profile: NO_PROFILE },
     });
     expect(http.calls).toHaveLength(1);
     expect(http.calls[0].headers.get("authorization")).toBe(`Bearer ${TOKEN}`);
@@ -168,7 +170,7 @@ describe("proveIdentity", () => {
 
     await expect(proveIdentity({ fetch: http.fetch, bootVersion: "1.2.3" })).resolves.toEqual({
       status: "ok",
-      identity: { accountId: "acct-789", instanceId: "inst-123" },
+      identity: { accountId: "acct-789", instanceId: "inst-123", profile: NO_PROFILE },
     });
     expect(http.calls).toHaveLength(1);
     expect(http.calls[0].headers.get("content-type")).toBe("application/json");
@@ -195,7 +197,12 @@ describe("proveIdentity", () => {
 
     expect(await proveIdentity({ fetch: http.fetch })).toEqual({
       status: "ok",
-      identity: { accountId: "acct-789", instanceId: "inst-123", email: "owner@example.com" },
+      identity: {
+        accountId: "acct-789",
+        instanceId: "inst-123",
+        email: "owner@example.com",
+        profile: NO_PROFILE,
+      },
     });
   });
 
@@ -217,7 +224,24 @@ describe("proveIdentity", () => {
         instanceId: "inst-123",
         email: "owner@example.com",
         avatarUrl: "https://example.com/avatar.png",
+        profile: NO_PROFILE,
       },
+    });
+  });
+
+  it("reads the guardian's work profile from whoami", async () => {
+    const http = createFetchRecorder();
+    http.when("GET", WHOAMI_URL).reply(200, {
+      instanceId: "inst-123",
+      account: { id: "acct-789", displayName: "Ada", survey: { buildGoals: ["Orders"] } },
+    });
+
+    const result = await proveIdentity({ fetch: http.fetch });
+
+    expect(result.status === "ok" && result.identity.profile).toEqual({
+      name: "Ada",
+      survey: { background: null, buildGoals: ["Orders"], buildDescription: null },
+      publicProfile: null,
     });
   });
 
