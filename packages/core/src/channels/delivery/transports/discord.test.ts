@@ -1,6 +1,5 @@
-import { DiscordAPIError, HTTPError, RateLimitError, type REST } from "discord.js";
+import { DiscordAPIError, HTTPError, type REST } from "discord.js";
 import { describe, expect, it } from "@rstest/core";
-import { DeliveryFailure } from "../types.js";
 import { discordMarkdown, discordTransport } from "./discord.js";
 
 const refusal = (status: number, code: number, message: string) =>
@@ -110,25 +109,6 @@ describe("discordTransport", () => {
     });
   });
 
-  it("asks to wait as long as discord.js says when it gives up on a rate limit", async () => {
-    const limited = new RateLimitError({
-      timeToReset: 2500,
-      limit: 5,
-      method: "PATCH",
-      hash: "hash",
-      url: "/channels/7/messages/41",
-      route: "/channels/:id/messages/:id",
-      majorParameter: "7",
-      global: false,
-      retryAfter: 2500,
-      sublimitTimeout: 0,
-      scope: "user",
-    });
-    const failure = await failureOf(limited);
-    expect(failure).toBeInstanceOf(DeliveryFailure);
-    expect(failure).toMatchObject({ kind: "rate-limited", retryAfterMs: 2500 });
-  });
-
   it("names a server error that outlasted discord.js's retries unknown", async () => {
     expect(
       await failureOf(new HTTPError(502, "Bad Gateway", "PATCH", "/channels/7/messages/41", {})),
@@ -142,6 +122,16 @@ describe("discordTransport", () => {
     expect(await failureOf(refused)).toMatchObject({ kind: "unavailable" });
     const aborted = Object.assign(new Error("This operation was aborted"), { name: "AbortError" });
     expect(await failureOf(aborted)).toMatchObject({ kind: "unknown" });
+  });
+
+  it("names a create that failed to connect unknown, since an earlier attempt may have posted it", async () => {
+    const refused = Object.assign(new TypeError("fetch failed"), {
+      cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+    });
+    const { create } = transportOver(() => {
+      throw refused;
+    });
+    await expect(create("7", "hello")).rejects.toMatchObject({ kind: "unknown" });
   });
 
   it("names a failed placement unavailable unless Discord refused it", async () => {

@@ -57,7 +57,7 @@ A reply can reach a chat as the agent writes it, rather than whole after the run
 - On Feishu and Discord, code that runs past the end of a message is closed there and opened again in the next, so each message shows it as code.
 - On Feishu, a reply streams as cards unless the Feishu streaming style under Experimental features chooses edited messages. The style is read for each new message. A card takes any number of edits and shows its text as it is typed until the reply marks it finished: once its text is final, or when the reply stops or fails. A card whose create Feishu answers only after the reply stopped waiting is marked once the answer comes. A card shows its block's latest text, as a post does, even when the block changes after the card was marked. A failure to mark it changes nothing the reply reports, and Feishu ends the typing itself ten minutes after the card began.
 - A streamed reply lands where a whole one would. Where a chat puts replies in a thread, every message of the reply goes into that thread.
-- A message the platform's client sends again on its own shows once. discord.js sends a create again after a timeout, so each Discord create carries a nonce that Discord enforces.
+- A message the platform's client sends again on its own shows once. discord.js sends a create again after a timeout, so each Discord create carries a nonce that Discord enforces. A create whose resend fails to connect is reported as unknown, since an earlier attempt may have posted it.
 - A fault in the reply stream never ends the run. The result still reaches its caller. A reply that certainly wrote nothing is reported as failed, so the caller sends it. A reply that cannot settle is reported as unknown.
 
 ## An account's agent

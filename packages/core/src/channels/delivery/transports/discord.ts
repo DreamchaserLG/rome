@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { DiscordAPIError, HTTPError, RateLimitError, type REST, Routes } from "discord.js";
+import { DiscordAPIError, HTTPError, type REST, Routes } from "discord.js";
 import { DeliveryFailure, type DeliveryTransport, type TextCodec } from "../types.js";
 import { renderFenced } from "./fenced-markdown.js";
 import { neverConnected } from "./network.js";
@@ -22,7 +22,9 @@ export interface DiscordTransportOptions {
  * discord.js sends a request again when it times out, its connection resets,
  * or Discord answers with a server error, a create included. Each create
  * carries a nonce Discord enforces, so a create sent again returns the message
- * the first one made instead of posting it twice.
+ * the first one made instead of posting it twice. Only the last attempt's
+ * error reaches the transport, so a create that fails to connect is unknown:
+ * an earlier attempt may have posted it, and a new create has a new nonce.
  */
 export function discordTransport({ rest, place }: DiscordTransportOptions): DeliveryTransport {
   return {
@@ -47,7 +49,7 @@ export function discordTransport({ rest, place }: DiscordTransportOptions): Deli
             : failure;
         }
       }
-      return call(async () => {
+      const created = call(async () => {
         const sent = (await rest.post(Routes.channelMessages(target), {
           body: {
             content: text,
@@ -56,6 +58,11 @@ export function discordTransport({ rest, place }: DiscordTransportOptions): Deli
           },
         })) as { id: string; channel_id: string };
         return { messageId: sent.id, chatId: sent.channel_id };
+      });
+      return created.catch((failure: DeliveryFailure) => {
+        throw failure.kind === "unavailable"
+          ? new DeliveryFailure("unknown", failure.message)
+          : failure;
       });
     },
     edit: (receipt, text) =>
@@ -88,8 +95,6 @@ async function call<T>(write: () => Promise<T>): Promise<T> {
 
 function classify(error: unknown): DeliveryFailure {
   const message = error instanceof Error ? error.message : String(error);
-  if (error instanceof RateLimitError)
-    return new DeliveryFailure("rate-limited", message, error.retryAfter);
   if (error instanceof DiscordAPIError) {
     // Only a 401 means the token is dead. A 403 is a refusal in one channel,
     // such as a user who closed their DMs, and the token still works.
