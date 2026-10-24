@@ -29,20 +29,16 @@ import { IconButton } from "@/components/ui/icon-button";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { deleteSession, listSessions, renameSession, type SessionScope } from "@/lib/chat-api";
+import { deleteSession, renameSession, type SessionScope } from "@/lib/chat-api";
 import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
 import type { ChatSession } from "@/lib/chat-types";
 import { deviceFolderName, pathSegments } from "@/lib/device-folder";
 import { activeSessionFromPath, sessionActivityTime } from "@/lib/chat-session";
+import { useChatSessions } from "@/hooks/use-chat-sessions";
 import { usePinnedProjects } from "@/hooks/use-pinned-projects";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
-import {
-  emitSessionsChanged,
-  useArchiveSession,
-  usePinSession,
-  useSessionsChanged,
-} from "@/lib/session-events";
+import { emitSessionsChanged, useArchiveSession, usePinSession } from "@/lib/session-events";
 
 /** What a chat row's mark says. Waiting, running and failed describe the chat,
  *  so they show even while it is open; done means unseen replies, so the open
@@ -314,8 +310,6 @@ export function RecentChats({
   const { t } = useTranslation("common");
   const navigate = useNavigate();
   const location = useLocation();
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [phase, setPhase] = useState<LoadPhase>("loading");
   const [groupMode, setGroupMode] = useState<GroupMode>(() => readGroupMode());
   const [scope, setScope] = useState<SessionScope>(() => readScope());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => readStatusFilter());
@@ -332,35 +326,26 @@ export function RecentChats({
   const renamingRef = useRef(false);
   const activeSessionId = activeSessionFromPath(location.pathname);
 
-  // The newest running state the status stream has reported per chat. A list
-  // response can be older than an event that arrived while it was in flight,
-  // so the stream's word wins over the row's.
+  const {
+    sessions: cachedSessions,
+    isError,
+    refetch,
+    invalidate,
+    update: updateSessions,
+  } = useChatSessions(statusFilter, scope);
+  // Cached rows show at once and a failed refetch keeps them, so the skeleton
+  // is only for a list that has never loaded.
+  const phase: LoadPhase = isError ? "error" : cachedSessions ? "ready" : "loading";
+
+  // The newest running state the status stream has reported per chat, applied
+  // over every list response: one can be older than an event that arrived
+  // while it was in flight. Per mount, since events stop while unmounted; the
+  // remount's refetch reconciles whatever was missed.
   const liveRunning = useRef(new Map<string, boolean>());
-  // Only the latest request may update the list or phase, including event-driven refetches.
-  const listRequest = useRef(0);
-  const loadSessions = useCallback(async () => {
-    const request = ++listRequest.current;
-    try {
-      const data = await listSessions(statusFilter, scope);
-      if (request !== listRequest.current) return;
-      setSessions(data.map((s) => withLiveRunning(s, liveRunning.current)));
-      setPhase("ready");
-    } catch {
-      if (request !== listRequest.current) return;
-      setPhase("error");
-    }
-  }, [statusFilter, scope]);
-
-  useEffect(() => {
-    void loadSessions();
-    return () => {
-      listRequest.current += 1;
-    };
-  }, [loadSessions]);
-
-  useSessionsChanged(() => {
-    void loadSessions();
-  });
+  const sessions = useMemo(
+    () => (cachedSessions ?? []).map((s) => withLiveRunning(s, liveRunning.current)),
+    [cachedSessions],
+  );
 
   // Live running state. A stop refetches the list for unread and
   // lastTurnFailed, and a reconnect refetches whatever changed meanwhile.
@@ -371,10 +356,10 @@ export function RecentChats({
         schema: sessionRunningSchema,
         fn: ({ sessionId, running }) => {
           liveRunning.current.set(sessionId, running);
-          setSessions((prev) =>
+          updateSessions((prev) =>
             prev.map((s) => (s.id === sessionId ? withLiveRunning(s, liveRunning.current) : s)),
           );
-          if (!running) void loadSessions();
+          if (!running) void invalidate();
         },
       },
     },
@@ -383,7 +368,7 @@ export function RecentChats({
       // and the snapshot the new connection sends.
       onReconnect: () => {
         liveRunning.current.clear();
-        void loadSessions();
+        void invalidate();
       },
     },
   );
@@ -572,7 +557,7 @@ export function RecentChats({
         // Server unchanged — leave the list as-is and skip the optimistic flip.
         return;
       }
-      setSessions((prev) => {
+      updateSessions((prev) => {
         // Drop the row when it no longer matches the active filter (archiving
         // under "active", unarchiving under "archived"); otherwise reflect the
         // new flag in place (the "all" view). Archiving never forces navigation.
@@ -584,7 +569,7 @@ export function RecentChats({
         );
       });
     },
-    [archiveMutation, statusFilter],
+    [archiveMutation, statusFilter, updateSessions],
   );
 
   const handleUnarchive = useCallback(
@@ -601,7 +586,7 @@ export function RecentChats({
       } catch {
         return;
       }
-      setSessions((prev) =>
+      updateSessions((prev) =>
         prev.map((session) =>
           session.id === id
             ? { ...session, pinnedAt: pinned ? new Date().toISOString() : null }
@@ -609,7 +594,7 @@ export function RecentChats({
         ),
       );
     },
-    [pinMutation],
+    [pinMutation, updateSessions],
   );
 
   const handleDelete = useCallback(
@@ -619,13 +604,13 @@ export function RecentChats({
       } catch {
         // ignore — refetch anyway
       }
-      setSessions((prev) => prev.filter((s) => s.id !== id));
+      updateSessions((prev) => prev.filter((s) => s.id !== id));
       emitSessionsChanged();
       if (activeSessionId === id) {
         navigate("/chat");
       }
     },
-    [activeSessionId, navigate],
+    [activeSessionId, navigate, updateSessions],
   );
 
   const startRename = useCallback((session: ChatSession) => {
@@ -655,7 +640,7 @@ export function RecentChats({
       }
       setEditingId(null);
       setEditingValue("");
-      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, name } : s)));
+      updateSessions((prev) => prev.map((s) => (s.id === id ? { ...s, name } : s)));
       try {
         await renameSession(id, name);
       } catch {
@@ -663,7 +648,7 @@ export function RecentChats({
       }
       emitSessionsChanged();
     },
-    [editingValue, sessions, cancelRename],
+    [editingValue, sessions, cancelRename, updateSessions],
   );
 
   // Focus and select the rename field as soon as it mounts.
@@ -1165,7 +1150,7 @@ export function RecentChats({
                   variant="outline"
                   size="sm"
                   className="mt-3"
-                  onClick={() => void loadSessions()}
+                  onClick={() => void refetch()}
                 >
                   {t("recentChats.searchRetry")}
                 </Button>
