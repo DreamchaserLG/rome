@@ -30,6 +30,7 @@ actions:
   - actions/execute-root-script
   - actions/fetch-channel-history
   - actions/generate-image
+  - actions/get-guardian-cloud-profile
   - actions/manage-root-script
   - actions/publish-event
   - actions/search-event-catalog

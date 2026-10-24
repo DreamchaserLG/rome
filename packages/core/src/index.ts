@@ -14,11 +14,13 @@ import {
   logInstanceIdentityAtBoot,
   seedInstanceTokenFromEnv,
   onInstanceTokenChanged,
+  proveIdentity,
 } from "./lib/instance-identity.js";
 import { startInstanceIdentityHeartbeat } from "./lib/instance-identity-heartbeat.js";
 import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "./lib/feedback-client.js";
 import { assembleDiagnosticBundle } from "./lib/diagnostics.js";
 import { NotifyClient } from "./lib/notify-client.js";
+import { CloudProfileClient } from "./lib/cloud-profile.js";
 import { getGuardianAuthState, recordResolvedAccount } from "./lib/guardian-auth-state.js";
 import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./lib/rome-cloud-relay.js";
@@ -959,6 +961,7 @@ async function main() {
       assembleDiagnosticBundle({ settingsRepo, channelsService, appCatalog, bootVersionReport }),
     agentReportsEnabled: async () => (await settingsRepo.get(AGENT_REPORTS_ENABLED_KEY)) !== false,
   });
+  const cloudProfileClient = new CloudProfileClient(() => proveIdentity());
   const resolveArtifactReference = createArtifactReferenceResolver({
     agentLoader,
     actionRegistry,
@@ -1044,6 +1047,7 @@ async function main() {
       favorService,
       hostExecution,
       feedback: feedbackClient,
+      cloudProfile: cloudProfileClient,
       agentNames: agentNameResolver,
     },
   );
@@ -1057,6 +1061,7 @@ async function main() {
       favorService,
       hostExecution,
       feedback: feedbackClient,
+      cloudProfile: cloudProfileClient,
       agentNames: agentNameResolver,
     }),
   );
@@ -1485,6 +1490,7 @@ async function main() {
     backendTurnRunner,
     notify: notifyClient,
     feedback: feedbackClient,
+    cloudProfile: cloudProfileClient,
     agentNames: agentNameResolver,
   });
   actionEngine.setWorkerRpcServer(workerRpcServer);
