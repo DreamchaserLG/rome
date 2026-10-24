@@ -110,7 +110,7 @@ function messageText(raw: string): string {
     .trim();
 }
 
-interface CloudProfile {
+export interface CloudProfile {
   name: string | null;
   survey: {
     background: string | null;

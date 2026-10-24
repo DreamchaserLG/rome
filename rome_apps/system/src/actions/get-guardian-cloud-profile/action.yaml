@@ -2,13 +2,14 @@ name: get_guardian_cloud_profile
 type: system
 description: >-
   Read what the guardian shared with Rome Cloud about their work: their name,
-  their signup-survey background and build goals, and their public professional
-  headline, role, company and summary when Rome Cloud matched it to them. Use it
-  to tailor help to their work. It is personal context for the guardian's own
-  agent: never repeat it to anyone else, and do not recite it back to the
-  guardian unprompted. Returns an error when the instance is not connected to
-  Rome Cloud.
+  their signup-survey background and build goals, and their public work
+  headline, role, company and summary. For first-party callers that tailor
+  output for the guardian alone, such as Briefing. Returns an error when the
+  instance is not connected to Rome Cloud.
 complexity: simple
 speed: fast
 reliability: high
 sideEffects: read-only
+# Personal context: kept out of wildcard agent allow-lists, which include
+# chats with visitors and Rome's bot accounts. Apps reach it via runAction.
+visibility: explicit

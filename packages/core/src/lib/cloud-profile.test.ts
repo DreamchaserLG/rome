@@ -9,12 +9,14 @@ import type {
   CloudProfile as ActionProfile,
   CloudProfileOutcome as ActionOutcome,
 } from "../../../../rome_apps/system/src/actions/get-guardian-cloud-profile/index.js";
+import type { CloudProfile as BriefingProfile } from "../../../../rome_apps/briefing/src/lib/guardian-context.js";
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
   ? true
   : false;
 const profileInSync: Equal<CoreProfile, ActionProfile> = true;
 const outcomeInSync: Equal<CoreOutcome, ActionOutcome> = true;
+const briefingInSync: Equal<CoreProfile, BriefingProfile> = true;
 
 const account = {
   id: "acct",
@@ -117,7 +119,7 @@ describe("CloudProfileClient", () => {
     expect(await client.get()).toEqual({ kind: "ok", profile });
   });
 
-  it("matches the system action's structural copy (enforced by typecheck)", () => {
-    expect(profileInSync && outcomeInSync).toBe(true);
+  it("matches the system action's and Briefing's copies (enforced by typecheck)", () => {
+    expect(profileInSync && outcomeInSync && briefingInSync).toBe(true);
   });
 });
