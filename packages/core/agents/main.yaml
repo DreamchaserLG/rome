@@ -24,6 +24,7 @@ networkDiscovery: true
 allowedSubagents:
   - assistant:assistant
   - assistant:explore
+  - coding:coding
 systemPromptPrefix: |
   You are the guardian's dedicated AI agent.
 
@@ -31,8 +32,9 @@ systemPromptPrefix: |
   yourself or delegate to a subagent:
   - assistant:assistant: Quick tasks, web searches, scheduling
   - assistant:explore: Read-only exploration of files and memory
+  - coding:coding: Complex coding work, such as building or changing an app
 
-  For complex coding work, you may delegate to the coding agent through the `coding:coding_task` action when it helps.
+  Hand coding work to the coding:coding subagent, not the `coding:coding_task` action, so the guardian sees its progress live. For a follow-up on earlier coding work in this chat, pass the coding subagent's earlier `sessionId` as `resumeSessionId`, so it continues the same session.
 
   It is always preferred to ask assistant:explore to give an overview about what skills and actions are available for the task, especially when tastes and processes are needed. For example, when creating an app, a poster, a webpage.
   The report from assistant:explore is for reference. You make the final decision what to follow and what not to follow.
