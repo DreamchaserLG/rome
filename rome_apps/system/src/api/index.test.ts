@@ -29,7 +29,7 @@ function createContext(
     set: rs.fn(async () => undefined),
   };
   return {
-    app: { id: "recap", version: "0.1.0", description: "Recap" },
+    app: { id: "system", version: "0.2.21", description: "System" },
     controller: {},
     db: {} as never,
     log: { debug: rs.fn(), info: rs.fn(), warn: rs.fn(), error: rs.fn() },
@@ -39,7 +39,38 @@ function createContext(
   };
 }
 
-describe("recap API", () => {
+describe("system recap settings API", () => {
+  for (const caller of [
+    { kind: "anonymous" } as const,
+    { kind: "visitor", accountId: "visitor-1", email: "visitor@example.com" } as const,
+  ]) {
+    it.each([
+      "GET",
+      "PUT",
+    ])(`rejects ${caller.kind} %s without accessing global settings`, async (method) => {
+      const ctx = createContext({ enabled: false });
+      const response = await createApiHandler(ctx).handle({
+        method,
+        path: ["settings"],
+        headers: {},
+        query: new URLSearchParams(),
+        caller,
+        body: new TextEncoder().encode(
+          JSON.stringify({
+            enabled: true,
+            createAudio: true,
+            threshold: "short",
+            audioSpeed: "normal",
+          }),
+        ),
+      });
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toEqual({ error: "forbidden" });
+      expect(ctx.repositories.settings.get).not.toHaveBeenCalled();
+      expect(ctx.repositories.settings.set).not.toHaveBeenCalled();
+    });
+  }
+
   it("reads recap settings", async () => {
     const handler = createApiHandler(
       createContext({ enabled: true, createAudio: true, threshold: "long", audioSpeed: "faster" }),

@@ -16,10 +16,14 @@ function readJsonBody(request: RomeAppApiRequest): unknown {
   }
 }
 
-class RecapApiHandler implements RomeAppApiHandler {
+class SystemApiHandler implements RomeAppApiHandler {
   constructor(private readonly ctx: RomeAppContext) {}
 
   async handle(request: RomeAppApiRequest): Promise<Response> {
+    if (request.caller?.kind !== "guardian") {
+      return Response.json({ error: "forbidden" }, { status: 403 });
+    }
+
     const route = request.path.join("/");
 
     if (request.method === "GET" && request.path.length === 0) {
@@ -72,7 +76,7 @@ class RecapApiHandler implements RomeAppApiHandler {
       {
         error: "not_found",
         appId: this.ctx.app.id,
-        message: `Unknown recap API route: /${route}`,
+        message: `Unknown system API route: /${route}`,
       },
       { status: 404 },
     );
@@ -80,5 +84,5 @@ class RecapApiHandler implements RomeAppApiHandler {
 }
 
 export function createApiHandler(ctx: RomeAppContext): RomeAppApiHandler {
-  return new RecapApiHandler(ctx);
+  return new SystemApiHandler(ctx);
 }
