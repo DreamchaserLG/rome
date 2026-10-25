@@ -151,7 +151,11 @@ if [ -n "$existing_project_labels" ]; then
     while IFS= read -r dir; do
       [ -n "$dir" ] && printf '  %s\n' "$dir" >&2
     done <<<"$other_roots"
-    echo "        Two worktrees share a basename. Rename one directory and retry." >&2
+    if [ -n "${ROME_DEV_SLUG:-}" ]; then
+      echo "        ROME_DEV_SLUG=${ROME_DEV_SLUG} pins this name. Unset it here, or run dev:all from that checkout." >&2
+    else
+      echo "        Two worktrees share a basename. Rename one directory and retry." >&2
+    fi
     exit 1
   fi
 fi
