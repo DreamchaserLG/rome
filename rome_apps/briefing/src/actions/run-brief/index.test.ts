@@ -107,11 +107,11 @@ describe("buildPrompt", () => {
     const prompt = buildPrompt("evening", "UTC", [], context, ["- Earlier idea"]);
     expect(prompt).toContain("I sort these by hand");
     expect(prompt).toContain("- Earlier idea");
-    expect(prompt).toContain("last **Try with Rome** only when a suggestion qualifies");
+    expect(prompt).toContain("under a **Try with Rome** header");
     expect(prompt).not.toContain("${");
 
     const without = buildPrompt("evening", "UTC", [], null, []);
-    expect(without).toContain("Leave this section out");
+    expect(without).not.toContain("TRY WITH ROME");
     expect(without).not.toContain("RECENT WEBCHAT MESSAGES");
   });
 });
