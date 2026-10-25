@@ -69,7 +69,8 @@ function toRecord(row: typeof channels.$inferSelect): ChannelRecord {
  * A channel's id is minted once and never changes, since every stored row
  * spells it. It is an opaque id, except that a connection kind's first channel carries
  * the connection kind's name, which is what data stored before channels were recorded
- * spells. A row stays when its Connection goes, so its id is never minted
+ * spells. A linkable connection kind's channel takes the name only when the boot pass
+ * for those Connections asks for it. A row stays when its Connection goes, so its id is never minted
  * again. An account of a linkable connection kind starts fresh: the connection kind's next
  * Connection gets a channel of its own. Another connection kind's next Connection
  * takes the row back, since apps address that connection kind's one channel by its
@@ -129,7 +130,9 @@ export class ChannelRecordsRepository {
    * channel, so it starts with no history. A Connection of any other connection kind
    * takes back the connection kind's unbacked channel, the one carrying the connection kind's
    * name first. Failing that, it gets the connection kind's name if no channel holds
-   * it, and a fresh opaque id otherwise. A new channel is linked to `agent`
+   * it, and a fresh opaque id otherwise. A linkable connection kind's channel gets an
+   * opaque id, so its id is one no account ever had, unless the caller names
+   * one (`id`, taken only while free). A new channel is linked to `agent`
    * when its connection kind takes one, and to none by default: Rome picks no agent
    * for an account. `domain` is a Feishu app's domain, which decides its
    * channel's platform.
@@ -138,7 +141,7 @@ export class ChannelRecordsRepository {
     exec: Exec,
     connection: { id: string; connectionKind: string; domain?: string },
     now: Date,
-    { agent = null }: { agent?: string | null } = {},
+    { agent = null, id: named }: { agent?: string | null; id?: string } = {},
   ): ChannelRecord {
     const held = exec.select().from(channels).where(eq(channels.connectionId, connection.id)).get();
     if (held) return toRecord(held);
@@ -167,13 +170,12 @@ export class ChannelRecordsRepository {
       return toRecord({ ...vacant, connectionId: connection.id, agent: null });
     }
 
-    const kindIdTaken =
-      exec
-        .select({ id: channels.id })
-        .from(channels)
-        .where(eq(channels.id, connectionKind))
-        .get() !== undefined;
-    const id = kindIdTaken ? randomUUID() : connectionKind;
+    const wanted = named ?? (LINKABLE_KINDS.has(connectionKind) ? undefined : connectionKind);
+    const free =
+      wanted !== undefined &&
+      exec.select({ id: channels.id }).from(channels).where(eq(channels.id, wanted)).get() ===
+        undefined;
+    const id = free ? wanted : randomUUID();
     const row = {
       id,
       connectionKind,

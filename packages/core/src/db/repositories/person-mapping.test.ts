@@ -135,7 +135,7 @@ describe("PersonMappingRepository", () => {
     const records = new ChannelRecordsRepository(testDb.db);
     repo = new PersonMappingRepository(testDb.db, recordedConnectionKindOf(testDb.db));
     const now = new Date();
-    records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, now);
+    records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, now, { id: "telegram" });
     const second = records.claim(testDb.db, { id: "c2", connectionKind: "telegram" }, now).id;
     const personId = await repo.create({
       displayName: "Erin",
@@ -151,7 +151,7 @@ describe("PersonMappingRepository", () => {
     const records = new ChannelRecordsRepository(testDb.db);
     repo = new PersonMappingRepository(testDb.db, recordedConnectionKindOf(testDb.db));
     const now = new Date();
-    records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, now);
+    records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, now, { id: "telegram" });
     const second = records.claim(testDb.db, { id: "c2", connectionKind: "telegram" }, now).id;
     const personId = await repo.create({ displayName: "Erin", bondLevel: "inner-circle" });
 
