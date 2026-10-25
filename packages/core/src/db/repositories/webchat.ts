@@ -40,6 +40,7 @@ import {
   isSessionTraceArchived,
   sessionTraceCutoff,
   TRACE_ACTIVITY_ROLES,
+  TRACE_RANKED_ROOT_TYPES,
 } from "../../webchat/trace-retention.js";
 import type {
   TraceSubagentResultEvent,
@@ -2479,6 +2480,26 @@ export class WebChatRepository {
         asc(romeAgentMessages.turnId),
         asc(romeAgentMessages.createdAt),
       );
+  }
+
+  /**
+   * Last conversation activity of the root session at a 1-based rank by recency, or null when fewer
+   * roots have any. A root's activity is its own messages only, since descendants do not reactivate
+   * ancestors. Only {@link TRACE_RANKED_ROOT_TYPES} roots rank, so background runs cannot push chats out.
+   */
+  async getRecentRootActivityAt(rank: number): Promise<Date | null> {
+    const rows = await this.db.all<{ lastMessageAt: number }>(sql`
+      SELECT max(${romeAgentMessages.createdAt}) AS lastMessageAt
+      FROM ${romeAgentMessages}
+      JOIN ${romeSessions} ON ${romeSessions.id} = ${romeAgentMessages.sessionId}
+      WHERE ${romeSessions.parentSessionId} IS NULL
+        AND ${inArray(romeSessions.type, TRACE_RANKED_ROOT_TYPES)}
+        AND ${inArray(romeAgentMessages.role, TRACE_ACTIVITY_ROLES)}
+      GROUP BY ${romeAgentMessages.sessionId}
+      ORDER BY lastMessageAt DESC
+      LIMIT 1 OFFSET ${rank - 1}
+    `);
+    return rows[0] ? new Date(rows[0].lastMessageAt * 1000) : null;
   }
 
   /** A session stays visible while it or any ancestor has recent conversation activity. */

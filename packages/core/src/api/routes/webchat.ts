@@ -41,7 +41,7 @@ import {
   toWebchatProjectOption,
 } from "../../webchat/projects.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../../webchat/constants.js";
-import { sessionTraceCutoff } from "../../webchat/trace-retention.js";
+import { resolveSessionTraceCutoff } from "../../webchat/trace-retention.js";
 import { appendUploadPathsToPrompt, saveWebchatUploads } from "../../webchat/uploads.js";
 import {
   TURN_BRANCH_PROMPT_MAX_LENGTH,
@@ -1121,7 +1121,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const attachTraceSummaries = async (sessionId: string, messages: StoredMessages) => {
     const hasTrace = messages.some((m) => m.role === "trace");
     if (!hasTrace) return messages;
-    const sessionActivityCutoff = sessionTraceCutoff();
+    const sessionActivityCutoff = await resolveSessionTraceCutoff(deps.webchatRepo);
     const traceContents = await deps.webchatRepo.getTraceContents(sessionId, {
       sessionActivityCutoff,
     });
@@ -1998,7 +1998,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   app.get("/sessions/messages/:id/content", async (c) => {
     const messageId = c.req.param("id");
-    const sessionActivityCutoff = sessionTraceCutoff();
+    const sessionActivityCutoff = await resolveSessionTraceCutoff(deps.webchatRepo);
     const row = await deps.webchatRepo.getMessageContentForDisplay(messageId, {
       sessionActivityCutoff,
     });
@@ -2016,7 +2016,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const turnId = c.req.param("turnId");
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
-    const sessionActivityCutoff = sessionTraceCutoff();
+    const sessionActivityCutoff = await resolveSessionTraceCutoff(deps.webchatRepo);
     const row = await deps.webchatRepo.getTraceContentByTurn(sessionId, turnId, {
       sessionActivityCutoff,
     });
@@ -2034,7 +2034,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const turnId = c.req.param("turnId");
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
-    const sessionActivityCutoff = sessionTraceCutoff();
+    const sessionActivityCutoff = await resolveSessionTraceCutoff(deps.webchatRepo);
     const row = await deps.webchatRepo.getTraceContentByTurn(sessionId, turnId, {
       sessionActivityCutoff,
     });
@@ -2656,7 +2656,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   app.get("/chat/messages/:id/content", async (c) => {
     const messageId = c.req.param("id");
-    const sessionActivityCutoff = sessionTraceCutoff();
+    const sessionActivityCutoff = await resolveSessionTraceCutoff(deps.webchatRepo);
     const row = await deps.webchatRepo.getMessageContentForDisplay(messageId, {
       sessionActivityCutoff,
     });
@@ -2679,7 +2679,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const lookup = await getStoredWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
     let content: string | null = null;
-    const sessionActivityCutoff = sessionTraceCutoff();
+    const sessionActivityCutoff = await resolveSessionTraceCutoff(deps.webchatRepo);
     const row = await deps.webchatRepo.getTraceContentByTurn(sessionId, turnId, {
       sessionActivityCutoff,
     });

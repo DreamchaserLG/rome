@@ -62,14 +62,22 @@ A turn is one request to an agent plus the agent work that follows until the age
 ## Chat trace window
 
 A session's effective activity is the latest conversation message across itself and every ancestor reached through `parentSessionId`.
-The dashboard loads all of its traces while that time is less than seven days old.
-At exactly seven idle days, the session shows chat history only, with an archived-steps note on each turn.
+The dashboard loads all of its traces while either of two things holds:
+
+- The effective activity is less than seven days old.
+- The effective activity is at least as recent as the 20th most recently active root session.
+
+A root session has no `parentSessionId`. Only guardian chats and channel threads rank, and a root's rank uses its own messages, not its descendants'.
+Action runs and handoffs never take a rank, so background work cannot push a chat out of the top 20. They follow the same rule as any session.
+A session that ties with the 20th root stays visible. With fewer than 20 active roots, nothing is archived.
+There is no upper age cap: a session in the top 20 keeps its steps however long it has been idle.
+Otherwise the session shows chat history only, with an archived-steps note on each turn.
 User messages, assistant replies, cards, and interaction results stay in the transcript.
 History, lazy trace reads, and raw downloads follow the same session-wide decision.
 
 Activity includes user, assistant, trace, and notification rows. Notifications record real out-of-band conversation messages.
 Reading, renaming, pinning, and unknown metadata roles do not count. A lineage with no conversation messages is not an archive candidate.
-Each read batches session and ancestor message times in one recursive query, without reading trace payloads.
+Each read ranks the roots in one query and then batches session and ancestor message times in one recursive query, without reading trace payloads.
 There are no session-type exceptions: an old subagent remains visible under an active ancestor, and a fork, promoted side chat, or channel thread can stay active on its own messages under an idle source.
 A new message reactivates the session and its descendants, not its ancestors or siblings.
 If every session in a tree is idle, all of its traces are archived.
@@ -82,7 +90,7 @@ A merged transcript can therefore contain archived child steps beside active par
 This window changes dashboard reads, not storage. It deletes nothing and does not change sharing, usage accounting, or agent resume context.
 Reactivation reveals retained traces while their blocks remain in the database.
 The window and idle predicate live in `packages/core/src/webchat/trace-retention.ts`.
-The repository's `getTraceArchivedSessionIds` applies that predicate to explicitly requested sessions.
+Each request resolves one cutoff from both thresholds, and the repository's `getTraceArchivedSessionIds` applies it to explicitly requested sessions.
 Step 2 will add its own archival selection query and must account for handoff links before removing traces.
 
 ## Event

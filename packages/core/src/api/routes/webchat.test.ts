@@ -31,6 +31,7 @@ import type {
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../core/model-resolver.js";
 import { guardianAuth, webchatProjects, romeAgentMessages } from "../../db/schema.js";
+import { TRACE_RETENTION_RECENT_ROOTS } from "../../webchat/trace-retention.js";
 import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
@@ -373,6 +374,14 @@ describe("Webchat API", () => {
     ]);
   });
 
+  // Twenty chats active "now", so only the seven-day window decides what is archived.
+  const seedRecentRoots = async () => {
+    for (let i = 0; i < TRACE_RETENTION_RECENT_ROOTS; i++) {
+      await deps.webchatRepo.createSession(`recent-root-${i}`, `Recent ${i}`);
+      await deps.webchatRepo.addMessage(`recent-root-${i}-msg`, `recent-root-${i}`, "user", "Hi");
+    }
+  };
+
   it.each([
     "webchat",
     "action",
@@ -383,6 +392,7 @@ describe("Webchat API", () => {
     const type = variant === "promoted-fork" ? "fork" : variant;
     rs.useFakeTimers({ toFake: ["Date"] });
     rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
+    await seedRecentRoots();
     const sessionId = `retention-${variant}`;
     await deps.webchatRepo.createSession("idle-source", "Idle source");
     await deps.webchatRepo.addMessage("source-message", "idle-source", "user", "Old source");
@@ -521,6 +531,53 @@ describe("Webchat API", () => {
     expect(history).not.toContain('"traceArchived":true');
   });
 
+  it("keeps steps of the 20 most recently active roots past seven days and archives the 21st", async () => {
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
+    const DAY = 24 * 60 * 60 * 1000;
+    const ids = Array.from({ length: TRACE_RETENTION_RECENT_ROOTS + 1 }, (_, i) => `ranked-${i}`);
+    for (const [i, id] of ids.entries()) {
+      await deps.webchatRepo.createSession(id, id);
+      await deps.webchatRepo.addMessage(`${id}-user`, id, "user", "Question", `${id}-turn`);
+      await deps.webchatRepo.appendTraceBlocks({
+        messageId: `${id}-trace`,
+        sessionId: id,
+        turnId: `${id}-turn`,
+        startSeq: 0,
+        blocks: [
+          { type: "thinking", content: "Private thinking" },
+          { type: "result", content: "Done" },
+        ],
+      });
+      // Every root is idle at least eight days; ranked-0 is the most recent.
+      await testDb.db
+        .update(romeAgentMessages)
+        .set({ createdAt: new Date(Date.now() - (8 + i) * DAY) })
+        .where(eq(romeAgentMessages.sessionId, id));
+    }
+    const app = createWebchatRuntime(deps).routes;
+    const archivedOf = async (id: string) => {
+      const messages = (await (await app.request(`/sessions/${id}/messages`)).json()) as Array<{
+        id: string;
+        traceArchived?: boolean;
+      }>;
+      return messages.find((m) => m.id === `${id}-trace`)?.traceArchived === true;
+    };
+    expect(await archivedOf(ids[0])).toBe(false);
+    expect(await archivedOf(ids[TRACE_RETENTION_RECENT_ROOTS - 1])).toBe(false);
+    expect(await archivedOf(ids[TRACE_RETENTION_RECENT_ROOTS])).toBe(true);
+    const lazy = await (
+      await app.request(
+        `/sessions/${ids[TRACE_RETENTION_RECENT_ROOTS]}/turns/${ids[TRACE_RETENTION_RECENT_ROOTS]}-turn/trace`,
+      )
+    ).json();
+    expect(lazy).toEqual({ trace: null, traceArchived: true });
+    const kept = (await (
+      await app.request(`/sessions/${ids[0]}/turns/${ids[0]}-turn/trace`)
+    ).json()) as { trace: unknown };
+    expect(kept.trace).not.toBeNull();
+  });
+
   it("keeps 30-day-old child summaries while their root is active, and hides the tree when idle", async () => {
     rs.useFakeTimers({ toFake: ["Date"] });
     rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
@@ -636,6 +693,7 @@ describe("Webchat API", () => {
       parentTurnId,
     );
     await testDb.db.update(romeAgentMessages).set({ createdAt: new Date("2026-09-24T12:00:00Z") });
+    await seedRecentRoots();
     await deps.webchatRepo.addMessage("root-latest", parentSessionId, "user", "Continue");
     await testDb.db
       .update(romeAgentMessages)
@@ -3365,6 +3423,7 @@ describe("Webchat API", () => {
     it("keeps real handoff history on its own clock without including it in parent summaries or cost reads", async () => {
       rs.useFakeTimers({ toFake: ["Date"] });
       rs.setSystemTime(new Date("2026-10-24T12:00:00Z"));
+      await seedRecentRoots();
       const ctl = mockScriptedManager();
       ctl.setEvents(handoffEvents("tu-child-1"));
       const app = createWebchatRuntime(deps).routes;

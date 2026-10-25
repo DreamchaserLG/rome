@@ -4,7 +4,11 @@ import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { ApprovalsRepository } from "./approvals.js";
 import { ChatSettingsRepository } from "../../chat-settings/repository.js";
 import type { DrizzleDb } from "../index.js";
-import { sessionTraceCutoff } from "../../webchat/trace-retention.js";
+import {
+  resolveSessionTraceCutoff,
+  sessionTraceCutoff,
+  TRACE_RETENTION_RECENT_ROOTS,
+} from "../../webchat/trace-retention.js";
 import {
   romeAgentMessagePlatformIds,
   romeAgentMessages,
@@ -350,6 +354,142 @@ describe("WebChatRepository", () => {
         (await repo.getMessageContentForDisplay(`${id}-trace`, options))?.traceArchived,
       ).toBeUndefined();
     }
+  });
+
+  describe("recent-roots trace window", () => {
+    const now = new Date("2026-10-24T12:00:00Z");
+    const DAY = 24 * 60 * 60 * 1000;
+    const daysAgo = (days: number) => new Date(now.getTime() - days * DAY);
+
+    // A session with one trace and one user message, both last active at `at`.
+    async function seed(
+      id: string,
+      at: Date,
+      options: {
+        parentSessionId?: string;
+        type?: "chat" | "handoff" | "action" | "subagent" | "fork";
+        role?: string;
+      } = {},
+    ) {
+      const type = options.type ?? "chat";
+      if (type === "chat") await repo.createSession(id, id);
+      else if (type === "handoff")
+        await repo.createSession(id, id, undefined, undefined, null, null, null, "webchat_handoff");
+      else
+        await repo.ensureRomeSession({
+          id,
+          name: id,
+          type,
+          parentSessionId: options.parentSessionId,
+          agentName: "main",
+        });
+      await repo.appendTraceBlocks({
+        messageId: `${id}-trace`,
+        sessionId: id,
+        turnId: `${id}-turn`,
+        startSeq: 0,
+        blocks: [{ type: "thinking", content: `${id} steps` }],
+      });
+      if (options.role) await repo.addMessage(`${id}-extra`, id, options.role, "x");
+      await testDb.db
+        .update(romeAgentMessages)
+        .set({ createdAt: at })
+        .where(eq(romeAgentMessages.sessionId, id));
+    }
+
+    // Roots r0 (newest) .. r{count-1}, one day apart starting `firstIdleDays` ago.
+    async function seedRoots(count: number, firstIdleDays: number) {
+      for (let i = 0; i < count; i++) await seed(`r${i}`, daysAgo(firstIdleDays + i));
+    }
+
+    const archived = async (ids: string[], at = now) =>
+      (
+        await repo.getTraceArchivedSessionIds(ids, await resolveSessionTraceCutoff(repo, at))
+      ).sort();
+
+    it("returns the last activity at a rank, or null with too few roots", async () => {
+      await seedRoots(3, 1);
+      expect(await repo.getRecentRootActivityAt(1)).toEqual(daysAgo(1));
+      expect(await repo.getRecentRootActivityAt(3)).toEqual(daysAgo(3));
+      expect(await repo.getRecentRootActivityAt(4)).toBeNull();
+    });
+
+    it("keeps an idle root within the top 20 and archives the 21st", async () => {
+      await seedRoots(TRACE_RETENTION_RECENT_ROOTS + 1, 8);
+      expect(await archived(["r0", "r19", "r20"])).toEqual(["r20"]);
+      const options = { sessionActivityCutoff: await resolveSessionTraceCutoff(repo, now) };
+      expect((await repo.getTraceContents("r19", options))[0]?.content).toContain("r19 steps");
+      expect((await repo.getTraceContents("r20", options))[0]?.traceArchived).toBe(true);
+    });
+
+    it("archives nothing with fewer than 20 roots, even at 60 days idle", async () => {
+      await seedRoots(TRACE_RETENTION_RECENT_ROOTS - 1, 60);
+      expect(await archived(["r0", "r18"])).toEqual([]);
+    });
+
+    it("keeps every session tied with the 20th root", async () => {
+      for (let i = 0; i < TRACE_RETENTION_RECENT_ROOTS + 2; i++) await seed(`r${i}`, daysAgo(10));
+      await seed("older", daysAgo(11));
+      expect(await archived(["r0", "r21", "older"])).toEqual(["older"]);
+    });
+
+    it("keeps the seven-day boundary when the 20th root is recent", async () => {
+      for (let i = 0; i < TRACE_RETENTION_RECENT_ROOTS; i++) await seed(`r${i}`, daysAgo(1));
+      await seed("exactly-seven", daysAgo(7));
+      await seed("just-under-seven", new Date(daysAgo(7).getTime() + 1000));
+      expect(await archived(["exactly-seven", "just-under-seven"])).toEqual(["exactly-seven"]);
+    });
+
+    it("keeps a branch under a top-20 root through the ancestor rule", async () => {
+      await seedRoots(TRACE_RETENTION_RECENT_ROOTS + 1, 8);
+      await seed("child", daysAgo(40), { parentSessionId: "r19", type: "subagent" });
+      await seed("grandchild", daysAgo(40), { parentSessionId: "child", type: "fork" });
+      await seed("orphan-child", daysAgo(40), { parentSessionId: "r20", type: "subagent" });
+      expect(await archived(["child", "grandchild", "orphan-child"])).toEqual(["orphan-child"]);
+    });
+
+    it("keeps a non-root branch whose own effective activity reaches the 20th root", async () => {
+      await seedRoots(TRACE_RETENTION_RECENT_ROOTS + 1, 8);
+      await seed("branch-at-t20", daysAgo(8 + TRACE_RETENTION_RECENT_ROOTS - 1), {
+        parentSessionId: "r20",
+        type: "fork",
+      });
+      await seed("branch-before-t20", daysAgo(8 + TRACE_RETENTION_RECENT_ROOTS), {
+        parentSessionId: "r20",
+        type: "fork",
+      });
+      expect(await archived(["branch-at-t20", "branch-before-t20"])).toEqual(["branch-before-t20"]);
+    });
+
+    it("does not let descendant activity move an ancestor's rank", async () => {
+      await seedRoots(TRACE_RETENTION_RECENT_ROOTS, 8);
+      await seed("quiet-root", daysAgo(100));
+      await seed("busy-child", daysAgo(0.5), { parentSessionId: "quiet-root", type: "fork" });
+      expect(await repo.getRecentRootActivityAt(TRACE_RETENTION_RECENT_ROOTS)).toEqual(
+        daysAgo(8 + TRACE_RETENTION_RECENT_ROOTS - 1),
+      );
+      expect(await archived(["quiet-root", "busy-child"])).toEqual(["quiet-root"]);
+    });
+
+    it("ranks only chats and channel threads, not action runs or handoffs", async () => {
+      await seedRoots(TRACE_RETENTION_RECENT_ROOTS, 8);
+      for (let i = 0; i < 5; i++) {
+        await seed(`action-${i}`, daysAgo(0.1), { type: "action" });
+        await seed(`handoff-${i}`, daysAgo(0.1), { type: "handoff" });
+      }
+      await seed("idle-chat", daysAgo(100));
+      expect(await repo.getRecentRootActivityAt(TRACE_RETENTION_RECENT_ROOTS)).toEqual(
+        daysAgo(8 + TRACE_RETENTION_RECENT_ROOTS - 1),
+      );
+      expect(await archived(["r19", "idle-chat"])).toEqual(["idle-chat"]);
+    });
+
+    it("does not rank roots whose only rows are not conversation activity", async () => {
+      await seedRoots(TRACE_RETENTION_RECENT_ROOTS - 1, 8);
+      await repo.createSession("metadata-only", "Metadata only");
+      await repo.addMessage("meta", "metadata-only", "pin", "x");
+      expect(await repo.getRecentRootActivityAt(TRACE_RETENTION_RECENT_ROOTS)).toBeNull();
+    });
   });
 
   it("filters owners before returning chats and preserves the all-owner default", async () => {
