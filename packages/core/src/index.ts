@@ -89,7 +89,7 @@ import { createAccountNames } from "./channels/account-names.js";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList, joinLaterChannel } from "./channels/channel-list.js";
 import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE, webchatChannel } from "./channels/webchat-channel.js";
-import { claimChannels } from "./channels/claim-channels.js";
+import { claimChannels, recordChannelAccounts } from "./channels/claim-channels.js";
 import { domainOf, domainOfGrants } from "./channels/platform.js";
 import { AccountListening, accountAgentResolver } from "./channels/account-agents.js";
 import { recordedChannelOf } from "./channels/connection-ports.js";
@@ -387,10 +387,15 @@ async function main() {
     connectionRegistry.getDescriptor(connectionKind)?.capabilities.talker !== undefined;
   const connectionRegistry: ConnectionRegistry = new ConnectionRegistry({
     ledger: new DrizzleGrantLedger(db),
-    onMint: (tx, record, profile) => {
+    onMint: (tx, record, profile, account) => {
       if (!talks(record.connectionKind)) return;
-      channelRecords.claim(tx, { ...record, domain: domainOf(profile) }, record.createdAt);
+      channelRecords.claim(
+        tx,
+        { ...record, domain: domainOf(profile), accountId: account?.accountId },
+        record.createdAt,
+      );
     },
+    onAccount: (tx, id, account) => channelRecords.recordAccount(tx, id, account.accountId),
     onRemove: (tx, id) => channelRecords.vacate(tx, id),
   });
   const channelOf = recordedChannelOf(channelRecords, talks);
@@ -1458,6 +1463,9 @@ async function main() {
     connectionRegistry.all().filter((c) => talks(c.connectionKind)),
     async (id) => domainOfGrants(await connectionRegistry.getLedger().listGrants(id)),
   );
+  // A channel recorded before channels knew their account learns it from its
+  // connection's grant.
+  await recordChannelAccounts(db, channelRecords, connectionRegistry.getLedger());
   connectionRegistry.startCapabilities();
   // Renew hourly OAuth tokens (Shopify) before they lapse: nothing reports a
   // token the connector reads from its custody file as rejected.

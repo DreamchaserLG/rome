@@ -927,10 +927,19 @@ export const channels = sqliteTable(
     connectionKind: text("connection_kind").notNull(),
     platform: text("platform").notNull(),
     connectionId: text("connection_id"),
+    // The platform's own id for the account. With `platform` it is the
+    // account's identity, so at most one record holds a pair. Vocabulary:
+    // docs/domains/chats.md#account.
+    platformAccountId: text("platform_account_id"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     agent: text("agent"),
   },
-  (table) => [uniqueIndex("channels_connection_unique").on(table.connectionId)],
+  (table) => [
+    uniqueIndex("channels_connection_unique").on(table.connectionId),
+    uniqueIndex("uq_channels_platform_account")
+      .on(table.platform, table.platformAccountId)
+      .where(sql`${table.platformAccountId} IS NOT NULL`),
+  ],
 );
 
 // The grant ledger. Rows record outcomes only — never step/flow state

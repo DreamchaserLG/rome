@@ -260,3 +260,33 @@ describe("ConnectionRegistry.confer account guard", () => {
     }
   });
 });
+
+describe("ConnectionRegistry account participants", () => {
+  it("hands the account a grant reaches to the mint, and to a later conferral", async () => {
+    const db = createTestDb();
+    const minted: Array<{ kind: string; accountId?: string }> = [];
+    const recorded: Array<{ id: string; accountId: string }> = [];
+    const registry = new ConnectionRegistry({
+      ledger: new DrizzleGrantLedger(db.db),
+      onMint: (_tx, record, _profile, account) =>
+        minted.push({ kind: record.connectionKind, accountId: account?.accountId }),
+      onAccount: (_tx, id, account) => recorded.push({ id, accountId: account.accountId }),
+    });
+    registry.register(botIdDescriptor());
+    try {
+      await registry.confer(SERVICE, undefined, "bot", credentialFor("t-1"), { botId: "100" });
+      const placeholder = await registry.connectAnother(SERVICE);
+      await registry.confer(SERVICE, placeholder.id, "bot", credentialFor("t-2"), {
+        botId: "200",
+      });
+
+      expect(minted).toEqual([
+        { kind: SERVICE, accountId: "100" },
+        { kind: SERVICE, accountId: undefined },
+      ]);
+      expect(recorded).toEqual([{ id: placeholder.id, accountId: "200" }]);
+    } finally {
+      db.close();
+    }
+  });
+});

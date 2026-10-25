@@ -136,6 +136,112 @@ describe("ChannelRecordsRepository", () => {
     expect(records.claim(db, { id: "c4", connectionKind: "email" }, NOW).id).toBe(later);
   });
 
+  it("records the account a channel is, by the platform's own id", () => {
+    const records = repository();
+    const db = testDb!.db;
+
+    expect(
+      records.claim(db, { id: "c1", connectionKind: "email", accountId: "a@x.test" }, NOW),
+    ).toMatchObject({ platform: "email", platformAccountId: "a@x.test" });
+    expect(records.claim(db, { id: "c2", connectionKind: "telegram" }, NOW).platformAccountId).toBe(
+      null,
+    );
+  });
+
+  it("gives a reconnected account that takes no agent its own record back, never another account's", () => {
+    const records = repository();
+    const db = testDb!.db;
+    const a = records.claim(db, { id: "c1", connectionKind: "email", accountId: "a@x.test" }, NOW);
+    const b = records.claim(db, { id: "c2", connectionKind: "email", accountId: "b@x.test" }, NOW);
+    records.vacate(db, "c1");
+    records.vacate(db, "c2");
+
+    expect(
+      records.claim(db, { id: "c3", connectionKind: "email", accountId: "b@x.test" }, NOW).id,
+    ).toBe(b.id);
+    // a's record keeps a's history, so a third account gets a fresh one.
+    const c = records.claim(db, { id: "c4", connectionKind: "email", accountId: "c@x.test" }, NOW);
+    expect(c.id).not.toBe(a.id);
+    expect(records.byId(a.id)).toMatchObject({ connectionId: null, platformAccountId: "a@x.test" });
+  });
+
+  it("gives a reconnected account that takes an agent a fresh record", () => {
+    const records = repository();
+    const db = testDb!.db;
+    const first = records.claim(
+      db,
+      { id: "c1", connectionKind: "telegram", accountId: "bot-1" },
+      NOW,
+    );
+    records.vacate(db, "c1");
+    expect(records.byId(first.id)?.platformAccountId).toBeNull();
+
+    const again = records.claim(
+      db,
+      { id: "c2", connectionKind: "telegram", accountId: "bot-1" },
+      NOW,
+    );
+    expect(again.id).not.toBe(first.id);
+    expect(again.platformAccountId).toBe("bot-1");
+  });
+
+  it("records an account a later grant reports, and keeps the one it knows", () => {
+    const records = repository();
+    const db = testDb!.db;
+    const record = records.claim(db, { id: "c1", connectionKind: "telegram" }, NOW);
+
+    records.recordAccount(db, "c1", "bot-1");
+    expect(records.byId(record.id)?.platformAccountId).toBe("bot-1");
+    records.recordAccount(db, "c1", "bot-2");
+    expect(records.byId(record.id)?.platformAccountId).toBe("bot-1");
+    // No channel backed by the Connection: nothing to record.
+    records.recordAccount(db, "missing", "bot-3");
+    expect(records.all()).toHaveLength(1);
+  });
+
+  it("moves a Connection to the record its account kept when a later grant names it", () => {
+    const records = repository();
+    const db = testDb!.db;
+    const kept = records.claim(
+      db,
+      { id: "c1", connectionKind: "email", accountId: "a@x.test" },
+      NOW,
+    );
+    records.vacate(db, "c1");
+    const placeholder = records.claim(
+      db,
+      { id: "c2", connectionKind: "email" },
+      new Date(NOW.getTime() + 1),
+    );
+    expect(placeholder.id).not.toBe(kept.id);
+
+    records.recordAccount(db, "c2", "a@x.test");
+    expect(records.byConnection("c2")?.id).toBe(kept.id);
+    expect(records.idOf("c2")).toBe(kept.id);
+    expect(records.byId(placeholder.id)?.connectionId).toBeNull();
+  });
+
+  it("takes an account from an unbacked record of another connection kind", () => {
+    const records = repository();
+    const db = testDb!.db;
+    const old = records.claim(
+      db,
+      { id: "c1", connectionKind: "telegram_user", accountId: "42" },
+      NOW,
+    );
+    // A personal account vacated without letting go, as a record from before
+    // linkable kinds released their account on disconnect.
+    db.update(channels).set({ connectionId: null }).where(eq(channels.id, old.id)).run();
+
+    const next = records.claim(
+      db,
+      { id: "c2", connectionKind: "telegram_user", accountId: "42" },
+      NOW,
+    );
+    expect(next.platformAccountId).toBe("42");
+    expect(records.byId(old.id)?.platformAccountId).toBeNull();
+  });
+
   it("names the service behind a channel, and passes an unrecorded name through", () => {
     const records = repository();
     records.claim(testDb!.db, { id: "c1", connectionKind: "telegram" }, NOW, { id: "telegram" });
