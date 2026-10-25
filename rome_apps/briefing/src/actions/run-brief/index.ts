@@ -134,7 +134,7 @@ function suggestionsInstructions(context: GuardianContext | null, previous: stri
     "   - Rome must be able to do it today: with an installed app, action, skill or connectable toolkit, or by building a small app, routine or workflow for it. Check rather than assume, and never promise access to a service Rome cannot connect to. Skip anything Rome already handles for them through an app, routine or workflow.",
     "   - Do not repeat a suggestion from a recent brief (listed below).",
     "   - Word it as an offer tied to its basis, e.g. 'You mentioned re-checking X by hand on Oct 22. Rome could do that every morning — try: \"<one-line request>\"'. Never write 'you'd love', 'you probably want', 'as a <role>', or any other guess about what they like or who they are.",
-    "   - Privacy: this context is private to the guardian. Refer to a chat only by its topic; do not quote it at length or mention other people named in it. Do not restate their profile, employer or background. Never base a suggestion on health, money, relationships, legal matters or other sensitive personal topics.",
+    "   - Privacy: this context is private to the guardian. Refer to a chat only by its topic; do not quote it at length or mention other people named in it. Do not restate their profile, employer or background. Use extra caution with sensitive personal topics such as health, money, relationships or legal matters: do not suggest them unless the guardian has shown interest in them.",
     "   - Only suggest. Do not run, create, install or schedule anything.",
     "   - Use the context below only for this section; the other sections come from their own sources.",
     "",
