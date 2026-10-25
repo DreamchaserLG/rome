@@ -127,13 +127,9 @@ export function deliversToGuardian(settings: BriefingSettings, shouldDeliver: bo
 }
 
 function suggestionsInstructions(context: GuardianContext | null, previous: string[]): string[] {
-  if (!context || (!context.chats && !context.profile)) {
-    return [
-      "4. TRY WITH ROME — no personal context is available for this brief. Leave this section out.",
-    ];
-  }
+  if (!context || (!context.chats && !context.profile)) return [];
   return [
-    "4. TRY WITH ROME — optional. Suggest at most two things the guardian could do with Rome that they would very likely want. Precision matters more than coverage: a wrong or generic suggestion costs their trust, so leave the section out entirely unless a suggestion clearly passes every rule below.",
+    "4. TRY WITH ROME — optional, under a **Try with Rome** header. Suggest at most two things the guardian could do with Rome that they would very likely want. Precision matters more than coverage: a wrong or generic suggestion costs their trust, so leave the section out entirely unless a suggestion clearly passes every rule below.",
     "   - Ground it in something the guardian said themselves: a need, frustration or repeated task in their recent chats below, or a goal from their survey. The strongest signal is a task they keep doing by hand in chat. Do not infer tastes, personality, mood or private life.",
     "   - Rome must be able to do it today: with an installed app, action, skill or connectable toolkit, or by building a small app, routine or workflow for it. Check rather than assume, and never promise access to a service Rome cannot connect to. Skip anything Rome already handles for them through an app, routine or workflow.",
     "   - Do not repeat a suggestion from a recent brief (listed below).",
@@ -188,7 +184,7 @@ export function buildPrompt(
     "   - Use judgment on borderline cases. If something is worth knowing but not worth acting on, mention it under Messages instead. An automated message occasionally does matter (a failed payment, a flight change); keep those.",
     "   - Fewer is better: one concrete action per bullet, most urgent first. If nothing qualifies, write '_Nothing urgent._'",
     "",
-    "FORMAT: Start with a one-line greeting and date. Then short sections, each with a bold header on its own line, in this order: **Summary** (a 2–3 sentence executive summary of the day), **Action Items** (following the rules above), then **Calendar**, **Messages**, **Scouting**, and last **Try with Rome** only when a suggestion qualifies. Keep it skimmable and tight. Return ONLY the briefing markdown.",
+    "FORMAT: Start with a one-line summary of the most important items. Then short sections, each with a bold header on its own line, ordered by what matters most. Keep it skimmable and tight. Return ONLY the briefing markdown.",
     "",
     "--- SCOUTING FINDINGS SINCE LAST BRIEF ---",
     describeScoutResults(results),
