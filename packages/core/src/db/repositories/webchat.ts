@@ -1859,7 +1859,7 @@ export class WebChatRepository {
       .where(eq(romeSessions.id, id));
   }
 
-  async updateSessionLargeModelSelection(id: string, largeModelSelection: string) {
+  async updateSessionLargeModelSelection(id: string, largeModelSelection: string | null) {
     await this.db.update(romeSessions).set({ largeModelSelection }).where(eq(romeSessions.id, id));
   }
 

@@ -77,6 +77,11 @@ function xmlEscape(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/** {@link xmlEscape} for a value inside a double-quoted attribute. */
+function xmlAttr(value: string): string {
+  return xmlEscape(value).replace(/"/g, "&quot;");
+}
+
 /**
  * Render a workspace-context snapshot into a `<workspace_context>` XML block
  * suitable for prepending to a user message. Returns null when the snapshot
@@ -204,6 +209,34 @@ export function buildThreadContextBlock(
   }
 
   return `<thread_context>\n${lines.join("\n")}\n</thread_context>`;
+}
+
+export const FETCH_CHANNEL_HISTORY_ACTION = "system:fetch_channel_history";
+
+/**
+ * Render a `<continuation>` block for the first turn of a provider thread that
+ * replaced the one holding the chat, after a move to another provider. Rome's
+ * transcript still has every message; the agent reads what it needs. It names
+ * no channel: the thread's channel and id are in its thread context.
+ */
+export function buildContinuationBlock(input: {
+  /** The model the chat ran on before this thread. */
+  previousModel?: string;
+  /** The agent may call `system:fetch_channel_history`. */
+  canReadHistory: boolean;
+}): string {
+  const open = input.previousModel
+    ? `<continuation previous_model="${xmlAttr(input.previousModel)}">`
+    : "<continuation>";
+  const lines = [
+    "This conversation started before your current context, so its earlier messages are not in your context.",
+  ];
+  if (input.canReadHistory) {
+    lines.push(
+      `When the conversation needs them, read them with \`${FETCH_CHANNEL_HISTORY_ACTION}\`, passing this thread's channel and thread id. To page back, pass limit, then the nextCursor it returns as cursor.`,
+    );
+  }
+  return `${open}\n${lines.join("\n")}\n</continuation>`;
 }
 
 /**

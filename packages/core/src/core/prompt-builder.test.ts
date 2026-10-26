@@ -26,6 +26,7 @@ rs.mock("../paths.js", () => ({
 
 import {
   buildInteractiveSurfaceGuidanceSection,
+  buildContinuationBlock,
   buildDeviceFolderBlock,
   buildThreadContextBlock,
   buildWorkspaceContextSection,
@@ -728,5 +729,32 @@ describe("buildDeviceFolderBlock", () => {
     });
     expect(block).toContain("(id d1)");
     expect(block?.match(/<\/device_folder>/g)).toHaveLength(1);
+  });
+});
+
+describe("buildContinuationBlock", () => {
+  it("says the earlier messages are not in context and how to read them, without naming a channel", () => {
+    expect(
+      buildContinuationBlock({ previousModel: "claude-sonnet-5-5", canReadHistory: true }),
+    ).toBe(
+      [
+        '<continuation previous_model="claude-sonnet-5-5">',
+        "This conversation started before your current context, so its earlier messages are not in your context.",
+        "When the conversation needs them, read them with `system:fetch_channel_history`, passing this thread's channel and thread id. To page back, pass limit, then the nextCursor it returns as cursor.",
+        "</continuation>",
+      ].join("\n"),
+    );
+  });
+
+  it("escapes a quote in the previous model's attribute", () => {
+    expect(buildContinuationBlock({ previousModel: 'x" y="z', canReadHistory: false })).toContain(
+      '<continuation previous_model="x&quot; y=&quot;z">',
+    );
+  });
+
+  it("leaves out the read hint for an agent that may not call the action", () => {
+    const block = buildContinuationBlock({ canReadHistory: false });
+    expect(block.startsWith("<continuation>\n")).toBe(true);
+    expect(block).not.toContain("fetch_channel_history");
   });
 });

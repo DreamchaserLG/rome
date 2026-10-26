@@ -51,6 +51,7 @@ import { artifactLocalName } from "@/lib/artifact-name";
 import {
   buildChatView,
   buildRows,
+  canPickChatModel,
   isAwaitingGuardian,
   isLastTurnFailed,
   type AgentIdentity,
@@ -113,6 +114,7 @@ import {
   postSessionTurn,
   postSessionTurnJson,
   type PostTurnResult,
+  updateSessionModel,
 } from "@/lib/chat-api";
 import { useArchiveSession, usePinSession } from "@/lib/session-events";
 import {
@@ -121,6 +123,7 @@ import {
 } from "@/pages/free/workspace-context";
 import { applyAgentPlacement } from "@/pages/free/use-free-cells";
 import { randomUUID } from "@/lib/random-uuid";
+import { DEFAULT_LARGE_MODEL_SELECTION } from "@/lib/chat-constants";
 
 // Leave a jumped-to question clear of the top edge — flush against it reads
 // as cut off.
@@ -188,6 +191,7 @@ const traceSummarySchema: z.ZodType<TraceSummary> = z.lazy(() =>
     stoppedByUser: z.boolean().optional(),
     terminalError: z.string().optional(),
     plan: agentPlanSchema.optional(),
+    model: z.string().optional(),
   }),
 );
 
@@ -386,11 +390,33 @@ export function Chat({
   const {
     sessionName,
     model,
+    largeModelSelection: storedModelSelection,
+    isSideChat,
     reasoningEffort,
     pinnedAgentMention: identityAgentMention,
     archivedAt,
     pinnedAt,
   } = useSessionIdentity(mainSessionId);
+  // The open chat's model pick, shown as soon as the guardian makes it. It is
+  // stored on the chat and the next turn runs on it.
+  const [pickedModel, setPickedModel] = useState<{ sessionId: string; value: string } | null>(null);
+  const chatModelValue =
+    (pickedModel && pickedModel.sessionId === mainSessionId ? pickedModel.value : null) ??
+    storedModelSelection ??
+    DEFAULT_LARGE_MODEL_SELECTION;
+  const pickChatModel = useCallback(
+    (next: string) => {
+      if (!mainSessionId) return;
+      const sessionId = mainSessionId;
+      const previous = chatModelValue;
+      setPickedModel({ sessionId, value: next });
+      updateSessionModel(sessionId, next).catch(() => {
+        setPickedModel({ sessionId, value: previous });
+        setStreamError(t("modelSelector.saveFailed"));
+      });
+    },
+    [mainSessionId, chatModelValue, t],
+  );
   // The agent a draft's first send picked stands in until the new session's
   // identity loads, so its chip does not drop out when the composer locks.
   const [createdAgentMention, setCreatedAgentMention] = useState<AgentMention | null>(null);
@@ -482,6 +508,8 @@ export function Chat({
   );
   const { displayMessages, handoffList, floorSessionId, identityBySession, interactionResults } =
     view;
+  const chatModelPickable =
+    !!mainSessionId && canPickChatModel({ mainSessionId, floorSessionId, isSideChat });
 
   // Ordered, unique turn ids of the MAIN session — the selectable share unit.
   // Handoff child turns aren't listed here; they ride along with their parent.
@@ -2155,10 +2183,16 @@ export function Chat({
                       // outside it; this mount adds the floating blur/translucency.
                       boxClassName="rounded-16 border border-border bg-surface/95 p-4 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
                       onSend={handleComposerSend}
-                      // A draft picks the session's project, model, and agent;
-                      // a session has them fixed.
+                      // A draft picks the session's project, model, and agent.
+                      // A session keeps its project and agent, and its model
+                      // can change from the next turn.
                       showProjectSelector={!mainSessionId}
-                      showModelSelector={!mainSessionId}
+                      showModelSelector={!mainSessionId || chatModelPickable}
+                      chatModelSelection={
+                        chatModelPickable
+                          ? { value: chatModelValue, onChange: pickChatModel }
+                          : undefined
+                      }
                       initialProjectName={initialProjectName}
                       initialDeviceFolder={initialDeviceFolder}
                       initialAgentMention={initialAgentMention}

@@ -190,6 +190,35 @@ describe("createChannelsService", () => {
     );
   });
 
+  it("puts a cursor on each message and resumes after one", async () => {
+    const query = rs.fn(async () => [line("m2", 2_000), line("m1", 1_000)]);
+    const { channelsService } = service([
+      { name: "whatsapp", messages: { query, byAccount: null } },
+    ]);
+
+    const page = await channelsService.query("whatsapp", { limit: 2 });
+    const cursor = page.at(-1)?.cursor;
+    expect(cursor).toEqual(expect.any(String));
+    await channelsService.query("whatsapp", { chatId: "c1" as ChatId, after: cursor, limit: 2 });
+
+    expect(query).toHaveBeenLastCalledWith({
+      chatId: "c1",
+      limit: 2,
+      after: expect.objectContaining({
+        source: "whatsapp",
+        timestamp: 1,
+        ref: expect.stringContaining("m1"),
+      }),
+    });
+    await expect(
+      channelsService.query("whatsapp", { chatId: "c1" as ChatId, after: "not-a-cursor" }),
+    ).rejects.toThrow("Invalid message cursor");
+    // Paging walks back through one chat.
+    await expect(channelsService.query("whatsapp", { after: cursor })).rejects.toThrow(
+      "A query after a cursor names a chat",
+    );
+  });
+
   // TODO(0.8): remove with the migration getters.
   it("tells an app built on 0.6 how to migrate off history and connectionIds", async () => {
     const { channelsService } = service();

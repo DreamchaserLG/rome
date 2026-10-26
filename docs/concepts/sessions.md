@@ -26,6 +26,9 @@ A session remembers the concrete model that produced its history — the **sessi
 
 - A successful turn establishes or updates the pin. A pinned session never drifts to another model on its own. A session with no pin resolves from the agent's exact `modelId`, when configured, or its tier until its next successful turn records a pin.
 - Resolution precedence for a turn is **explicit guardian selection → session pin → agent modelId → agent tier**. An explicit model selection (the webchat model selector) wins over both pins, and the successful turn then re-pins the session to the model that actually ran. Choosing a model is therefore the rescue path for a session stranded by a pin whose model cannot run.
+- The webchat model selector stays available after a chat's first message. A pick is stored on the chat, and the next turn runs on it, also when the chat's session is already open. Auto clears the pick, so the session pin decides again. A side chat promoted to a chat, and a chat with a handoff open, show no selector.
+- A pick on the same provider continues the provider thread on the new model. A pick on another provider starts a new thread, which has seen none of the chat, so its first turn carries a [continuation](#continuation) notice.
+- The chat shows a short centered note before the first turn that ran on another model than the session's previous turn. It names the model that ran, as the turn's accounting records it, so two picks that a custom provider maps to one model show no note.
 - A pinned model is **fail-closed**: if it cannot run (logged out, quota-exhausted, or entitlement lost), the turn fails with a structured resolution error rather than silently substituting another model. Recovery is an explicit selection, or a new session whose configured model is available.
 - A new session — including a summoned or subagent session on a shared thread — resolves from its own agent's exact model or tier, because session lookup is agent-scoped. A fork inherits the live session's model unless its caller supplies a tier override, and never updates its source session's pin.
 - Changing an agent's configured `modelId` does not rewrite a saved session pin. The changed default applies to new or unpinned sessions.
@@ -36,6 +39,17 @@ A session remembers the concrete model that produced its history — the **sessi
 - **Provider pin** — an [agent](agents.md) may pin a *provider* while still letting a tier select the concrete model.
 - **Agent model pin** — `provider` with `modelId` supplies an exact default for a new or unpinned session. The session model pin records the model that produced existing history and takes precedence over that default.
 - **Model tier** — the portable agent-level default the session pin overrides once a turn has run.
+
+## Continuation
+
+Rome's transcript is the conversation, and a provider thread is a cache of it. When a chat moves to another provider, the new provider starts a thread that has seen none of the chat. Its first turn carries a `<continuation>` notice: the earlier messages are not in its context, and the model the chat ran on before. When the agent may call `system:fetch_channel_history`, the notice says to read them with it. The agent reads them when the conversation needs them, so nothing grows the prompt unless it asks.
+
+**Contracts:**
+
+- The notice goes on the first turn of a thread that replaced one holding the chat: a pick on another provider in an open chat, or a session reopened on another provider than its recorded thread. It rides on that thread's turns until one returns a result, since a turn that fails may never have reached the thread.
+- A thread that starts in a session also gets the `<thread_context>` block on its first turn.
+- The notice names no channel. The thread's channel and thread id are in its thread context.
+- A new chat, a new generation (the chat-settings reset policy), and a thread that resumes add no notice. Subagent sessions carry none.
 
 ## Turn
 
