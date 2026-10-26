@@ -2578,5 +2578,122 @@ describe("AnthropicProvider", () => {
         code: "context_window_exceeded",
       });
     });
+
+    async function nextTurn(events: AsyncIterator<AgentEvent>): Promise<AgentEvent[]> {
+      const turn: AgentEvent[] = [];
+      for (;;) {
+        const next = await events.next();
+        if (next.done) return turn;
+        turn.push(next.value);
+        if (next.value.type === "result" || next.value.type === "error") return turn;
+      }
+    }
+
+    const turnCost = (turn: AgentEvent[]): number | undefined =>
+      (turn.at(-1) as { accounting?: { costUsd?: number } } | undefined)?.accounting?.costUsd;
+
+    const costedResult = (
+      text: string,
+      echo: string,
+      totalCostUsd: number,
+      usage: Record<string, number>,
+    ) => ({
+      type: "result",
+      subtype: "success",
+      result: text,
+      usage,
+      num_turns: 1,
+      stop_reason: "end_turn",
+      total_cost_usd: totalCostUsd,
+      duration_ms: 1,
+      user_message_uuids: [echo],
+    });
+
+    it("records a turn's cost as its share of the SDK's running total", async () => {
+      const first = "00000000-0000-4000-8000-0000000000a1";
+      const second = "00000000-0000-4000-8000-0000000000a2";
+      queryMock.mockImplementation(({ prompt }) => ({
+        async *[Symbol.asyncIterator]() {
+          const inputs = prompt[Symbol.asyncIterator]();
+          const one = (await inputs.next()).value;
+          yield { ...one, isReplay: true };
+          yield costedResult("first", first, 1.0, {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          });
+          const two = (await inputs.next()).value;
+          yield { ...two, isReplay: true };
+          yield costedResult("second", second, 2.5, {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          });
+        },
+        close: rs.fn(),
+      }));
+
+      const session = await new AnthropicProvider().openSession(buildParams());
+      const events = session.events[Symbol.asyncIterator]();
+      await session.sendUserInput({ text: "first", inputId: first });
+      const firstTurn = await nextTurn(events);
+      await session.sendUserInput({ text: "second", inputId: second });
+      const secondTurn = await nextTurn(events);
+      await session.close();
+
+      expect(firstTurn.at(-1)).toMatchObject({ type: "result", content: "first" });
+      expect(turnCost(firstTurn)).toBeCloseTo(1.0);
+      expect(secondTurn.at(-1)).toMatchObject({ type: "result", content: "second" });
+      expect(turnCost(secondTurn)).toBeCloseTo(1.5);
+    });
+
+    it("prices a resumed session's first turn from its tokens, then diffs the running total", async () => {
+      // The first result after a restart repeats the transcript's lifetime
+      // total (issue #1421 logged $271.77); the next turn moves $1.70.
+      const first = "00000000-0000-4000-8000-0000000000b1";
+      const second = "00000000-0000-4000-8000-0000000000b2";
+      queryMock.mockImplementation(({ prompt }) => ({
+        async *[Symbol.asyncIterator]() {
+          const inputs = prompt[Symbol.asyncIterator]();
+          const one = (await inputs.next()).value;
+          yield { ...one, isReplay: true };
+          yield costedResult("first", first, 271.77, {
+            input_tokens: 1000000,
+            output_tokens: 0,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          });
+          const two = (await inputs.next()).value;
+          yield { ...two, isReplay: true };
+          yield costedResult("second", second, 273.47, {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          });
+        },
+        close: rs.fn(),
+      }));
+
+      const session = await new AnthropicProvider().openSession(
+        buildParams({ isNewSession: false, providerThreadId: "sdk-thread-9" }),
+      );
+      const events = session.events[Symbol.asyncIterator]();
+      await session.sendUserInput({ text: "first", inputId: first });
+      const firstTurn = await nextTurn(events);
+      await session.sendUserInput({ text: "second", inputId: second });
+      const secondTurn = await nextTurn(events);
+      await session.close();
+
+      // No in-memory baseline: the turn falls back to the token-priced
+      // estimate instead of the $271.77 lifetime total. claude-test has no
+      // rate entry, so the estimate is undefined and no cost is recorded.
+      expect(firstTurn.at(-1)).toMatchObject({ type: "result", content: "first" });
+      expect(turnCost(firstTurn)).toBeUndefined();
+      expect(secondTurn.at(-1)).toMatchObject({ type: "result", content: "second" });
+      expect(turnCost(secondTurn)).toBeCloseTo(1.7);
+    });
   });
 });
