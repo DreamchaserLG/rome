@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from "@rstest/core";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createTestDb } from "../test/helpers.js";
 import { AccountAlreadyConnectedError, DifferentAccountError } from "./errors.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
@@ -255,6 +256,92 @@ describe("ConnectionRegistry.confer account guard", () => {
       });
 
       await expect(refused).rejects.toBeInstanceOf(DifferentAccountError);
+    } finally {
+      close();
+    }
+  });
+});
+
+describe("ConnectionRegistry account participants", () => {
+  it("hands the account a grant reaches to the mint, and to a later conferral", async () => {
+    const db = createTestDb();
+    const minted: Array<{ kind: string; accountId?: string }> = [];
+    const recorded: Array<{ id: string; accountId: string }> = [];
+    const registry = new ConnectionRegistry({
+      ledger: new DrizzleGrantLedger(db.db),
+      onMint: (_tx, record, _profile, account) =>
+        minted.push({ kind: record.connectionKind, accountId: account?.accountId }),
+      onAccount: (_tx, id, account) => recorded.push({ id, accountId: account.accountId }),
+    });
+    registry.register(botIdDescriptor());
+    try {
+      await registry.confer(SERVICE, undefined, "bot", credentialFor("t-1"), { botId: "100" });
+      const placeholder = await registry.connectAnother(SERVICE);
+      await registry.confer(SERVICE, placeholder.id, "bot", credentialFor("t-2"), {
+        botId: "200",
+      });
+
+      expect(minted).toEqual([
+        { kind: SERVICE, accountId: "100" },
+        { kind: SERVICE, accountId: undefined },
+      ]);
+      expect(recorded).toEqual([{ id: placeholder.id, accountId: "200" }]);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("ConnectionRegistry account records", () => {
+  function recordingRegistry() {
+    const db = createTestDb();
+    const records = new ChannelRecordsRepository(db.db);
+    const registry = new ConnectionRegistry({
+      ledger: new DrizzleGrantLedger(db.db),
+      onMint: (tx, record, _profile, account) =>
+        records.claim(tx, { ...record, accountId: account?.accountId }, record.createdAt),
+      onAccount: (tx, id, account) => records.recordAccount(tx, id, account.accountId),
+      onRemove: (tx, id) => records.vacate(tx, id),
+    });
+    registry.register(botIdDescriptor());
+    return { ...db, records, registry };
+  }
+
+  it("records the account a Connection kept across a revoke reaches next", async () => {
+    const { records, registry, close } = recordingRegistry();
+    try {
+      const conn = await registry.confer(SERVICE, undefined, "bot", credentialFor("t-1"), {
+        botId: "100",
+      });
+      expect(records.byConnection(conn.id)?.platformAccountId).toBe("100");
+
+      await registry.revoke(conn.id, "bot");
+      await registry.confer(SERVICE, conn.id, "bot", credentialFor("t-2"), { botId: "200" });
+      expect(records.byConnection(conn.id)?.platformAccountId).toBe("200");
+    } finally {
+      close();
+    }
+  });
+
+  it("connects an account again while the Connection whose grant was revoked stays", async () => {
+    const { records, registry, close } = recordingRegistry();
+    try {
+      const old = await registry.confer(SERVICE, undefined, "bot", credentialFor("t-1"), {
+        botId: "100",
+      });
+      await registry.revoke(old.id, "bot");
+
+      const next = await registry.confer(
+        SERVICE,
+        undefined,
+        "bot",
+        credentialFor("t-2"),
+        { botId: "100" },
+        { another: true },
+      );
+      expect(next.id).not.toBe(old.id);
+      expect(records.byConnection(next.id)?.platformAccountId).toBe("100");
+      expect(records.byConnection(old.id)?.platformAccountId).toBeNull();
     } finally {
       close();
     }

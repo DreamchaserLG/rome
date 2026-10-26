@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import type { GrantRecord } from "../connections/ledger.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
-import { claimChannels } from "./claim-channels.js";
+import { claimChannels, recordChannelAccounts } from "./claim-channels.js";
 import { domainOfGrants } from "./platform.js";
 
 describe("claimChannels", () => {
@@ -83,4 +84,35 @@ describe("claimChannels", () => {
 
     expect(records.byConnection("c1")?.platform).toBe("lark");
   });
+
+  it("records the account each backed channel's Connection reaches", async () => {
+    testDb = createTestDb();
+    const records = new ChannelRecordsRepository(testDb.db);
+    const now = new Date();
+    records.claim(testDb.db, { id: "c1", connectionKind: "telegram" }, now);
+    records.claim(testDb.db, { id: "c2", connectionKind: "email" }, now);
+    records.claim(testDb.db, { id: "c3", connectionKind: "discord" }, now);
+    const grants: Record<string, GrantRecord[]> = {
+      c1: [grant("c1", "authorized", { platform: "telegram", accountId: "bot-1" })],
+      c2: [grant("c2", "unauthorized", { platform: "email", accountId: "a@x.test" })],
+      c3: [grant("c3", "degraded")],
+    };
+
+    await recordChannelAccounts(testDb.db, records, {
+      listGrants: async (id) => grants[id] ?? [],
+    });
+
+    expect(records.byConnection("c1")?.platformAccountId).toBe("bot-1");
+    // A grant given up reaches no account, and a grant naming none tells nothing.
+    expect(records.byConnection("c2")?.platformAccountId).toBeNull();
+    expect(records.byConnection("c3")?.platformAccountId).toBeNull();
+  });
 });
+
+function grant(
+  custody: string,
+  state: GrantRecord["state"],
+  account?: GrantRecord["account"],
+): GrantRecord {
+  return { custody, name: "bot", state, account };
+}

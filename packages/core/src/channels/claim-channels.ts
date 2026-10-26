@@ -4,6 +4,7 @@
  */
 
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import type { GrantLedger } from "../connections/ledger.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 
@@ -32,6 +33,35 @@ export async function claimChannels(
         agent: MAIN_AGENT_ID,
         id: connection.connectionKind,
       });
+    }
+  });
+}
+
+/**
+ * Record the account each backed channel is, for channels recorded before
+ * they knew it: the account its Connection's held grant reaches, once the
+ * grant names it. A channel whose Connection holds no such grant stays
+ * without one until a grant reports it.
+ */
+export async function recordChannelAccounts(
+  db: DrizzleDb,
+  records: Pick<ChannelRecordsRepository, "all" | "recordAccount">,
+  ledger: Pick<GrantLedger, "listGrants">,
+): Promise<void> {
+  const unknown = records
+    .all()
+    .filter((record) => record.connectionId !== null && record.platformAccountId === null);
+  if (unknown.length === 0) return;
+  const accounts = await Promise.all(
+    unknown.map(async (record) => {
+      const grants = await ledger.listGrants(record.connectionId!);
+      return grants.find((grant) => grant.state !== "unauthorized" && grant.account)?.account;
+    }),
+  );
+  db.transaction((tx) => {
+    for (const [i, record] of unknown.entries()) {
+      const account = accounts[i];
+      if (account) records.recordAccount(tx, record.connectionId!, account.accountId);
     }
   });
 }

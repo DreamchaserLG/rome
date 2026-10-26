@@ -76,8 +76,17 @@ export interface ConnectionRegistryDeps {
   /** Runs inside the transaction that mints a Connection, so whatever the
    *  caller records for it (the channel it backs) commits or rolls back with
    *  the row. `profile` is the profile of the grant whose conferral mints the
-   *  Connection, and undefined for a mint with no grant held. */
-  onMint?: (tx: DrizzleTx, record: ConnectionRecord, profile?: ProfileRecord) => void;
+   *  Connection, and undefined for a mint with no grant held. `account` is the
+   *  account that grant reaches, when its profile names one. */
+  onMint?: (
+    tx: DrizzleTx,
+    record: ConnectionRecord,
+    profile?: ProfileRecord,
+    account?: GrantAccount,
+  ) => void;
+  /** Runs inside the transaction that confers a grant on a Connection that
+   *  already exists, when the grant names the account it reaches. */
+  onAccount?: (tx: DrizzleTx, id: ConnectionId, account: GrantAccount) => void;
   /** Runs inside the transaction that deletes a Connection, before any
    *  caller participant. */
   onRemove?: (tx: DrizzleTx, id: ConnectionId) => void;
@@ -214,6 +223,7 @@ export class ConnectionRegistry {
   private readonly backoff: { baseMs: number; maxMs: number };
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly onMint?: ConnectionRegistryDeps["onMint"];
+  private readonly onAccount?: ConnectionRegistryDeps["onAccount"];
   private readonly onRemove?: (tx: DrizzleTx, id: ConnectionId) => void;
 
   private readonly descriptors = new Map<string, RegisteredDescriptor>();
@@ -244,6 +254,7 @@ export class ConnectionRegistry {
     this.backoff = deps.backoff ?? DEFAULT_BACKOFF;
     this.sleep = deps.sleep ?? defaultSleep;
     this.onMint = deps.onMint;
+    this.onAccount = deps.onAccount;
     this.onRemove = deps.onRemove;
   }
 
@@ -537,9 +548,10 @@ export class ConnectionRegistry {
           for (const name of Object.keys(registered!.descriptor.auth)) {
             ledger.writeEnsureGrant(tx, id, name);
           }
-          this.onMint?.(tx, record, profile);
+          this.onMint?.(tx, record, profile, account);
         }
         ledger.writeGrant(tx, id, grant, patch);
+        if (!minting && account) this.onAccount?.(tx, id, account);
         opts.inTx?.(tx);
       });
     const logActivationFailure = (err: unknown) => {
