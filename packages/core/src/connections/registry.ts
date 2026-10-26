@@ -86,7 +86,14 @@ export interface ConnectionRegistryDeps {
   ) => void;
   /** Runs inside the transaction that confers a grant on a Connection that
    *  already exists, when the grant names the account it reaches. */
-  onAccount?: (tx: DrizzleTx, id: ConnectionId, account: GrantAccount) => void;
+  onAccount?: (
+    tx: DrizzleTx,
+    connection: { id: ConnectionId; connectionKind: string },
+    account: GrantAccount,
+  ) => void;
+  /** Runs once a grant's revoke is written: the Connection no longer reaches
+   *  the account the grant did. */
+  onRevoke?: (id: ConnectionId) => void;
   /** Runs inside the transaction that deletes a Connection, before any
    *  caller participant. */
   onRemove?: (tx: DrizzleTx, id: ConnectionId) => void;
@@ -224,6 +231,7 @@ export class ConnectionRegistry {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly onMint?: ConnectionRegistryDeps["onMint"];
   private readonly onAccount?: ConnectionRegistryDeps["onAccount"];
+  private readonly onRevoke?: ConnectionRegistryDeps["onRevoke"];
   private readonly onRemove?: (tx: DrizzleTx, id: ConnectionId) => void;
 
   private readonly descriptors = new Map<string, RegisteredDescriptor>();
@@ -255,6 +263,7 @@ export class ConnectionRegistry {
     this.sleep = deps.sleep ?? defaultSleep;
     this.onMint = deps.onMint;
     this.onAccount = deps.onAccount;
+    this.onRevoke = deps.onRevoke;
     this.onRemove = deps.onRemove;
   }
 
@@ -452,6 +461,12 @@ export class ConnectionRegistry {
     });
   }
 
+  /** Tell the caller a revoke of one of `id`'s grants was written. Called by
+   *  the Connection, under the grant's lock. */
+  revoked(id: ConnectionId): void {
+    this.onRevoke?.(id);
+  }
+
   /** Commit grant revocation and the caller's cleanup together before stopping capabilities. */
   revoke(
     id: ConnectionId,
@@ -551,7 +566,7 @@ export class ConnectionRegistry {
           this.onMint?.(tx, record, profile, account);
         }
         ledger.writeGrant(tx, id, grant, patch);
-        if (!minting && account) this.onAccount?.(tx, id, account);
+        if (!minting && account) this.onAccount?.(tx, { id, connectionKind }, account);
         opts.inTx?.(tx);
       });
     const logActivationFailure = (err: unknown) => {
@@ -1561,6 +1576,7 @@ class ConnectionImpl implements Connection {
     } else {
       await this.ledger.updateGrant(this.id, grant, patch);
     }
+    this.registry.revoked(this.id);
     this.grantState.set(grant, "unauthorized");
     this.liveCreds.delete(grant);
     this.renewedSinceLastConfer.delete(grant);

@@ -389,13 +389,13 @@ async function main() {
     ledger: new DrizzleGrantLedger(db),
     onMint: (tx, record, profile, account) => {
       if (!talks(record.connectionKind)) return;
-      channelRecords.claim(
-        tx,
-        { ...record, domain: domainOf(profile), accountId: account?.accountId },
-        record.createdAt,
-      );
+      channelRecords.claim(tx, { ...record, domain: domainOf(profile), account }, record.createdAt);
     },
-    onAccount: (tx, id, account) => channelRecords.recordAccount(tx, id, account.accountId),
+    onAccount: (tx, connection, account) => {
+      if (!talks(connection.connectionKind)) return;
+      channelRecords.ensureAccount(tx, connection, account, new Date());
+    },
+    onRevoke: () => channelRecords.forget(),
     onRemove: (tx, id) => channelRecords.vacate(tx, id),
   });
   const channelOf = recordedChannelOf(channelRecords, talks);

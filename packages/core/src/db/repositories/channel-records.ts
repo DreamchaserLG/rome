@@ -1,16 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { LINKABLE_KINDS, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
-import { and, asc, eq, isNotNull, isNull, ne } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, ne, or } from "drizzle-orm";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { platformOf } from "../../channels/platform.js";
-import { channels } from "../schema.js";
+import type { GrantAccount } from "../../connections/ledger.js";
+import { channels, connectionGrants } from "../schema.js";
 import { inTransaction, type DrizzleDb, type DrizzleTx } from "../index.js";
 
 /**
  * A channel a Connection backs, as stored: its id, the connection kind and platform
  * it is on, the platform's own id for the account (null until a grant reports
- * it), the Connection behind it now (null once that Connection is gone), and
- * the agent linked to it. Vocabulary: docs/domains/chats.md#account.
+ * it), the Connection behind it now, and the agent linked to it. The
+ * Connection behind it is the one whose live grant reaches its platform and
+ * id, or, for a channel that knows no account yet, the one it was claimed
+ * for; null when none is. Vocabulary: docs/domains/connections.md#connection.
  */
 export interface ChannelRecord {
   id: string;
@@ -53,11 +56,13 @@ type Exec = DrizzleDb | DrizzleTx;
 /** Let go of the account `accountId` on `platform` from every channel but
  *  `keep`, so channel `keep` can record it. It runs only once the registry has
  *  refused an account another live grant reaches, so a channel that still holds
- *  the account is unbacked or backed by a Connection whose grant was given up. */
+ *  the account is unbacked or backed by a Connection whose grant was given up.
+ *  That Connection lets the channel go too: a channel that knows no account
+ *  falls back to the Connection it was claimed for. */
 function releaseAccount(exec: Exec, platform: string, accountId: string, keep: string): void {
   exec
     .update(channels)
-    .set({ platformAccountId: null })
+    .set({ platformAccountId: null, connectionId: null, agent: null })
     .where(
       and(
         eq(channels.platform, platform),
@@ -92,6 +97,38 @@ function toRecord(row: typeof channels.$inferSelect): ChannelRecord {
   };
 }
 
+/** A channel row with the Connection whose live grant reaches its account. */
+interface Reached {
+  row: typeof channels.$inferSelect;
+  custody: string | null;
+}
+
+/** The channel as a record, its Connection found by its account: the
+ *  Connection whose live grant reaches it. A channel that knows no account yet
+ *  falls back to the Connection it was claimed for. */
+function reachedRecord({ row, custody }: Reached): ChannelRecord {
+  return {
+    ...toRecord(row),
+    connectionId: row.platformAccountId === null ? row.connectionId : custody,
+  };
+}
+
+/** Channels joined to the live grant that reaches each one's account. At most
+ *  one does, by the grants' unique index. */
+function reached(exec: Exec) {
+  return exec
+    .select({ row: channels, custody: connectionGrants.custody })
+    .from(channels)
+    .leftJoin(
+      connectionGrants,
+      and(
+        eq(connectionGrants.platform, channels.platform),
+        eq(connectionGrants.accountId, channels.platformAccountId),
+        ne(connectionGrants.state, "unauthorized"),
+      ),
+    );
+}
+
 /**
  * The channels the Connections back, and which agent each is linked to.
  *
@@ -118,12 +155,12 @@ export class ChannelRecordsRepository {
   constructor(private readonly db: DrizzleDb) {}
 
   all(): ChannelRecord[] {
-    return this.db.select().from(channels).orderBy(asc(channels.createdAt)).all().map(toRecord);
+    return reached(this.db).orderBy(asc(channels.createdAt)).all().map(reachedRecord);
   }
 
   byId(id: string): ChannelRecord | null {
-    const row = this.db.select().from(channels).where(eq(channels.id, id)).get();
-    return row ? toRecord(row) : null;
+    const found = reached(this.db).where(eq(channels.id, id)).get();
+    return found ? reachedRecord(found) : null;
   }
 
   /** The connection kind behind channel `id`, or `id` itself when no channel
@@ -172,13 +209,13 @@ export class ChannelRecordsRepository {
   sendersOfLink(link: string): string[] {
     const own = this.byId(link);
     if (own && own.connectionKind !== link) return own.connectionId === null ? [] : [link];
-    const backed = this.db
-      .select({ id: channels.id })
-      .from(channels)
-      .where(and(eq(channels.connectionKind, link), isNotNull(channels.connectionId)))
+    const backed = reached(this.db)
+      .where(eq(channels.connectionKind, link))
       .orderBy(asc(channels.createdAt))
-      .all();
-    return backed.length === 0 ? [link] : backed.map((row) => row.id);
+      .all()
+      .map(reachedRecord)
+      .filter((record) => record.connectionId !== null);
+    return backed.length === 0 ? [link] : backed.map((record) => record.id);
   }
 
   /** The id of the channel `connectionId` backs, or null for none. */
@@ -190,13 +227,25 @@ export class ChannelRecordsRepository {
     return id;
   }
 
+  /** The channel `connectionId` backs: the one whose account its live grant
+   *  reaches, or the one claimed for it that knows no account yet. */
   byConnection(connectionId: string): ChannelRecord | null {
-    const row = this.db
-      .select()
-      .from(channels)
-      .where(eq(channels.connectionId, connectionId))
+    const found = reached(this.db)
+      .where(
+        or(
+          eq(connectionGrants.custody, connectionId),
+          and(isNull(channels.platformAccountId), eq(channels.connectionId, connectionId)),
+        ),
+      )
       .get();
-    return row ? toRecord(row) : null;
+    return found ? reachedRecord(found) : null;
+  }
+
+  /** Forget what the caches hold, after a grant is given up: the channel its
+   *  Connection backed is backed by none now. */
+  forget(): void {
+    this.ids.clear();
+    this.links.clear();
   }
 
   /**
@@ -211,14 +260,15 @@ export class ChannelRecordsRepository {
    * one (`id`, taken only while free). A new channel is linked to `agent`
    * when its connection kind takes one, and to none by default: Rome picks no agent
    * for an account. `domain` is a Feishu app's domain, which decides its
-   * channel's platform. `accountId` is the platform's own id for the account
-   * the Connection reaches, when its grant reports one, and the channel records
-   * it. Which channel is taken back does not depend on it yet: names such as
-   * `email` and `whatsapp` still reach a connection kind's one channel.
+   * channel's platform. `account` is the account the Connection reaches, when
+   * its grant reports one, and the channel records it; its platform decides
+   * the channel's. Which channel is taken back does not depend on it yet:
+   * names such as `email` and `whatsapp` still reach a connection kind's one
+   * channel.
    */
   claim(
     exec: Exec,
-    connection: { id: string; connectionKind: string; domain?: string; accountId?: string },
+    connection: { id: string; connectionKind: string; domain?: string; account?: GrantAccount },
     now: Date,
     { agent = null, id: named }: { agent?: string | null; id?: string } = {},
   ): ChannelRecord {
@@ -228,8 +278,8 @@ export class ChannelRecordsRepository {
     this.links.clear();
 
     const connectionKind = connection.connectionKind;
-    const platform = platformOf(connectionKind, connection.domain);
-    const accountId = connection.accountId ?? null;
+    const platform = connection.account?.platform ?? platformOf(connectionKind, connection.domain);
+    const accountId = connection.account?.accountId ?? null;
     const vacant = LINKABLE_KINDS.has(connectionKind)
       ? undefined
       : exec
@@ -246,13 +296,14 @@ export class ChannelRecordsRepository {
       // Only a connection kind that takes no agent gets here, so the channel starts with none.
       if (accountId !== null) releaseAccount(exec, platform, accountId, vacant.id);
       // A different account taking the channel back replaces the one it held.
-      const platformAccountId = accountId;
-      exec
-        .update(channels)
-        .set({ connectionId: connection.id, agent: null, platformAccountId })
-        .where(eq(channels.id, vacant.id))
-        .run();
-      return toRecord({ ...vacant, connectionId: connection.id, agent: null, platformAccountId });
+      const taken = {
+        connectionId: connection.id,
+        agent: null,
+        platformAccountId: accountId,
+        platform: accountId === null ? vacant.platform : platform,
+      };
+      exec.update(channels).set(taken).where(eq(channels.id, vacant.id)).run();
+      return toRecord({ ...vacant, ...taken });
     }
 
     const wanted = named ?? (LINKABLE_KINDS.has(connectionKind) ? undefined : connectionKind);
@@ -276,22 +327,47 @@ export class ChannelRecordsRepository {
   }
 
   /**
-   * Record that the channel `connectionId` backs is the account the platform
-   * knows as `accountId`, once a grant reports it. A Connection kept across a
-   * revoke may be given access to another account, which then replaces the
-   * one its channel held.
+   * Record that the channel `connectionId` backs is `account`, once a grant
+   * reports it: the account's platform and the platform's own id for it. A
+   * Connection kept across a revoke may be given access to another account,
+   * which then replaces the one its channel held, platform included (a Feishu
+   * app given access again on Lark).
    */
-  recordAccount(exec: Exec, connectionId: string, accountId: string): void {
-    const row = exec.select().from(channels).where(eq(channels.connectionId, connectionId)).get();
-    if (!row || row.platformAccountId === accountId) return;
+  recordAccount(exec: Exec, connectionId: string, account: GrantAccount): void {
+    const { platform, accountId } = account;
+    // A grant given again reaches its account again, whichever it is, so what
+    // the caches hold from while it was given up goes.
     this.ids.clear();
     this.links.clear();
-    releaseAccount(exec, row.platform, accountId, row.id);
+    const row = exec.select().from(channels).where(eq(channels.connectionId, connectionId)).get();
+    if (!row || (row.platform === platform && row.platformAccountId === accountId)) return;
+    releaseAccount(exec, platform, accountId, row.id);
     exec
       .update(channels)
-      .set({ platformAccountId: accountId })
+      .set({ platform, platformAccountId: accountId })
       .where(eq(channels.id, row.id))
       .run();
+  }
+
+  /**
+   * Record `account` on the channel `connection` backs, or claim one for it
+   * when it backs none: a Connection kept across a revoke whose account went
+   * to another Connection let its channel go, and a grant given to it again
+   * needs one to talk through.
+   */
+  ensureAccount(
+    exec: Exec,
+    connection: { id: string; connectionKind: string },
+    account: GrantAccount,
+    now: Date,
+  ): void {
+    const held = exec
+      .select({ id: channels.id })
+      .from(channels)
+      .where(eq(channels.connectionId, connection.id))
+      .get();
+    if (held) this.recordAccount(exec, connection.id, account);
+    else this.claim(exec, { ...connection, account }, now);
   }
 
   /** Release the channel `connectionId` backs. The row and its id stay, and
@@ -325,14 +401,15 @@ export class ChannelRecordsRepository {
   link(id: string, requested: string | null): ChannelRecord {
     const agent = requested !== null && isCoreMainAgentId(requested) ? MAIN_AGENT_ID : requested;
     return this.db.transaction((tx) => {
-      const row = tx.select().from(channels).where(eq(channels.id, id)).get();
-      if (!row) throw new ChannelRecordNotFound(id);
+      const found = reached(tx).where(eq(channels.id, id)).get();
+      if (!found) throw new ChannelRecordNotFound(id);
+      const row = reachedRecord(found);
       if (agent !== null && !LINKABLE_KINDS.has(row.connectionKind)) {
         throw new ChannelNotLinkable(id, row.connectionKind);
       }
       if (agent !== null && row.connectionId === null) throw new ChannelUnbacked(id);
       tx.update(channels).set({ agent }).where(eq(channels.id, id)).run();
-      return toRecord({ ...row, agent });
+      return { ...row, agent };
     });
   }
 
