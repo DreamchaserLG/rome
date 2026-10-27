@@ -2730,7 +2730,7 @@ describe("AnthropicProvider", () => {
       await session.close();
 
       expect(turn.at(-1)).toMatchObject({ type: "result", content: "first" });
-      // $2.0 − $0 = the Rome turn's $1.10 plus the task-notification's $0.90.
+      // $2.0 − $0 = the task-notification's $1.40 plus the Rome turn's own $0.60.
       expect(turnCost(turn)).toBeCloseTo(2.0);
     });
 
