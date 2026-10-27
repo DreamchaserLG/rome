@@ -966,6 +966,7 @@ export class AnthropicProvider implements ModelProvider {
               }
             }
             if (abortController.signal.aborted) await queryProcess.abort();
+            const reportedTotalCostUsd = readPositiveNumber(message.total_cost_usd);
             const contextUsage = abortController.signal.aborted
               ? undefined
               : await readSdkContextUsage(q);
@@ -975,7 +976,14 @@ export class AnthropicProvider implements ModelProvider {
               providerId,
               contextUsage,
               abortController.signal.aborted,
-              turnReportedCostUsd(readPositiveNumber(message.total_cost_usd)),
+              // An SDK-owned result ends no Rome turn, so its accounting never
+              // reaches a turn log. Advancing the running-total baseline for it
+              // would strand its spend: the difference would be charged to no
+              // turn, and the following Rome turn would diff against the higher
+              // total and report only its own increase. Leave the baseline put
+              // so that next Rome turn's difference carries the background
+              // spend along with its own.
+              sdkOwned ? undefined : turnReportedCostUsd(reportedTotalCostUsd),
             );
             const resultData = {
               subtype: message.subtype,
